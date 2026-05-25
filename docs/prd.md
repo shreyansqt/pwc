@@ -117,16 +117,28 @@ This means:
      link. These are machine-specific and (unlike identity refs) would not
      survive a future multi-machine world.
 
-2. **Cold-start briefing (`/standup`).** Pulls latest state from connected
-   sources (Jira, GitHub, Slack, email), reconciles with the ledger, surfaces
-   new things that look like tasks, and presents a prioritized portfolio view.
-   Designed to be the *first thing* I run after starting the coordinator — and
-   to produce the same useful briefing whether the coordinator has been alive
-   for ten minutes or just booted fresh.
+2. **Cold-start briefing (`/standup`).** The whole-portfolio operation. Walks
+   every task already in the ledger, re-checks external state for each against
+   its connected source (Jira, GitHub, Slack, email), runs reconciliation
+   (surfacing conflicts — review came back, CI went red, worker gone), *and*
+   notices new inbound that looks like a task — then presents a prioritized
+   portfolio view. Complete and comparatively expensive: N source round-trips
+   plus a reconciliation pass. Designed to be the *first thing* I run after
+   starting the coordinator, run once or twice a day. Answers "where does all my
+   work stand right now?" — and produces the same useful briefing whether the
+   coordinator has been alive for ten minutes or just booted fresh.
 
-3. **Inbound surface (`/whats-new`).** Lighter-weight check during the day —
-   what's landed in my inboxes that might be a task, without a full standup. I
-   decide whether to promote each one into the ledger.
+3. **Inbound surface (`/whats-new`).** The inbound-only operation, and the
+   distinction from `/standup` is *scope, not intensity*: `/whats-new`
+   deliberately does **not** re-reconcile the existing portfolio — it looks only
+   at the inbound edge (what's landed since I last looked) and asks whether to
+   promote any of it into tasks. That refusal is the feature: it's the cheap
+   check I fire several times a day between focused blocks, and re-litigating my
+   whole portfolio every time would make it too heavy to keep using. Answers
+   "did anything new come in?" and nothing else. When I promote an item, the
+   coordinator reconciles *that item only* (e.g. checks a new PR's CI before
+   registering it) so I have enough context for the inline-vs-worker call —
+   never fanning out to the rest of the portfolio.
 
 4. **Next-action decision (`/pick-next`).** Given current ledger state, suggest
    what to start or resume next. Consider blockers, external readiness, and my
