@@ -272,7 +272,7 @@ def cmd_archive(args):
             (ts, ts, args.task),
         )
         _insert_event(conn, task_id=args.task, source="coordinator",
-                      kind="rollup", detail="archived", at=ts)
+                      kind="archived", detail="archived", at=ts)
         row = conn.execute("SELECT * FROM tasks WHERE id = ?", (args.task,)).fetchone()
     emit(pwc_db.row_to_dict(row))
 

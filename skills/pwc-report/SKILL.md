@@ -1,6 +1,6 @@
 ---
 name: pwc-report
-description: For a PWC worker to report its status back to the coordinator's task database — blocked, awaiting review, done, or a freeform note. Run this when you hit a meaningful event in the task you were dispatched to work on.
+description: For a PWC worker to report its status back to the coordinator's task database — blocked, awaiting review, done, or a freeform note. Run this when you hit a meaningful event in the task you were started on.
 ---
 
 # /pwc-report
@@ -13,8 +13,8 @@ This is a worker's only write to the task database: an append to the event log. 
 not change task fields the coordinator owns.
 
 > **Note for spawned workers:** PWC's skills are installed at the *workspace root*,
-> but you run in a sub-repo, so this `/pwc-report` skill is usually **not
-> resolvable from your cwd**. Your dispatch prompt therefore gave you the literal
+> but you run in a repo, so this `/pwc-report` skill is usually **not
+> resolvable from your cwd**. Your /start prompt therefore gave you the literal
 > `taskdb.py log-event ...` command to run directly — use that. This SKILL.md
 > documents the same call for when the skill *is* available (e.g. the coordinator
 > reporting an inline task's outcome from the workspace root).
@@ -24,7 +24,7 @@ not change task fields the coordinator owns.
 - **Scripts directory**: `~/work/pwc/scripts` (`$SCRIPTS`).
 - **Workspace**: your current directory; the task database is auto-discovered from it.
 - **Your task id**: given to you in your opening prompt (e.g. `t_0007`). If you
-  don't have one, you weren't dispatched by PWC — don't report.
+  don't have one, you weren't started by PWC — don't report.
 
 ## Tools
 
@@ -55,5 +55,5 @@ not change task fields the coordinator owns.
   The coordinator owns those. Reporting `done` signals completion — the coordinator
   decides when to archive.
 - You don't need to report that you're "still working" — silence means in progress.
-  If your session dies without a final report, the coordinator's liveness check will
+  If your session dies without a final report, the coordinator's worker-status check will
   notice and flag the task for triage.

@@ -15,12 +15,12 @@ coordinator's tab untouched. Tabs also dropped all the pane-layout state trackin
 
 Three path bugs surfaced only by running it for real, all now fixed:
 1. A spawned worker can't resolve `/pwc-report` — skills install at the workspace
-   root, but workers run in a sub-repo, so the skill isn't on their path. Fix:
+   root, but workers run in a repo, so the skill isn't on their path. Fix:
    seed the literal `taskdb.py log-event` command, not the skill.
-2. `taskdb.py`'s workspace discovery resolved to the sub-repo, not the root. Fix:
+2. `taskdb.py`'s workspace discovery resolved to the repo, not the root. Fix:
    seed command passes `--workspace <root>` explicitly.
 3. The cause of #2 — `spawn.py` was writing `iterm_layout.json` into the worker's
-   *sub-repo* `.pwc/`, creating a stray dir that shadowed discovery. Fix: layout
+   *repo* `.pwc/`, creating a stray dir that shadowed discovery. Fix: layout
    state goes in the workspace-root `.pwc/`.
 
 The real finding, though, is not a bug: **a freshly spawned `claude` session
@@ -44,7 +44,7 @@ Built the whole v1 skeleton in one session, task database-first.
   reconciliation → inbound → rollup/archive. Each layer verified against a seeded
   fixture before the next.
 - **Workers**: `spawn.py` opens an iTerm2 window running `claude --session-id`;
-  `liveness.py` uses `pgrep -f <uuid>` as an exact alive/dead test. dispatch covers
+  `worker_status.py` uses `pgrep -f <uuid>` as an exact alive/dead test. dispatch covers
   resumption (reopen prior session, else fresh+seeded). `/pwc-report` is the worker's
   one channel back to the task database.
 - **Install** is per-workspace symlinks + a `.pwc/` task database, mirroring team-skills.

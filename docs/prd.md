@@ -37,7 +37,7 @@ Me. One person, dogfooded daily.
 **Task.** The unit of work the coordinator tracks. Examples: implementing a Jira
 ticket, reviewing a specific PR, responding to a Slack thread, processing
 today's email, drafting a design doc. A task may carry one or more *external
-references* (Jira key, PR, Slack thread — see the typed reference set in
+references* (Jira key, PR, Slack thread — see the references in
 capability 1) or be purely local. Each task has a stable internal ID the
 coordinator assigns.
 
@@ -91,7 +91,7 @@ This means:
   moves on, and multi-tier changes commit atomically. No "I'll save at end of
   session" semantics.
 - **History lives in the schema, not in git.** A SQLite file doesn't diff, so
-  the longitudinal record (what `/brief`'s log rollup and the journal draw on)
+  the longitudinal record (what `/brief`'s recap and the journal draw on)
   comes from an append-only events table inside the database, not from version
   control.
 
@@ -100,7 +100,7 @@ This means:
 1. **Durable task database.** A local SQLite database; single source of truth for
    every active task. Read in two shapes — an always-loaded summary (one status
    line per task) and on-demand per-task detail. A task record includes:
-   internal task ID, type, a typed reference set (see below), short description,
+   internal task ID, type, a references (see below), short description,
    status, worker session if spawned, last meaningful event, last touched,
    priority/notes. Persists across coordinator sessions; survives the coordinator
    being killed and restarted.
@@ -109,7 +109,7 @@ This means:
    structured fields (above), a freeform notes section (my private thoughts,
    half-formed ideas), and a task-scoped view of the append-only events table.
    That last one *is* the running narrative — every meaningful event is already
-   logged there with a timestamp for the log rollup, so the per-task timeline
+   logged there with a timestamp for the recap, so the per-task timeline
    comes for free as a projection of it rather than something the coordinator
    has to remember to append to separately.
 
@@ -133,7 +133,7 @@ This means:
    re-checks external state for each against its connected source (Jira, GitHub,
    Slack, email), runs reconciliation (surfacing conflicts — review came back,
    CI went red, worker gone), notices new inbound that looks like a task, sweeps
-   for staleness (see below), captures a longitudinal log entry of what's
+   for staleness (see below), captures a recap of what's
    happened since the last brief, archives done tasks, and presents a
    prioritized view of all tasks. Answers "where does all my work stand right now?"
    — and produces the same useful briefing whether the coordinator has been
@@ -147,7 +147,7 @@ This means:
    threshold (default ~7–10 days, no meaningful event) *and* not explicitly
    parked, and asks me to keep or drop each. Like everything else, staleness is
    a signal, not a verdict — the coordinator never auto-archives on age
-   (silently deleting work I've stopped watching is the exact failure liveness
+   (silently deleting work I've stopped watching is the exact failure worker-status check
    detection exists to prevent); it surfaces, I adjudicate. A task that *is*
    explicitly parked
    (blocked, awaiting review) is exempt from the sweep — long parking is a
@@ -217,7 +217,7 @@ This means:
    surfaces naturally whenever a later `/brief` re-checks that task's external
    state.
 
-   **Liveness detection.** Self-reporting only covers workers healthy enough to
+   **worker-status check.** Self-reporting only covers workers healthy enough to
    report; a worker that crashed, was force-killed, or had its terminal closed
    reports nothing and would otherwise read "in progress" forever — the task database
    lying about exactly the work I've stopped watching. So at briefing time the
@@ -227,13 +227,13 @@ This means:
    detection of death, not of outcome: a gone worker may have left finished,
    unpushed work behind, so the coordinator never infers done/failed — it
    surfaces the last known state and I adjudicate (resume, mark done, drop).
-   This stays within the on-demand model: liveness is evaluated at `/brief`,
+   This stays within the on-demand model: worker-status check is evaluated at `/brief`,
    not by a background daemon.
 
 ## Out of scope for v1
 
 - "Needs attention" auto-detection from worker *output* (workers self-report
-  meaningful events instead; note this is distinct from liveness detection,
+  meaningful events instead; note this is distinct from worker-status check,
   which the coordinator does do — see capability 6).
 - Dynamic parallelism caps.
 - A graphical UI — the coordinator lives in a terminal window.

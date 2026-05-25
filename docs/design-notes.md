@@ -52,7 +52,7 @@ sharpened by decisions made after this entry was first written:
    has spawned something it can't yet identify.
 2. **No startup hole.** Under B, a worker that crashes during startup before
    `/register-worker` fires is an orphan the coordinator never recorded — a gap
-   in the exact liveness/tracking guarantee this mechanism exists to provide.
+   in the exact worker-status check/tracking guarantee this mechanism exists to provide.
    Under C the row is written at spawn, so even an instantly-dead worker is
    already in the task database as "spawned, then gone."
 3. **Fewer moving parts.** No registration skill, no boot handshake, no race
@@ -71,7 +71,7 @@ established. So the worker-side skill shrinks from register-and-report to just
 self-*reporting*; C handles the registration half.
 
 Either way the captured session ID earns its keep twice over, which is why
-getting it right matters: it's what liveness detection tests to tell a live
+getting it right matters: it's what worker-status check tests to tell a live
 worker from a dead one, *and* it's what lets dispatch reopen a task's prior
 session (`claude --resume`) instead of starting cold.
 

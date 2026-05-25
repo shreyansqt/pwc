@@ -21,10 +21,10 @@ pwc/                      # this repo — the SOURCE (develop & commit here)
   scripts/                # shared deterministic mechanism ("the hands")
     taskdb.py             #   single read/write path to the task database (CLI, JSON I/O)
     spawn.py              #   spawn a worker in an iTerm2 window
-    liveness.py           #   is a worker session still running? (pgrep)
+    worker_status.py           #   is a worker session still running? (pgrep)
     pwc_db.py, _common.py #   shared connection / discovery helpers
   skills/                 # the coordinator's brain (SKILL.md each)
-    brief/  next/  dispatch/  pwc-report/
+    brief/  next/  start/  pwc-report/
   install.sh              # symlink skills into a workspace + init its task database
 ```
 
@@ -39,7 +39,7 @@ PWC installs per-workspace by symlinking its skills into the workspace's
 ./install.sh ~/work/acme     # or omit the arg for that default
 ```
 
-This creates `<workspace>/.claude/skills/{brief,next,dispatch,pwc-report}` (symlinks
+This creates `<workspace>/.claude/skills/{brief,next,start,pwc-report}` (symlinks
 back here) and `<workspace>/.pwc/taskdb.db`. Because the skills are symlinks,
 `git pull` in this repo upgrades every installed workspace at once.
 
@@ -48,7 +48,7 @@ back here) and `<workspace>/.pwc/taskdb.db`. Because the skills are symlinks,
 - **Python 3** (stdlib `sqlite3` — no packages needed for the task database).
 - **iTerm2** with the Python API enabled (Preferences → General → Magic → *Enable
   Python API*) and `pip install iterm2` — required only for spawning workers.
-- `pgrep` (standard on macOS) — for liveness checks.
+- `pgrep` (standard on macOS) — for worker-status check checks.
 
 ## Use
 
@@ -56,11 +56,11 @@ Start a Claude Code session **in the workspace** and:
 
 - **`/brief`** — the all-tasks briefing. Run it anytime (morning to orient,
   midday to check in, close to wrap up). Reconciles against your sources, sweeps for
-  dead workers and stale tasks, notices inbound, rolls up the day, and presents a
+  dead workers and stale tasks, notices new tasks, recaps the day, and presents a
   prioritized view.
 - **`/next`** — suggests what to start or resume next. Suggests only; never acts
   without your confirmation.
-- **dispatch** — turns a task into action: spawns a worker (default) or handles it
+- **`/start`** — turns a task into action: spawns a worker (default) or handles it
   inline. Also resumes a stopped task by reopening its prior session.
 - **`/pwc-report`** — used *by a worker* to report status (blocked / awaiting-review
   / done / note) back to the task database.
@@ -79,5 +79,5 @@ python3 scripts/taskdb.py --workspace <ws> detail --task t_0007
 
 v1, built in phases and dogfooded against the `acme` workspace. Two behaviors are
 deferred by design (the data/queries exist; the decision logic is learned from real
-cases): **reconciliation conflict rules** and **inbound new-vs-update matching**.
+cases): **reconciliation conflict rules** and **new-task new-vs-update matching**.
 See the build journal in [`docs/journal.md`](docs/journal.md).

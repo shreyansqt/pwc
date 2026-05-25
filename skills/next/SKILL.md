@@ -1,6 +1,6 @@
 ---
 name: next
-description: Suggest what PWC task to start or resume next, given the current task database state. Considers blockers, external readiness, and priority. Always suggests — never dispatches on its own.
+description: Suggest what PWC task to start or resume next, given the current task database state. Considers blockers, external readiness, and priority. Always suggests — never starts work on its own.
 ---
 
 # /next
@@ -9,7 +9,7 @@ Given the current set of tasks, suggest what the user should pick up next. This 
 recommendation, not an action: `/next` never spawns a worker or mutates the task database.
 Picking what to work on and starting it without the user in the loop would cross
 from "holds my state" into "drives me" — so `/next` proposes, and the user decides
-(and explicitly confirms) before anything is dispatched.
+(and explicitly confirms) before anything is started.
 
 ## Configuration
 
@@ -39,8 +39,8 @@ from "holds my state" into "drives me" — so `/next` proposes, and the user dec
    Explain the reasoning in a sentence ("t_0002's review just landed, so it's
    unblocked and it's your highest-priority open item").
 
-4. **Offer to dispatch — then stop.** End by offering to start the suggested task
-   (which hands off to the dispatch skill on the user's confirmation). Do not call
+4. **Offer to start it — then stop.** End by offering to start the suggested task
+   (which hands off to the /start skill on the user's confirmation). Do not call
    `spawn.py`, do not modify the task database, do not start anything yourself. Wait for
    an explicit "yes."
 

@@ -42,16 +42,16 @@ CREATE TABLE IF NOT EXISTS task_refs (
 CREATE INDEX IF NOT EXISTS idx_refs_identity ON task_refs(kind, ref_type, value);
 CREATE INDEX IF NOT EXISTS idx_refs_task ON task_refs(task_id);
 
--- Append-only. The history (for /brief's log rollup) AND the per-task running
+-- Append-only. The history (for /brief's recap) AND the per-task running
 -- narrative (a task's timeline is its events). Never updated, never deleted.
 CREATE TABLE IF NOT EXISTS events (
   id      INTEGER PRIMARY KEY AUTOINCREMENT,
-  task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,  -- NULL = portfolio-level event
+  task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,  -- NULL = ledger-level event (not tied to one task)
   at      TEXT NOT NULL,                       -- ISO8601 UTC
   source  TEXT NOT NULL,                       -- coordinator|worker|brief|system
   kind    TEXT NOT NULL,                       -- created|dispatched|status|blocked|
-                                               -- awaiting-review|done|reconcile|inbound|
-                                               -- stale-flag|rollup|gone|note
+                                               -- awaiting-review|done|reconcile|new-task|
+                                               -- stale-flag|recap|archived|gone|note
   detail  TEXT                                 -- freeform message; the per-task narrative line
 );
 

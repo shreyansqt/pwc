@@ -19,7 +19,7 @@ if [[ ! -d "$WS" ]]; then
   exit 1
 fi
 
-SKILLS=(brief next dispatch pwc-report)
+SKILLS=(brief next start pwc-report)
 
 mkdir -p "$WS/.claude/skills" "$WS/.pwc"
 

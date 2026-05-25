@@ -11,9 +11,9 @@ user never has to hold the state of their work in their head. It produces the sa
 useful briefing whether the coordinator booted ten minutes ago or just now — all
 state lives in the task database, not in this conversation.
 
-This skill is built in layers, all present below: render, liveness sweep,
-staleness sweep, external reconciliation, inbound noticing, and a log rollup +
-archive. Reconciliation *conflict resolution rules* and inbound *matching logic*
+This skill is built in layers, all present below: render, worker-status sweep,
+staleness sweep, external reconciliation, noticing new tasks, and a recap +
+archive. Reconciliation *conflict resolution rules* and new-task *matching logic*
 are deliberately left to be handled as real cases arise (see Notes).
 
 ## Configuration
@@ -31,9 +31,9 @@ are deliberately left to be handled as real cases arise (see Notes).
 - `python3 $SCRIPTS/taskdb.py summary` — the always-loaded index: one status line
   per active task, archived tasks excluded. Returns a JSON array.
 - `python3 $SCRIPTS/taskdb.py detail --task <id>` — full per-task detail: the
-  structured fields, its typed references, and its event timeline. Use only when
+  structured fields, its references, and its event timeline. Use only when
   drilling into a specific task, not for the overview.
-- `python3 $SCRIPTS/liveness.py --json -` — reads a JSON list of
+- `python3 $SCRIPTS/worker_status.py --json -` — reads a JSON list of
   `{task, session_id}` on stdin, returns each with `alive: true|false`. Tests
   whether each worker session is actually still running.
 - `python3 $SCRIPTS/taskdb.py set-status-gone --task <id>` — mark a task whose
@@ -43,15 +43,15 @@ are deliberately left to be handled as real cases arise (see Notes).
 - `python3 $SCRIPTS/taskdb.py parked-aging --threshold-days <N>` — parked tasks
   aged beyond N days; the gentler "still waiting?" nudge.
 - `python3 $SCRIPTS/taskdb.py find-refs --ref-type <t> --value <v>` — find tasks
-  carrying a given identity reference. Used in inbound noticing to tell whether an
+  carrying a given identity reference. Used in noticing new tasks to tell whether an
   item is already tracked.
 - `python3 $SCRIPTS/taskdb.py events --since <ISO>` — events since a timestamp;
-  the source for the log rollup.
-- `python3 $SCRIPTS/taskdb.py log-event --task <id> --kind reconcile|inbound|rollup --detail "..."`
-  — record reconciliation observations, promoted inbound items, and the rollup.
+  the source for the recap.
+- `python3 $SCRIPTS/taskdb.py log-event --task <id> --kind reconcile|new-task|recap --detail "..."`
+  — record reconciliation observations, promoted new-task items, and the recap.
 - `python3 $SCRIPTS/taskdb.py archive --task <id>` — archive a done task so it
   leaves the active summary.
-- **External sources** (reconciliation + inbound), via the workspace's already
+- **External sources** (reconciliation + new tasks), via the workspace's already
   permissioned tools: Jira (`mcp__atlassian__getJiraIssue`), GitHub
   (`gh pr view`, `gh run list`), Slack (`slack_read_thread`), email (Gmail MCP).
 
@@ -61,11 +61,11 @@ are deliberately left to be handled as real cases arise (see Notes).
    with "no task database" the workspace isn't initialized — tell the user to run the PWC
    install/init for this workspace and stop.
 
-2. **Liveness sweep.** Collect every task in the summary that has a non-null
+2. **Worker-status sweep.** Collect every task in the summary that has a non-null
    `session_id` and a status that implies it should still be running (e.g.
    `active`, `blocked`, `awaiting-review` — not already `gone`, `done`, archived).
    Pass them as a JSON list of `{task, session_id}` to
-   `python3 $SCRIPTS/liveness.py --json -`. For each result with `alive: false`,
+   `python3 $SCRIPTS/worker_status.py --json -`. For each result with `alive: false`,
    run `taskdb.py set-status-gone --task <id>`. This detects **death, not
    outcome** — a gone worker may have left finished, unpushed work behind, so
    never infer done or failed; just flag it for the user to triage (resume, mark
@@ -95,7 +95,7 @@ are deliberately left to be handled as real cases arise (see Notes).
    task database to match the source, and do not apply a fixed rule set — the catalog of
    conflict shapes and how to handle each is intentionally learned case by case.
 
-5. **Notice inbound** (skip on a quick read). Scan the sources for items that look
+5. **Notice new tasks** (skip on a quick read). Scan the sources for items that look
    like they could be new tasks — assigned Jira tickets, review requests, Slack
    threads that mention you, unread email that needs action. For each candidate,
    check whether it's already tracked: `find-refs --ref-type <t> --value <v>` on
@@ -103,13 +103,13 @@ are deliberately left to be handled as real cases arise (see Notes).
    work, not new — fold it into that task's reconciliation, don't duplicate.
    For genuinely new items, **surface them and ask** whether to promote each into a
    task; never auto-promote. On promotion, `add-task` + `add-ref` (identity ref)
-   and `log-event --kind inbound`. *(The automatic new-vs-update decision is
+   and `log-event --kind new-task`. *(The automatic new-vs-update decision is
    deliberately left manual for now — you present, the user confirms.)*
 
-6. **Log rollup + archive.** Summarize what changed since the last brief: read
-   `events --since <last-brief-time>` (a task-DB-level `rollup` event marks each
-   brief, so "last brief" = the most recent `rollup`). Write a concise one-line
-   `log-event --kind rollup` (task_id omitted = task-DB-level, not tied to one task)
+6. **Recap + archive.** Summarize what changed since the last brief: read
+   `events --since <last-brief-time>` (a task-DB-level `recap` event marks each
+   brief, so "last brief" = the most recent `recap`). Write a concise one-line
+   `log-event --kind recap` (task_id omitted = task-DB-level, not tied to one task)
    capturing the
    session's net activity. Then archive any task the user has confirmed done:
    `archive --task <id>` (drops it from the active summary).
@@ -132,11 +132,11 @@ are deliberately left to be handled as real cases arise (see Notes).
 
 8. **Summarize the shape of your work** in a sentence or two: how many active,
    how many parked, anything flagged for attention (gone workers, stale tasks,
-   reconciliation conflicts, new inbound). This is the orientation the user is
+   reconciliation conflicts, new tasks). This is the orientation the user is
    actually after.
 
 9. **Offer next moves, don't take them.** End by pointing at what the user might do
-   (e.g. "drill into a task, or run `/next` for a suggestion"). Beyond the liveness
+   (e.g. "drill into a task, or run `/next` for a suggestion"). Beyond the worker-status
    and staleness sweeps above (which only flag and, for dead workers, mark `gone`),
    do not dispatch work or otherwise mutate tasks unless the user asks.
 
@@ -150,7 +150,7 @@ are deliberately left to be handled as real cases arise (see Notes).
 - **Two deferred-by-design behaviors.** (1) *Reconciliation conflict rules* — the
   step detects and surfaces task-DB-vs-external disagreement, but the rules for
   resolving each conflict shape are not codified; handle them as they arise. (2)
-  *Inbound matching* — the `find-refs` query to check whether an item is already
+  *New-task matching* — the `find-refs` query to check whether an item is already
   tracked exists, but the automatic new-vs-update decision is not built; surface
   candidates and let the user confirm.
 - Archived (done-and-rolled-up) tasks are intentionally absent from `summary`. If

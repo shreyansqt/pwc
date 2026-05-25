@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-"""Liveness check for worker sessions.
+"""Worker-status check — is a worker session still running?
 
 A worker is spawned with `claude --session-id <uuid>`, so the uuid appears in the
 worker process's command line. `pgrep -f <uuid>` is therefore an exact "is this
 session still running?" test — no PID storage, no polling, terminal-agnostic.
+("Worker status" = alive/dead here, distinct from a task's status field.)
 
-Used by /brief: for each task with a session_id and a status implying it should be
-alive, check liveness here; mark the dead ones "gone — needs triage" via
-`taskdb.py set-status-gone`. This detects death, not outcome — a gone worker may
-have left finished-but-unpushed work, so the coordinator never infers done/failed.
+Used by /brief: for each task with a session_id and a (task) status implying it
+should be running, check worker status here; mark the dead ones "gone — needs
+triage" via `taskdb.py set-status-gone`. This detects death, not outcome — a gone
+worker may have left finished-but-unpushed work, so never infer done/failed.
 
 Usage:
-  liveness.py --session-ids <uuid,uuid,...>
-  liveness.py --json -            # read [{"task": "...", "session_id": "..."}] on stdin
+  worker_status.py --session-ids <uuid,uuid,...>
+  worker_status.py --json -        # read [{"task": "...", "session_id": "..."}] on stdin
 
 Output (stdout, JSON): a list of {session_id, alive[, task]}.
 """
@@ -46,7 +47,7 @@ def is_alive(session_id: str) -> bool:
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(prog="liveness.py", description=__doc__)
+    p = argparse.ArgumentParser(prog="worker_status.py", description=__doc__)
     g = p.add_mutually_exclusive_group(required=True)
     g.add_argument("--session-ids", help="comma-separated session uuids")
     g.add_argument("--json", metavar="-", help="read JSON list from stdin ('-')")
