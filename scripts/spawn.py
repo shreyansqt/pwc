@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
-"""Spawn a PWC worker in an iTerm2 split pane.
+"""Spawn a PWC worker in a new iTerm2 tab.
 
 Builds a `claude` invocation (fresh `--session-id <uuid>` + seed prompt, or
-`--resume <uuid>`) and runs it in a new split pane. Layout: the first worker
-splits the coordinator's current window horizontally (worker pane below);
-subsequent workers split that worker region vertically, tiling beside each other.
-The worker-region pane is remembered in <workspace>/.pwc/iterm_layout.json and
-self-heals if closed. Prints session id, mode, and placement as JSON. Does NOT
-touch the ledger — the dispatch skill calls `ledger.py set-session` so all DB
-writes funnel through one path.
+`--resume <uuid>`) and runs it in a new tab of the current iTerm2 window, titled
+after the task. Each worker gets its own full-width tab (Cmd-1/2/... to switch);
+the coordinator's tab is untouched. Prints session id, mode, and placement as
+JSON. Does NOT touch the ledger — the dispatch skill calls `ledger.py set-session`
+so all DB writes funnel through one path.
 
 Requires iTerm2 running with the Python API enabled
 (Preferences -> General -> Magic -> Enable Python API) and `pip install iterm2`.
@@ -22,7 +20,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import shlex
 import sys
@@ -59,41 +56,13 @@ def build_claude_command(*, session_id, resume, cwd, seed_prompt, name):
     return mode, inner
 
 
-def _layout_state_path(cwd):
-    """Where we remember the 'worker region' iTerm2 pane for this workspace.
+def spawn(*, cwd, command, title=None):
+    """Open the worker in a new iTerm2 tab in the current window. Returns placement.
 
-    Layout is per-workspace, so this lives in the workspace root's .pwc/ — found by
-    walking up from cwd. Crucially NOT cwd/.pwc/: a worker's cwd is a sub-repo, and
-    writing a .pwc/ there would shadow the real workspace root for ledger discovery.
-    """
-    from _common import db_path, find_workspace_root
-    return db_path(find_workspace_root(cwd)).parent / "iterm_layout.json"
-
-
-def _read_worker_region(cwd):
-    p = _layout_state_path(cwd)
-    if p.exists():
-        try:
-            return json.loads(p.read_text()).get("worker_region_session_id")
-        except (ValueError, OSError):
-            return None
-    return None
-
-
-def _write_worker_region(cwd, session_id):
-    p = _layout_state_path(cwd)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps({"worker_region_session_id": session_id}))
-
-
-def spawn(*, cwd, command):
-    """Split the coordinator's window to place a worker pane. Returns placement info.
-
-    Layout model: the first worker splits the coordinator's current session
-    horizontally (worker pane below). Subsequent workers split that worker region
-    vertically, tiling beside each other. The 'worker region' pane is remembered
-    in <workspace>/.pwc/iterm_layout.json; if it's been closed, we fall back to a
-    fresh horizontal split off the coordinator.
+    Each worker gets its own full-width tab (switchable with Cmd-1/2/...), leaving
+    the coordinator's tab untouched — no pane tiling, no layout state to track. The
+    command runs in lieu of the shell in the new tab; the tab is titled after the
+    task so it's identifiable at a glance.
     """
     try:
         import iterm2  # lazy: non-spawn use of this module shouldn't need it
@@ -106,25 +75,19 @@ def spawn(*, cwd, command):
         app = await iterm2.async_get_app(connection)
         window = app.current_terminal_window
         if window is None:
-            fail("no active iTerm2 window to split from")
+            fail("no active iTerm2 window to open a tab in")
 
-        region_id = _read_worker_region(cwd)
-        base = app.get_session_by_id(region_id) if region_id else None
-
-        if base is not None:
-            # Subsequent worker: tile beside existing workers.
-            new = await base.async_split_pane(vertical=True)
-            placement["split"] = "vertical"
-        else:
-            # First worker (or the region pane is gone): split coordinator below.
-            base = window.current_tab.current_session
-            new = await base.async_split_pane(vertical=False)
-            placement["split"] = "horizontal"
-            _write_worker_region(cwd, new.session_id)
-
-        placement["iterm_session_id"] = new.session_id
-        # The new pane starts a login shell; run the worker command in it.
-        await new.async_send_text(command + "\n")
+        full = f"/bin/zsh -l -c {shlex.quote(command)}"
+        tab = await window.async_create_tab(command=full)
+        placement["tab"] = True
+        if tab is not None:
+            session = tab.current_session
+            placement["iterm_session_id"] = session.session_id if session else None
+            if title:
+                try:
+                    await tab.async_set_title(title)
+                except Exception:  # noqa: BLE001 — title is cosmetic, never fatal
+                    pass
 
     try:
         iterm2.run_until_complete(_main)
@@ -182,7 +145,7 @@ def main(argv=None):
         emit(result)
         return
 
-    placement = spawn(cwd=cwd, command=command)
+    placement = spawn(cwd=cwd, command=command, title=args.name or args.task)
     result.update(placement)
     emit(result)
 
