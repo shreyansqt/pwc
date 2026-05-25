@@ -11,10 +11,10 @@ user never has to hold the state of their work in their head. It produces the sa
 useful briefing whether the coordinator booted ten minutes ago or just now — all
 state lives in the ledger, not in this conversation.
 
-This skill is being built in layers. **Current layer: render-only** (read the
-ledger and present it). Later layers add liveness detection, a staleness sweep,
-external reconciliation, inbound noticing, and a log rollup — each documented as a
-section below when implemented.
+This skill is built in layers, all present below: render, liveness sweep,
+staleness sweep, external reconciliation, inbound noticing, and a log rollup +
+archive. Reconciliation *conflict resolution rules* and inbound *matching logic*
+are deliberately left to be handled as real cases arise (see Notes).
 
 ## Configuration
 
@@ -33,6 +33,27 @@ section below when implemented.
 - `python3 $SCRIPTS/ledger.py detail --task <id>` — full per-task detail: the
   structured fields, its typed references, and its event timeline. Use only when
   drilling into a specific task, not for the overview.
+- `python3 $SCRIPTS/liveness.py --json -` — reads a JSON list of
+  `{task, session_id}` on stdin, returns each with `alive: true|false`. Tests
+  whether each worker session is actually still running.
+- `python3 $SCRIPTS/ledger.py set-status-gone --task <id>` — mark a task whose
+  worker has vanished as `gone` (needs triage), logging a `gone` event.
+- `python3 $SCRIPTS/ledger.py stale --threshold-days <N>` — active, **not parked**
+  tasks untouched for longer than N days. The staleness-sweep candidates.
+- `python3 $SCRIPTS/ledger.py parked-aging --threshold-days <N>` — parked tasks
+  aged beyond N days; the gentler "still waiting?" nudge.
+- `python3 $SCRIPTS/ledger.py find-refs --ref-type <t> --value <v>` — find tasks
+  carrying a given identity reference. Used in inbound noticing to tell whether an
+  item is already tracked.
+- `python3 $SCRIPTS/ledger.py events --since <ISO>` — events since a timestamp;
+  the source for the log rollup.
+- `python3 $SCRIPTS/ledger.py log-event --task <id> --kind reconcile|inbound|rollup --detail "..."`
+  — record reconciliation observations, promoted inbound items, and the rollup.
+- `python3 $SCRIPTS/ledger.py archive --task <id>` — archive a done task so it
+  leaves the active summary.
+- **External sources** (reconciliation + inbound), via the workspace's already
+  permissioned tools: Jira (`mcp__atlassian__getJiraIssue`), GitHub
+  (`gh pr view`, `gh run list`), Slack (`slack_read_thread`), email (Gmail MCP).
 
 ## Steps
 
@@ -40,7 +61,59 @@ section below when implemented.
    with "no ledger" the workspace isn't initialized — tell the user to run the PWC
    install/init for this workspace and stop.
 
-2. **Render a prioritized briefing** from the summary JSON. Do not dump raw JSON —
+2. **Liveness sweep.** Collect every task in the summary that has a non-null
+   `session_id` and a status that implies it should still be running (e.g.
+   `active`, `blocked`, `awaiting-review` — not already `gone`, `done`, archived).
+   Pass them as a JSON list of `{task, session_id}` to
+   `python3 $SCRIPTS/liveness.py --json -`. For each result with `alive: false`,
+   run `ledger.py set-status-gone --task <id>`. This detects **death, not
+   outcome** — a gone worker may have left finished, unpushed work behind, so
+   never infer done or failed; just flag it for the user to triage (resume, mark
+   done, or drop). If a sweep changed any statuses, re-run `summary` so the
+   briefing reflects them.
+
+3. **Staleness sweep.** Run `ledger.py stale --threshold-days 7` and
+   `ledger.py parked-aging --threshold-days 14`. Staleness is a **signal, not a
+   verdict** — never auto-archive on age. Surface stale (non-parked) tasks and ask
+   the user, per task, to keep or drop. Surface aged parked tasks as a softer
+   nudge ("waiting N days — ping them?"). Take no action without the user's call.
+
+4. **Reconcile against external sources** (skip if the user asked for a quick
+   read). For each non-archived task that has an identity reference, re-check the
+   source of truth for that ref and compare to the ledger:
+   - Jira tasks → `mcp__atlassian__getJiraIssue` for the key; note status.
+   - PR / pr-review tasks → `gh pr view <ref> --json state,statusCheckRollup`
+     and `gh run list` for CI.
+   - Slack tasks → `slack_read_thread` for new replies since last touched.
+   - Email tasks → Gmail MCP for new messages on the thread.
+
+   **Surface conflicts; never auto-resolve them.** When the external state
+   disagrees with the ledger (e.g. ledger says a worker is active but Jira says
+   Done; ledger says awaiting-review but the PR is approved; CI went red since you
+   last looked), present the disagreement and let the user decide. Record what you
+   observed with `log-event --kind reconcile`. Do **not** silently overwrite the
+   ledger to match the source, and do not apply a fixed rule set — the catalog of
+   conflict shapes and how to handle each is intentionally learned case by case.
+
+5. **Notice inbound** (skip on a quick read). Scan the sources for items that look
+   like they could be new tasks — assigned Jira tickets, review requests, Slack
+   threads that mention you, unread email that needs action. For each candidate,
+   check whether it's already tracked: `find-refs --ref-type <t> --value <v>` on
+   its identity ref. If a task already carries that ref, it's an update to existing
+   work, not new — fold it into that task's reconciliation, don't duplicate.
+   For genuinely new items, **surface them and ask** whether to promote each into a
+   task; never auto-promote. On promotion, `add-task` + `add-ref` (identity ref)
+   and `log-event --kind inbound`. *(The automatic new-vs-update decision is
+   deliberately left manual for now — you present, the user confirms.)*
+
+6. **Log rollup + archive.** Summarize what changed since the last brief: read
+   `events --since <last-brief-time>` (a portfolio-level `rollup` event marks each
+   brief, so "last brief" = the most recent `rollup`). Write a concise one-line
+   `log-event --kind rollup` (task_id omitted = portfolio-level) capturing the
+   session's net activity. Then archive any task the user has confirmed done:
+   `archive --task <id>` (drops it from the active summary).
+
+7. **Render a prioritized briefing** from the summary JSON. Do not dump raw JSON —
    present a scannable view. Group and order so the user can triage at a glance:
 
    - Lead with anything needing attention: tasks whose `status` is `gone`
@@ -56,14 +129,15 @@ section below when implemented.
    a hint that a worker session is attached (`session_id` is non-null). Keep each
    task to roughly one line; this is an index, not a report.
 
-3. **Summarize the shape of the portfolio** in a sentence or two: how many active,
-   how many parked, anything flagged for attention. This is the orientation the
-   user is actually after.
+8. **Summarize the shape of the portfolio** in a sentence or two: how many active,
+   how many parked, anything flagged for attention (gone workers, stale tasks,
+   reconciliation conflicts, new inbound). This is the orientation the user is
+   actually after.
 
-4. **Offer next moves, don't take them.** End by pointing at what the user might do
-   (e.g. "drill into a task, or run `/next` for a suggestion") — but do not dispatch
-   work, modify the ledger, or drill into details unless asked. `/brief` is
-   read-only in this layer.
+9. **Offer next moves, don't take them.** End by pointing at what the user might do
+   (e.g. "drill into a task, or run `/next` for a suggestion"). Beyond the liveness
+   and staleness sweeps above (which only flag and, for dead workers, mark `gone`),
+   do not dispatch work or otherwise mutate tasks unless the user asks.
 
 ## Notes
 
@@ -72,5 +146,11 @@ section below when implemented.
   Never invent tasks or statuses that aren't in the `summary` output.
 - **Stay light.** `/brief` should not pull full `detail` for every task — that
   defeats the two-tier design. Load `detail` only for a task the user is focusing on.
+- **Two deferred-by-design behaviors.** (1) *Reconciliation conflict rules* — the
+  step detects and surfaces ledger-vs-external disagreement, but the rules for
+  resolving each conflict shape are not codified; handle them as they arise. (2)
+  *Inbound matching* — the `find-refs` query to check whether an item is already
+  tracked exists, but the automatic new-vs-update decision is not built; surface
+  candidates and let the user confirm.
 - Archived (done-and-rolled-up) tasks are intentionally absent from `summary`. If
   the user asks about completed work, add `--include-archived`.
