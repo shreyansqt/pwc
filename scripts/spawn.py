@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Spawn a PWC worker in its own iTerm2 window.
+"""Spawn a PWC worker in an iTerm2 split pane.
 
 Builds a `claude` invocation (fresh `--session-id <uuid>` + seed prompt, or
-`--resume <uuid>`) and opens it in a new iTerm2 window whose cwd is the task's
-working directory. Prints the session id and mode as JSON. Does NOT touch the
-ledger — the dispatch skill calls `ledger.py set-session` so all DB writes funnel
-through one path.
+`--resume <uuid>`) and runs it in a new split pane. Layout: the first worker
+splits the coordinator's current window horizontally (worker pane below);
+subsequent workers split that worker region vertically, tiling beside each other.
+The worker-region pane is remembered in <workspace>/.pwc/iterm_layout.json and
+self-heals if closed. Prints session id, mode, and placement as JSON. Does NOT
+touch the ledger — the dispatch skill calls `ledger.py set-session` so all DB
+writes funnel through one path.
 
 Requires iTerm2 running with the Python API enabled
 (Preferences -> General -> Magic -> Enable Python API) and `pip install iterm2`.
@@ -19,6 +22,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shlex
 import sys
@@ -55,16 +59,67 @@ def build_claude_command(*, session_id, resume, cwd, seed_prompt, name):
     return mode, inner
 
 
+def _layout_state_path(cwd):
+    """Where we remember the 'worker region' iTerm2 pane for this workspace."""
+    from _common import db_path
+    return db_path(cwd).parent / "iterm_layout.json"
+
+
+def _read_worker_region(cwd):
+    p = _layout_state_path(cwd)
+    if p.exists():
+        try:
+            return json.loads(p.read_text()).get("worker_region_session_id")
+        except (ValueError, OSError):
+            return None
+    return None
+
+
+def _write_worker_region(cwd, session_id):
+    p = _layout_state_path(cwd)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({"worker_region_session_id": session_id}))
+
+
 def spawn(*, cwd, command):
-    """Open a new iTerm2 window running `command`. Raises on connection failure."""
+    """Split the coordinator's window to place a worker pane. Returns placement info.
+
+    Layout model: the first worker splits the coordinator's current session
+    horizontally (worker pane below). Subsequent workers split that worker region
+    vertically, tiling beside each other. The 'worker region' pane is remembered
+    in <workspace>/.pwc/iterm_layout.json; if it's been closed, we fall back to a
+    fresh horizontal split off the coordinator.
+    """
     try:
-        import iterm2  # imported lazily so non-spawn use of this module doesn't need it
+        import iterm2  # lazy: non-spawn use of this module shouldn't need it
     except ImportError:
         fail("iterm2 module not installed — run `pip install iterm2`")
 
+    placement = {}
+
     async def _main(connection):
-        full = f"/bin/zsh -l -c {shlex.quote(command)}"
-        await iterm2.Window.async_create(connection, command=full)
+        app = await iterm2.async_get_app(connection)
+        window = app.current_terminal_window
+        if window is None:
+            fail("no active iTerm2 window to split from")
+
+        region_id = _read_worker_region(cwd)
+        base = app.get_session_by_id(region_id) if region_id else None
+
+        if base is not None:
+            # Subsequent worker: tile beside existing workers.
+            new = await base.async_split_pane(vertical=True)
+            placement["split"] = "vertical"
+        else:
+            # First worker (or the region pane is gone): split coordinator below.
+            base = window.current_tab.current_session
+            new = await base.async_split_pane(vertical=False)
+            placement["split"] = "horizontal"
+            _write_worker_region(cwd, new.session_id)
+
+        placement["iterm_session_id"] = new.session_id
+        # The new pane starts a login shell; run the worker command in it.
+        await new.async_send_text(command + "\n")
 
     try:
         iterm2.run_until_complete(_main)
@@ -74,6 +129,7 @@ def spawn(*, cwd, command):
             "(is iTerm2 running with the API enabled in "
             f"Preferences -> General -> Magic?): {type(e).__name__}: {e}"
         )
+    return placement
 
 
 def main(argv=None):
@@ -121,7 +177,8 @@ def main(argv=None):
         emit(result)
         return
 
-    spawn(cwd=cwd, command=command)
+    placement = spawn(cwd=cwd, command=command)
+    result.update(placement)
     emit(result)
 
 
