@@ -44,6 +44,13 @@ If Claude Code's `--session-id` flag works in our version, an even cleaner
 variant: pre-allocate the session ID before spawning, pass it in. No
 registration step needed at all. To investigate during build.
 
+The captured session ID earns its keep twice over, which raises the stakes on
+getting this right: it's what liveness detection tests to tell a live worker
+from a dead one, *and* it's what lets dispatch reopen a task's prior session
+(`claude --resume`) instead of starting cold. Pre-allocation is the more
+attractive option for the second use — knowing the ID before spawn means
+dispatch can decide new-vs-reopen without a round-trip through registration.
+
 ## Why short-lived tasks are inline rather than spawned workers
 
 For a one-shot Slack reply or a quick email triage, spawning a new terminal

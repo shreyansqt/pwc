@@ -160,10 +160,35 @@ This means:
    the wrong task to unwind) dwarfs the one keystroke confirmation costs. A
    trust-it-and-go mode is a plausible later addition, not v1.
 
-4. **Worker dispatch (long-running tasks).** Spawn a Claude Code worker in a
-   new terminal window — in the right working directory, with a context-loaded
-   initial prompt. Worker registers itself in the ledger so the coordinator
-   knows it's alive.
+4. **Worker dispatch (long-running tasks).** Launch a Claude Code worker for a
+   task in its own terminal window. Dispatch makes three decisions from the
+   task's ledger record:
+
+   - **Directory** — spawns in the task's working directory (from its
+     working-context refs), so the worker lands where the code is.
+   - **New vs. existing session** — if the task has a prior Claude Code session
+     whose transcript still exists on disk (the session ID was captured when its
+     worker registered), dispatch reopens *that* session (`claude --resume`) for
+     the richest continuity — the worker comes back with its own full
+     conversation intact. Otherwise it starts a fresh session.
+   - **Initial prompt** — for a fresh session, the prompt is seeded from the
+     task's stored detail and events timeline so the worker continues rather than
+     starting cold; for a reopened session, little or no seeding is needed since
+     the transcript carries it.
+
+   The worker registers itself in the ledger on startup so the coordinator knows
+   it's alive (and so its session ID is on file for a future reopen).
+
+   **Dispatch covers resumption — there is no separate resume command.** Picking
+   a task back up (a worker that's "gone — needs triage," or any parked task) is
+   just dispatching it again, and the new-vs-existing-session choice above is what
+   makes that continuous: reopen the prior session when it's still there, else a
+   fresh session seeded from durable storage. Two tiers of continuity, prior
+   session preferred, our stored detail as the fallback. Re-orientation — "what
+   changed externally since I last touched this" — comes from `/brief`'s per-task
+   reconciliation, which already runs on every task, so no dedicated catch-up
+   step is needed. A first-time dispatch is just resumption with no prior session
+   and empty history.
 
 5. **Inline handling (short-lived tasks).** The coordinator decides inline vs.
    worker at dispatch, and **the default is worker** — inline is reserved for the
@@ -198,12 +223,6 @@ This means:
    surfaces the last known state and I adjudicate (resume, mark done, drop).
    This stays within the on-demand model: liveness is evaluated at `/brief`,
    not by a background daemon.
-
-7. **Resumption by task (`/resume <task>`).** Re-attach to an existing worker
-   by task — referenced by external ID, internal ID, or fuzzy description.
-   Before re-attaching, show me a card with current status and what's changed
-   externally since I last touched it. This is *worker* resumption, distinct
-   from the coordinator itself, which never needs explicit resumption.
 
 ## Out of scope for v1
 
