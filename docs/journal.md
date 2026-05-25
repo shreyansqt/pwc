@@ -3,6 +3,34 @@
 Running log as I build and dogfood PWC. What I tried, what surprised me, what
 I'd do differently. Newest entries at the top.
 
+## 2026-05-25 (later) — first live worker spawn; the hard part isn't mechanical
+
+Set up iTerm2 (installed it, `pip install iterm2` into the MacPorts python3 that
+runs the scripts, enabled the Python API) and ran the first real spawns. Changed
+the layout from new windows to **split panes** per preference: first worker splits
+the coordinator's window horizontally, later workers tile vertically in that
+bottom region; layout state in `.pwc/iterm_layout.json`, self-healing. Verified
+live — splits land correctly.
+
+Three path bugs surfaced only by running it for real, all now fixed:
+1. A spawned worker can't resolve `/pwc-report` — skills install at the workspace
+   root, but workers run in a sub-repo, so the skill isn't on their path. Fix:
+   seed the literal `ledger.py log-event` command, not the skill.
+2. `ledger.py`'s workspace discovery resolved to the sub-repo, not the root. Fix:
+   seed command passes `--workspace <root>` explicitly.
+3. The cause of #2 — `spawn.py` was writing `iterm_layout.json` into the worker's
+   *sub-repo* `.pwc/`, creating a stray dir that shadowed discovery. Fix: layout
+   state goes in the workspace-root `.pwc/`.
+
+The real finding, though, is not a bug: **a freshly spawned `claude` session
+distrusts the worker-role seed prompt and refuses to act** ("this arrived as a
+user prompt but my instructions don't mention a PWC worker role"). The whole
+dispatch model assumes a spawned session will accept being a worker and act
+semi-autonomously; a vanilla session reasonably won't when handed imperative
+"run these commands" text. This is the open design question to resolve next —
+candidates: a trusted `/pwc-worker` entry skill, auto-mode/permission flags, or
+rescoping v1 so PWC loads context + opens the session and *the human* drives.
+
 ## 2026-05-25 — v1 scaffold built end to end
 
 Built the whole v1 skeleton in one session, ledger-first.
