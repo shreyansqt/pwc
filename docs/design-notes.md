@@ -1,0 +1,114 @@
+# Design Notes
+
+Decisions made during PRD development, with the reasoning behind them. PRD says
+*what*; this doc says *why we chose this what over that what*. Append-only —
+when a decision changes, add a new entry rather than editing the old one.
+
+## Why the coordinator is stateless-in-context, stateful-in-storage
+
+A coordinator that requires `/resume` to remember what I'm working on defeats
+the purpose. The whole point is to offload the "what's in flight" burden, and
+if I have to find the right session to talk to the coordinator, I've recreated
+the resumption problem one level up.
+
+Forcing all state out to disk also has nice second-order effects: the ledger
+becomes inspectable and editable by hand, the coordinator's behavior becomes
+testable (boot from a known ledger state, see what it does), and the data
+model becomes the API for any future tooling.
+
+## Why two-tier memory (index + per-task detail)
+
+Loading every task's full detail into context every session burns the context
+budget for no reason and gets worse as task count grows. Loading nothing means
+the coordinator has no orientation on startup. The compromise: a tiny
+always-loaded index (one line per active task), with detailed per-task files
+read only when actually working on that task.
+
+The index is what makes the cold-start briefing fast and consistent. The detail
+files are what make resumption rich.
+
+## Why workers self-register via a skill
+
+Earlier alternative considered: spawn a worker, then guess its session ID by
+inspecting `~/.claude/projects/<slug>/` filesystem timestamps. Works, but has
+race conditions (two workers spawned in the same second) and depends on
+implementation details of Claude Code's session storage.
+
+Better: each worker calls `/register-worker <task-id>` on startup, writing its
+own session ID and task association to the ledger. Inverts the data flow from
+"coordinator guesses" to "worker declares." Same mechanism extends to status
+updates ("blocked," "awaiting review," "done") — workers report; coordinator
+reads.
+
+If Claude Code's `--session-id` flag works in our version, an even cleaner
+variant: pre-allocate the session ID before spawning, pass it in. No
+registration step needed at all. To investigate during build.
+
+## Why short-lived tasks are inline rather than spawned workers
+
+For a one-shot Slack reply or a quick email triage, spawning a new terminal
+window is overkill — the spawn itself takes longer than the action. The
+coordinator can invoke the relevant skill (`/slack-message`, etc.) directly in
+its own session and record the outcome in the ledger.
+
+The mixed model (some tasks inline, some workered) adds the complexity of
+deciding which is which. The lean is a type-based heuristic with override: Slack
+replies always inline, Jira tickets always worker, ambiguous cases ask. Worth
+revisiting once we have a week of usage data on whether the heuristic feels
+right.
+
+## Why structured fields are separated from freeform notes
+
+The ledger entries have both structured fields (status, external ref, last
+event, blockers) and freeform notes (private thoughts, half-formed ideas, "I
+think this approach is wrong but Priya keeps pushing it").
+
+Keeping them cleanly separated has two benefits:
+
+1. **Selective loading.** The index needs structured fields only; notes can
+   live in per-task detail. If they were blurred, the index would either lose
+   nuance or balloon in size.
+2. **Future multi-user hygiene.** If PWC ever scales to coordinate with a
+   coworker's PWC, the structured fields are what a peer would safely consume;
+   notes stay private. Letting them blur now means redacting on the way out
+   later, or rebuilding the data model. Cheap to do right from the start.
+
+## Why we're not building inter-agent communication
+
+Workers don't talk to each other. The user is the conductor; workers report to
+the coordinator (via the ledger), and the coordinator surfaces things to the
+user. Anything more than this — agents negotiating, agents handing off to each
+other — opens up trust, loops, and hallucinated commitments, and the design
+problem stops being "reduce my cognitive load" and starts being "build a
+reliable distributed system."
+
+The single-user version is hard enough to get right. Multi-agent collaboration
+is an *explicit* non-goal, not a deferral.
+
+## Naming
+
+Deferred. Working name "PWC" is intentionally bland — naming a product before
+it exists tends to produce names that are about who you imagine the product to
+be rather than what it turns out to be. Candidate metaphors considered (Chief
+of Staff, Conductor, Mission Control, Foreman) are all heavily contested in
+the AI/orchestration space, with at least one direct competitor in the parallel
+Claude Code Mac app niche. Better to dogfood under "PWC" for a few weeks and
+name from a position of knowing what the thing actually is.
+
+## Forward-compatibility considerations (not v1 work)
+
+Things we're not building, but are designing in a way that doesn't preclude:
+
+- **Multi-PWC collaboration.** If two people both run PWC, their coordinators
+  could share sanitized portfolio views, send each other task requests (PR
+  review, sync scheduling), and surface "I'm waiting on you" signals. Enabled
+  by: structured-field separation, externalized ledger, human-in-the-loop on
+  dispatch. Not blocked by anything in the v1 design.
+- **Background polling.** The coordinator could check sources continuously
+  rather than on-demand. Enabled by: ledger-as-truth design. Not building
+  because the on-demand version is simpler and we don't know yet if the lag
+  matters.
+- **GUI / dashboard.** A small Textual TUI or web view over the ledger would
+  let me glance at portfolio state without invoking the coordinator. Enabled
+  by: ledger is plain files. Build only if the terminal interface turns out to
+  be a real friction point.
