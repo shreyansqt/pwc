@@ -5,13 +5,19 @@ description: For a PWC worker to report its status back to the coordinator's led
 
 # /pwc-report
 
-A thin reporting channel for a **worker** session. When PWC dispatches you to a
-task, you were told your task id in the opening prompt. As you hit meaningful
-events, record them here so the coordinator's next `/brief` reflects reality — the
-coordinator reads the ledger, it does not watch your window.
+A thin reporting channel for a worker to record status to the ledger. As you hit
+meaningful events, record them so the coordinator's next `/brief` reflects
+reality — the coordinator reads the ledger, it does not watch your window.
 
-This is the worker's only write to the ledger: an append to the event log. It does
+This is a worker's only write to the ledger: an append to the event log. It does
 not change task fields the coordinator owns.
+
+> **Note for spawned workers:** PWC's skills are installed at the *workspace root*,
+> but you run in a sub-repo, so this `/pwc-report` skill is usually **not
+> resolvable from your cwd**. Your dispatch prompt therefore gave you the literal
+> `ledger.py log-event ...` command to run directly — use that. This SKILL.md
+> documents the same call for when the skill *is* available (e.g. the coordinator
+> reporting an inline task's outcome from the workspace root).
 
 ## Configuration
 

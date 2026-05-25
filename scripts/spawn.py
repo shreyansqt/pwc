@@ -60,9 +60,14 @@ def build_claude_command(*, session_id, resume, cwd, seed_prompt, name):
 
 
 def _layout_state_path(cwd):
-    """Where we remember the 'worker region' iTerm2 pane for this workspace."""
-    from _common import db_path
-    return db_path(cwd).parent / "iterm_layout.json"
+    """Where we remember the 'worker region' iTerm2 pane for this workspace.
+
+    Layout is per-workspace, so this lives in the workspace root's .pwc/ — found by
+    walking up from cwd. Crucially NOT cwd/.pwc/: a worker's cwd is a sub-repo, and
+    writing a .pwc/ there would shadow the real workspace root for ledger discovery.
+    """
+    from _common import db_path, find_workspace_root
+    return db_path(find_workspace_root(cwd)).parent / "iterm_layout.json"
 
 
 def _read_worker_region(cwd):

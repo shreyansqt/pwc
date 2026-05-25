@@ -60,8 +60,28 @@ it again, reopening its prior session when one survives.
 4. **For a fresh session, build a seed prompt** from the task's detail + event
    timeline so the worker continues rather than starting cold. Include: the task id,
    what it is, relevant refs (Jira key, PR, branch), a short summary of prior events,
-   and the instruction to report status with `/pwc-report` (kinds: blocked,
-   awaiting-review, done). For a resumed session, little or no seed is needed.
+   and **the exact status-reporting command** (see below). For a resumed session,
+   little or no seed is needed.
+
+   **Reporting instruction — give the worker the full script command, not the
+   skill.** A worker runs in a sub-repo (e.g. `service-banking`), which creates two
+   traps to avoid:
+   - `/pwc-report` is *not* resolvable from the worker's cwd (skills install at the
+     workspace root), so seed the literal `ledger.py` command instead.
+   - The ledger lives at the *workspace root* (`<workspace>/.pwc/ledger.db`), but
+     `ledger.py` auto-discovers from cwd — which, from a sub-repo, finds the wrong
+     place. So the command **must pass `--workspace <root>` explicitly.**
+
+   Seed the worker with exactly this (substitute the real workspace root and task id):
+   ```
+   To report status, run this exact command (works from any directory):
+     python3 ~/work/pwc/scripts/ledger.py \
+       --workspace ~/work/acme \
+       log-event --task <THIS-TASK-ID> --source worker \
+       --kind <blocked|awaiting-review|done|note> --detail "<what happened>"
+   Report when you hit a meaningful event (blocked, up for review, done).
+   ```
+   Do not tell the worker to use `/pwc-report`, and do not omit `--workspace`.
 
 5. **Pre-allocate and spawn.** Generate a UUID, pass it as `--session-id` to
    `spawn.py` (so the id is known before the process exists). Pipe the seed prompt
