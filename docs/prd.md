@@ -137,10 +137,18 @@ This means:
    initial prompt. Worker registers itself in the ledger so the coordinator
    knows it's alive.
 
-6. **Inline handling (short-lived tasks).** For tasks the coordinator judges as
-   quick, single-shot, or not worth a dedicated worker, the coordinator acts
-   directly via its own skills (e.g., `/slack-message`). The action and its
-   outcome are still recorded in the ledger.
+6. **Inline handling (short-lived tasks).** The coordinator decides inline vs.
+   worker at dispatch, and **the default is worker** — inline is reserved for the
+   genuinely trivial that can't grow legs (a status check, a one-token reply).
+   The bias is deliberate: the failure cost is asymmetric. Worker-when-inline-
+   would-do just wastes a spawn — loud and harmless. Inline-when-it-should-have-
+   been-a-worker pulls real work into the coordinator's own conversation, which
+   is the one thing the architecture exists to prevent (the coordinator must stay
+   light and bootable-fresh). Preferring worker protects that context. For the
+   tasks that are inlined, the coordinator acts directly via its own skills
+   (e.g., `/slack-message`), recording the action and outcome in the ledger; if
+   an inline task surprises it by growing, it can spin the remainder out into a
+   worker rather than absorbing it.
 
 7. **Worker status tracking.** Workers update the ledger as they hit meaningful
    events (blocked, awaiting review, sent, done). Coordinator surfaces these in
@@ -200,10 +208,6 @@ This means:
   (Lean: always confirm in v1.)
 - When a worker reports "blocked on X," does the coordinator do anything
   proactive, or just record it? (Lean: just record in v1.)
-- How does the coordinator decide inline vs. worker for a given task? Heuristic
-  (task type-based), or does it ask me each time? (Lean: heuristic with override
-  — e.g., Slack replies always inline, Jira tickets always worker, ambiguous
-  cases ask.)
-- Should per-task detail files include a running narrative the coordinator
+- Should per-task detail records include a running narrative the coordinator
   appends to as things happen, or just structured fields? (Lean: structured
   fields plus a freeform notes section.)
