@@ -1,0 +1,10 @@
+# PWC runtime state lives in each workspace's .pwc/, never in this source repo.
+.pwc/
+*.db
+*.db-wal
+*.db-shm
+
+# Python
+__pycache__/
+*.pyc
+.venv/
