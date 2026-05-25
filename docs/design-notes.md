@@ -11,9 +11,9 @@ the purpose. The whole point is to offload the "what's in flight" burden, and
 if I have to find the right session to talk to the coordinator, I've recreated
 the resumption problem one level up.
 
-Forcing all state out to disk also has nice second-order effects: the ledger
+Forcing all state out to disk also has nice second-order effects: the task database
 becomes inspectable and editable by hand, the coordinator's behavior becomes
-testable (boot from a known ledger state, see what it does), and the data
+testable (boot from a known task database state, see what it does), and the data
 model becomes the API for any future tooling.
 
 ## Why two-tier memory (index + per-task detail)
@@ -37,10 +37,10 @@ implementation details of Claude Code's session storage.
 Two ways to get the session ID without guessing it:
 
 - **Self-registration (B):** the worker calls `/register-worker <task-id>` on
-  startup, writing its own session ID and task association to the ledger.
+  startup, writing its own session ID and task association to the task database.
   Inverts the data flow from "coordinator guesses" to "worker declares."
 - **Pre-allocation (C):** the coordinator generates the session ID, passes it on
-  the spawn command (`--session-id <uuid>`), and records it in the ledger as it
+  the spawn command (`--session-id <uuid>`), and records it in the task database as it
   spawns. The ID is known before the worker process even exists.
 
 **Decision: C is the plan, B is the fallback.** C wins on three counts, all
@@ -54,7 +54,7 @@ sharpened by decisions made after this entry was first written:
    `/register-worker` fires is an orphan the coordinator never recorded — a gap
    in the exact liveness/tracking guarantee this mechanism exists to provide.
    Under C the row is written at spawn, so even an instantly-dead worker is
-   already in the ledger as "spawned, then gone."
+   already in the task database as "spawned, then gone."
 3. **Fewer moving parts.** No registration skill, no boot handshake, no race
    between registration and the coordinator's next read.
 
@@ -66,7 +66,7 @@ unreliable, fall back to B.
 **Status reporting is separate and survives either way.** Identity (which
 session is which task) is what C absorbs. Ongoing worker reports throughout a
 task's life — "blocked," "awaiting review," "done" — are a distinct concern;
-workers write those events to the ledger regardless of how identity was
+workers write those events to the task database regardless of how identity was
 established. So the worker-side skill shrinks from register-and-report to just
 self-*reporting*; C handles the registration half.
 
@@ -80,7 +80,7 @@ session (`claude --resume`) instead of starting cold.
 For a one-shot Slack reply or a quick email triage, spawning a new terminal
 window is overkill — the spawn itself takes longer than the action. The
 coordinator can invoke the relevant skill (`/slack-message`, etc.) directly in
-its own session and record the outcome in the ledger.
+its own session and record the outcome in the task database.
 
 The mixed model (some tasks inline, some workered) adds the complexity of
 deciding which is which. The lean is a type-based heuristic with override: Slack
@@ -90,7 +90,7 @@ right.
 
 ## Why structured fields are separated from freeform notes
 
-The ledger entries have both structured fields (status, external ref, last
+The task database entries have both structured fields (status, external ref, last
 event, blockers) and freeform notes (private thoughts, half-formed ideas, "I
 think this approach is wrong but Priya keeps pushing it").
 
@@ -107,7 +107,7 @@ Keeping them cleanly separated has two benefits:
 ## Why we're not building inter-agent communication
 
 Workers don't talk to each other. The user is the conductor; workers report to
-the coordinator (via the ledger), and the coordinator surfaces things to the
+the coordinator (via the task database), and the coordinator surfaces things to the
 user. Anything more than this — agents negotiating, agents handing off to each
 other — opens up trust, loops, and hallucinated commitments, and the design
 problem stops being "reduce my cognitive load" and starts being "build a
@@ -134,7 +134,7 @@ hand-editability as benefits. That assumption is now reversed: the store is a
 local SQLite database. Per this doc's append-only rule, the earlier entries
 stand as written — this entry records what changed and why.
 
-What flipped it: **all ledger access goes through the coordinator.** It is the
+What flipped it: **all task database access goes through the coordinator.** It is the
 only reader and writer; there is no plan to hand-edit the store. Once that's
 true, the two strongest arguments for files collapse — "I can `cat` and edit it
 by hand" is moot if I never do, and "an LLM reads files natively" is moot
@@ -147,12 +147,12 @@ temp-file-then-rename scheme plus a derived-index reconciliation to paper over
 torn multi-file writes. The two tiers stop being two file types and become two
 query shapes against one store, which also means they can never drift.
 
-Cost paid: the ledger is no longer a pile of git-diffable text, so the
+Cost paid: the task database is no longer a pile of git-diffable text, so the
 longitudinal record can't come from version control. It moves *into* the
 schema as an append-only events table — which is arguably where a build/work
 log belonged anyway.
 
-Note this also dates the "ledger is plain files" enabler cited under GUI /
+Note this also dates the "task database is plain files" enabler cited under GUI /
 dashboard below; a TUI or web view now reads the SQLite store rather than flat
 files. The point stands — the data is still external to the conversation and
 trivially queryable — only the substrate changed.
@@ -162,15 +162,15 @@ trivially queryable — only the substrate changed.
 Things we're not building, but are designing in a way that doesn't preclude:
 
 - **Multi-PWC collaboration.** If two people both run PWC, their coordinators
-  could share sanitized portfolio views, send each other task requests (PR
+  could share sanitized task-list views, send each other task requests (PR
   review, sync scheduling), and surface "I'm waiting on you" signals. Enabled
-  by: structured-field separation, externalized ledger, human-in-the-loop on
+  by: structured-field separation, externalized task database, human-in-the-loop on
   dispatch. Not blocked by anything in the v1 design.
 - **Background polling.** The coordinator could check sources continuously
-  rather than on-demand. Enabled by: ledger-as-truth design. Not building
+  rather than on-demand. Enabled by: task database-as-truth design. Not building
   because the on-demand version is simpler and we don't know yet if the lag
   matters.
-- **GUI / dashboard.** A small Textual TUI or web view over the ledger would
-  let me glance at portfolio state without invoking the coordinator. Enabled
-  by: ledger is plain files. Build only if the terminal interface turns out to
+- **GUI / dashboard.** A small Textual TUI or web view over the task database would
+  let me glance at task state without invoking the coordinator. Enabled
+  by: task database is plain files. Build only if the terminal interface turns out to
   be a real friction point.

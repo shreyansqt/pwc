@@ -15,8 +15,8 @@ live — splits land correctly.
 Three path bugs surfaced only by running it for real, all now fixed:
 1. A spawned worker can't resolve `/pwc-report` — skills install at the workspace
    root, but workers run in a sub-repo, so the skill isn't on their path. Fix:
-   seed the literal `ledger.py log-event` command, not the skill.
-2. `ledger.py`'s workspace discovery resolved to the sub-repo, not the root. Fix:
+   seed the literal `taskdb.py log-event` command, not the skill.
+2. `taskdb.py`'s workspace discovery resolved to the sub-repo, not the root. Fix:
    seed command passes `--workspace <root>` explicitly.
 3. The cause of #2 — `spawn.py` was writing `iterm_layout.json` into the worker's
    *sub-repo* `.pwc/`, creating a stray dir that shadowed discovery. Fix: layout
@@ -33,9 +33,9 @@ rescoping v1 so PWC loads context + opens the session and *the human* drives.
 
 ## 2026-05-25 — v1 scaffold built end to end
 
-Built the whole v1 skeleton in one session, ledger-first.
+Built the whole v1 skeleton in one session, task database-first.
 
-- **Ledger** (`schema.sql` + `scripts/ledger.py`): three tables — tasks, task_refs,
+- **Task database** (`schema.sql` + `scripts/taskdb.py`): three tables — tasks, task_refs,
   events — behind one CLI that's the sole read/write path. WAL mode; a 20-writer
   concurrency probe passed with zero lock errors, which is what makes worker
   self-reporting safe against the coordinator's reads.
@@ -45,8 +45,8 @@ Built the whole v1 skeleton in one session, ledger-first.
 - **Workers**: `spawn.py` opens an iTerm2 window running `claude --session-id`;
   `liveness.py` uses `pgrep -f <uuid>` as an exact alive/dead test. dispatch covers
   resumption (reopen prior session, else fresh+seeded). `/pwc-report` is the worker's
-  one channel back to the ledger.
-- **Install** is per-workspace symlinks + a `.pwc/` ledger, mirroring team-skills.
+  one channel back to the task database.
+- **Install** is per-workspace symlinks + a `.pwc/` task database, mirroring team-skills.
 
 What changed from the design during build:
 - `--session-id` pre-allocation was confirmed working, so the self-registration

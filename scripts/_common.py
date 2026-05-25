@@ -1,9 +1,9 @@
 """Shared helpers: workspace-root discovery, db path resolution, time, output.
 
 A PWC installation lives in a workspace directory (e.g. ~/work/acme).
-The ledger is at <workspace>/.pwc/ledger.db. The workspace root is found by walking
-up from a starting directory until a marker (.pwc/ or .claude/) is seen — so any
-script run from anywhere inside the workspace resolves the same db.
+The task database is at <workspace>/.pwc/taskdb.db. The workspace root is found by
+walking up from a starting directory until a marker (.pwc/ or .claude/) is seen — so
+any script run from anywhere inside the workspace resolves the same db.
 """
 
 from __future__ import annotations
@@ -35,9 +35,9 @@ def find_workspace_root(start: str | os.PathLike[str] | None = None) -> Path:
 
 
 def db_path(workspace: str | os.PathLike[str] | None = None) -> Path:
-    """Resolve <workspace>/.pwc/ledger.db. `workspace` overrides discovery."""
+    """Resolve <workspace>/.pwc/taskdb.db. `workspace` overrides discovery."""
     root = Path(workspace).resolve() if workspace else find_workspace_root()
-    return root / ".pwc" / "ledger.db"
+    return root / ".pwc" / "taskdb.db"
 
 
 def now_iso() -> str:

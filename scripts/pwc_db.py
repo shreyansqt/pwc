@@ -1,6 +1,6 @@
 """SQLite connection + schema bootstrap + row helpers.
 
-One short-lived connection per ledger.py invocation: open, one transaction,
+One short-lived connection per taskdb.py invocation: open, one transaction,
 commit, close. WAL mode + busy_timeout let the coordinator (reader) and workers
 (append-only writers) operate concurrently without "database is locked" errors.
 """
@@ -17,11 +17,11 @@ _BUSY_TIMEOUT_MS = 5000
 
 
 def connect(workspace=None, *, must_exist: bool = True) -> sqlite3.Connection:
-    """Open the workspace ledger. Raises if missing unless `must_exist=False`."""
+    """Open the workspace task database. Raises if missing unless `must_exist=False`."""
     path = db_path(workspace)
     if must_exist and not path.exists():
         raise FileNotFoundError(
-            f"no ledger at {path} — run `ledger.py init` in this workspace first"
+            f"no task database at {path} — run `taskdb.py init` in this workspace first"
         )
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path), timeout=_BUSY_TIMEOUT_MS / 1000)

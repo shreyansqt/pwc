@@ -7,7 +7,7 @@ session still running?" test — no PID storage, no polling, terminal-agnostic.
 
 Used by /brief: for each task with a session_id and a status implying it should be
 alive, check liveness here; mark the dead ones "gone — needs triage" via
-`ledger.py set-status-gone`. This detects death, not outcome — a gone worker may
+`taskdb.py set-status-gone`. This detects death, not outcome — a gone worker may
 have left finished-but-unpushed work, so the coordinator never infers done/failed.
 
 Usage:

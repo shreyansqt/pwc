@@ -18,7 +18,7 @@ cognitive load of being the coordinator drains me more than the work itself.
 A personal coordinator agent that holds the state of all my in-flight work for
 me, briefs me on it, decides what to do next, and dispatches worker sessions to
 do the actual work — so I can focus on driving individual tasks without holding
-the portfolio in my head.
+all my tasks in my head.
 
 ## Non-goals
 
@@ -62,7 +62,7 @@ coordinator reads selectively. (Workers are different — dispatch may reopen a
 worker's prior session for continuity; it's only the *coordinator* that never
 needs resuming.)
 
-The store is a **local SQLite database**. All ledger access goes through the
+The store is a **local SQLite database**. All task database access goes through the
 coordinator — it is the only reader and writer; there is no expectation of
 hand-editing the store directly. SQLite is chosen over plain files for one
 decisive reason: state changes that span the two memory tiers (e.g. spawning a
@@ -97,7 +97,7 @@ This means:
 
 ## Core capabilities
 
-1. **Durable work ledger.** A local SQLite database; single source of truth for
+1. **Durable task database.** A local SQLite database; single source of truth for
    every active task. Read in two shapes — an always-loaded summary (one status
    line per task) and on-demand per-task detail. A task record includes:
    internal task ID, type, a typed reference set (see below), short description,
@@ -129,13 +129,13 @@ This means:
 
 2. **Briefing (`/brief`).** The single interactive surface — run it anytime
    (morning to orient, midday to check inbound, close to roll up), it always
-   does the same whole-portfolio operation. It walks every task in the ledger,
+   does the same all-tasks operation. It walks every task in the task database,
    re-checks external state for each against its connected source (Jira, GitHub,
    Slack, email), runs reconciliation (surfacing conflicts — review came back,
    CI went red, worker gone), notices new inbound that looks like a task, sweeps
    for staleness (see below), captures a longitudinal log entry of what's
    happened since the last brief, archives done tasks, and presents a
-   prioritized portfolio view. Answers "where does all my work stand right now?"
+   prioritized view of all tasks. Answers "where does all my work stand right now?"
    — and produces the same useful briefing whether the coordinator has been
    alive for ten minutes or just booted fresh. v1 keeps this as the *only*
    command deliberately: a lighter inbound-only variant is an obvious later
@@ -154,7 +154,7 @@ This means:
    gentler, separate nudge ("waiting 14 days — ping them?"), not an archival
    candidate.
 
-3. **Next-action decision (`/next`).** Given current ledger state, suggest
+3. **Next-action decision (`/next`).** Given current task database state, suggest
    what to start or resume next. Consider blockers, external readiness, and my
    own priorities. Always *suggests*, never auto-dispatches — picking what I
    work on and spawning it without me in the loop would cross from "holds my
@@ -164,7 +164,7 @@ This means:
 
 4. **Worker dispatch (long-running tasks).** Launch a Claude Code worker for a
    task in its own terminal window. Dispatch makes three decisions from the
-   task's ledger record:
+   task's task database record:
 
    - **Directory** — spawns in the task's working directory (from its
      working-context refs), so the worker lands where the code is.
@@ -178,10 +178,10 @@ This means:
      starting cold; for a reopened session, little or no seeding is needed since
      the transcript carries it.
 
-   The coordinator records the worker's session ID in the ledger at spawn time
+   The coordinator records the worker's session ID in the task database at spawn time
    (by pre-allocating it and passing `--session-id`), so the worker is tracked —
    and reopenable — from the instant it launches. The worker itself writes
-   status events ("blocked," "awaiting review," "done") to the ledger as it hits
+   status events ("blocked," "awaiting review," "done") to the task database as it hits
    them; see design notes for why identity is coordinator-assigned but status is
    worker-reported.
 
@@ -205,11 +205,11 @@ This means:
    is the one thing the architecture exists to prevent (the coordinator must stay
    light and bootable-fresh). Preferring worker protects that context. For the
    tasks that are inlined, the coordinator acts directly via its own skills
-   (e.g., `/slack-message`), recording the action and outcome in the ledger; if
+   (e.g., `/slack-message`), recording the action and outcome in the task database; if
    an inline task surprises it by growing, it can spin the remainder out into a
    worker rather than absorbing it.
 
-6. **Worker status tracking.** Workers update the ledger as they hit meaningful
+6. **Worker status tracking.** Workers update the task database as they hit meaningful
    events (blocked, awaiting review, sent, done). Coordinator surfaces these in
    the next briefing. When a worker reports "blocked on X," the coordinator just
    records it — no proactive unblocking (chasing a review, pinging a person) on
@@ -219,7 +219,7 @@ This means:
 
    **Liveness detection.** Self-reporting only covers workers healthy enough to
    report; a worker that crashed, was force-killed, or had its terminal closed
-   reports nothing and would otherwise read "in progress" forever — the ledger
+   reports nothing and would otherwise read "in progress" forever — the task database
    lying about exactly the work I've stopped watching. So at briefing time the
    coordinator checks whether each supposedly-alive worker's session is still
    actually running (testing the stored session/process handle, not a label),
@@ -246,7 +246,7 @@ This means:
 ## Success criteria
 
 1. I stop using a mental model or external notes to track what's in flight; the
-   ledger is the truth.
+   task database is the truth.
 2. Morning ramp-up time drops noticeably — I read a briefing instead of
    reconstructing.
 3. Resumption of a paused task feels like continuation, not cold-start.
@@ -260,8 +260,8 @@ This means:
 Deliberately deferred to build time — designed for, but not specified, because
 the real cases are best understood when hit rather than guessed at now:
 
-- **Reconciliation conflict rules.** When external state and the ledger disagree
-  in the overlap (ledger says active worker / Jira says done; ledger says
+- **Reconciliation conflict rules.** When external state and the task database disagree
+  in the overlap (task database says active worker / Jira says done; task database says
   awaiting review / GitHub says approved; CI went red since last touched), the
   rule is "surface, never auto-resolve." The exact set of conflict shapes and
   how each is presented is left for when they show up in practice.

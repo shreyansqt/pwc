@@ -1,12 +1,12 @@
 ---
 name: next
-description: Suggest what PWC task to start or resume next, given the current ledger state. Considers blockers, external readiness, and priority. Always suggests — never dispatches on its own.
+description: Suggest what PWC task to start or resume next, given the current task database state. Considers blockers, external readiness, and priority. Always suggests — never dispatches on its own.
 ---
 
 # /next
 
-Given the current portfolio, suggest what the user should pick up next. This is a
-recommendation, not an action: `/next` never spawns a worker or mutates the ledger.
+Given the current set of tasks, suggest what the user should pick up next. This is a
+recommendation, not an action: `/next` never spawns a worker or mutates the task database.
 Picking what to work on and starting it without the user in the loop would cross
 from "holds my state" into "drives me" — so `/next` proposes, and the user decides
 (and explicitly confirms) before anything is dispatched.
@@ -14,17 +14,17 @@ from "holds my state" into "drives me" — so `/next` proposes, and the user dec
 ## Configuration
 
 - **Scripts directory**: `~/work/pwc/scripts` (`$SCRIPTS`).
-- **Workspace**: the current directory; ledger auto-discovered at `<workspace>/.pwc/ledger.db`.
+- **Workspace**: the current directory; task database auto-discovered at `<workspace>/.pwc/taskdb.db`.
 
 ## Tools
 
-- `python3 $SCRIPTS/ledger.py summary` — the portfolio to choose from.
-- `python3 $SCRIPTS/ledger.py detail --task <id>` — pull detail only for the one or
+- `python3 $SCRIPTS/taskdb.py summary` — the tasks to choose from.
+- `python3 $SCRIPTS/taskdb.py detail --task <id>` — pull detail only for the one or
   two candidates worth weighing closely (blockers, last events).
 
 ## Steps
 
-1. **Load the portfolio** with `ledger.py summary`.
+1. **Load all tasks** with `taskdb.py summary`.
 
 2. **Rank candidates.** Favor, roughly in this order:
    - Tasks flagged for attention — `gone` (a worker needs triage) or `blocked`
@@ -41,11 +41,11 @@ from "holds my state" into "drives me" — so `/next` proposes, and the user dec
 
 4. **Offer to dispatch — then stop.** End by offering to start the suggested task
    (which hands off to the dispatch skill on the user's confirmation). Do not call
-   `spawn.py`, do not modify the ledger, do not start anything yourself. Wait for
+   `spawn.py`, do not modify the task database, do not start anything yourself. Wait for
    an explicit "yes."
 
 ## Notes
 
 - `/next` is read-only. The only thing it produces is a suggestion and an offer.
-- If the portfolio is empty or everything is parked/blocked, say so plainly rather
+- If there are no tasks, or everything is parked/blocked, say so plainly rather
   than inventing a candidate.

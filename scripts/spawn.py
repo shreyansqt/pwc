@@ -5,7 +5,7 @@ Builds a `claude` invocation (fresh `--session-id <uuid>` + seed prompt, or
 `--resume <uuid>`) and runs it in a new tab of the current iTerm2 window, titled
 after the task. Each worker gets its own full-width tab (Cmd-1/2/... to switch);
 the coordinator's tab is untouched. Prints session id, mode, and placement as
-JSON. Does NOT touch the ledger — the dispatch skill calls `ledger.py set-session`
+JSON. Does NOT touch the task DB — the dispatch skill calls `taskdb.py set-session`
 so all DB writes funnel through one path.
 
 Requires iTerm2 running with the Python API enabled

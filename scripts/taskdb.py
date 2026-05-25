@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PWC ledger CLI — the single read/write path to the SQLite ledger.
+"""PWC task database CLI — the single read/write path to the SQLite task DB.
 
 All output is one JSON value on stdout; diagnostics go to stderr; exit 1 on error.
 Writes are single transactions; multi-tier writes (e.g. set-session + dispatched
@@ -7,9 +7,9 @@ event) commit atomically. Workers use only `log-event`; the coordinator owns tas
 mutations.
 
 Usage:
-  ledger.py <subcommand> [flags]   [--workspace PATH]
+  taskdb.py <subcommand> [flags]   [--workspace PATH]
 
-See `ledger.py --help` or each subcommand's flags below.
+See `taskdb.py --help` or each subcommand's flags below.
 """
 
 from __future__ import annotations
@@ -294,7 +294,7 @@ def cmd_set_status_gone(args):
 
 # ── arg parsing ───────────────────────────────────────────────────────────---
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="ledger.py", description=__doc__)
+    p = argparse.ArgumentParser(prog="taskdb.py", description=__doc__)
     p.add_argument("--workspace", help="workspace root (default: discover from cwd)")
     sub = p.add_subparsers(dest="cmd", required=True)
 

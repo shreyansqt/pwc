@@ -1,34 +1,34 @@
 ---
 name: pwc-report
-description: For a PWC worker to report its status back to the coordinator's ledger — blocked, awaiting review, done, or a freeform note. Run this when you hit a meaningful event in the task you were dispatched to work on.
+description: For a PWC worker to report its status back to the coordinator's task database — blocked, awaiting review, done, or a freeform note. Run this when you hit a meaningful event in the task you were dispatched to work on.
 ---
 
 # /pwc-report
 
-A thin reporting channel for a worker to record status to the ledger. As you hit
+A thin reporting channel for a worker to record status to the task database. As you hit
 meaningful events, record them so the coordinator's next `/brief` reflects
-reality — the coordinator reads the ledger, it does not watch your window.
+reality — the coordinator reads the task database, it does not watch your window.
 
-This is a worker's only write to the ledger: an append to the event log. It does
+This is a worker's only write to the task database: an append to the event log. It does
 not change task fields the coordinator owns.
 
 > **Note for spawned workers:** PWC's skills are installed at the *workspace root*,
 > but you run in a sub-repo, so this `/pwc-report` skill is usually **not
 > resolvable from your cwd**. Your dispatch prompt therefore gave you the literal
-> `ledger.py log-event ...` command to run directly — use that. This SKILL.md
+> `taskdb.py log-event ...` command to run directly — use that. This SKILL.md
 > documents the same call for when the skill *is* available (e.g. the coordinator
 > reporting an inline task's outcome from the workspace root).
 
 ## Configuration
 
 - **Scripts directory**: `~/work/pwc/scripts` (`$SCRIPTS`).
-- **Workspace**: your current directory; the ledger is auto-discovered from it.
+- **Workspace**: your current directory; the task database is auto-discovered from it.
 - **Your task id**: given to you in your opening prompt (e.g. `t_0007`). If you
   don't have one, you weren't dispatched by PWC — don't report.
 
 ## Tools
 
-- `python3 $SCRIPTS/ledger.py log-event --task <your-id> --source worker --kind <kind> --detail "<what happened>"`
+- `python3 $SCRIPTS/taskdb.py log-event --task <your-id> --source worker --kind <kind> --detail "<what happened>"`
 
 ## Steps
 
@@ -41,7 +41,7 @@ not change task fields the coordinator owns.
 
 2. **Report it:**
    ```
-   python3 $SCRIPTS/ledger.py log-event --task <your-id> --source worker \
+   python3 $SCRIPTS/taskdb.py log-event --task <your-id> --source worker \
      --kind <blocked|awaiting-review|done|note> --detail "<concise description>"
    ```
 

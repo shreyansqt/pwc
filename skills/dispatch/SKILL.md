@@ -20,15 +20,15 @@ it again, reopening its prior session when one survives.
 
 ## Tools
 
-- `python3 $SCRIPTS/ledger.py detail --task <id>` — the task's fields, refs, and
+- `python3 $SCRIPTS/taskdb.py detail --task <id>` — the task's fields, refs, and
   event timeline; the basis for the cwd, the resume decision, and the seed prompt.
 - `python3 $SCRIPTS/liveness.py --session-ids <uuid>` — whether the task's existing
   session (if any) is currently running.
 - `python3 $SCRIPTS/spawn.py --task <id> --cwd <dir> --session-id <uuid> [--resume] [--prompt -]`
   — open the worker window. Prints `{session_id, cwd, mode, transcript_expected}`.
-- `python3 $SCRIPTS/ledger.py set-session --task <id> --session-id <uuid> --workdir <dir>`
+- `python3 $SCRIPTS/taskdb.py set-session --task <id> --session-id <uuid> --workdir <dir>`
   — record the pre-allocated session id at spawn (atomic with a `dispatched` event).
-- `python3 $SCRIPTS/ledger.py update-task` / `log-event` — for inline outcomes.
+- `python3 $SCRIPTS/taskdb.py update-task` / `log-event` — for inline outcomes.
 
 ## Steps
 
@@ -67,15 +67,15 @@ it again, reopening its prior session when one survives.
    skill.** A worker runs in a sub-repo (e.g. `service-banking`), which creates two
    traps to avoid:
    - `/pwc-report` is *not* resolvable from the worker's cwd (skills install at the
-     workspace root), so seed the literal `ledger.py` command instead.
-   - The ledger lives at the *workspace root* (`<workspace>/.pwc/ledger.db`), but
-     `ledger.py` auto-discovers from cwd — which, from a sub-repo, finds the wrong
+     workspace root), so seed the literal `taskdb.py` command instead.
+   - The task database lives at the *workspace root* (`<workspace>/.pwc/taskdb.db`), but
+     `taskdb.py` auto-discovers from cwd — which, from a sub-repo, finds the wrong
      place. So the command **must pass `--workspace <root>` explicitly.**
 
    Seed the worker with exactly this (substitute the real workspace root and task id):
    ```
    To report status, run this exact command (works from any directory):
-     python3 ~/work/pwc/scripts/ledger.py \
+     python3 ~/work/pwc/scripts/taskdb.py \
        --workspace ~/work/acme \
        log-event --task <THIS-TASK-ID> --source worker \
        --kind <blocked|awaiting-review|done|note> --detail "<what happened>"
@@ -88,7 +88,7 @@ it again, reopening its prior session when one survives.
    via `--prompt -`.
 
 6. **Record it immediately.** Right after spawn, run
-   `ledger.py set-session --task <id> --session-id <uuid> --workdir <dir>`. This
+   `taskdb.py set-session --task <id> --session-id <uuid> --workdir <dir>`. This
    writes the session id and a `dispatched` event so the task is tracked from the
    instant the worker starts — even one that dies on startup is recorded (liveness
    will later mark it `gone`).
@@ -96,7 +96,7 @@ it again, reopening its prior session when one survives.
 ### Inline path
 
 7. **Act directly** via the coordinator's own skills (e.g. `/slack-message`) and
-   record the outcome with `ledger.py log-event --task <id> --kind note --detail
+   record the outcome with `taskdb.py log-event --task <id> --kind note --detail
    "..."` (and `update-task --status done` if it's finished). Do not spawn a window.
 
 8. **Promote if it grows.** If an inline task turns out bigger than expected, stop
@@ -110,5 +110,5 @@ it again, reopening its prior session when one survives.
   step 3 guards against.
 - dispatch does not auto-pick tasks; it acts on a task the user chose (often via
   `/next`). It assumes the user has confirmed.
-- spawn.py does not touch the ledger; this skill owns the `set-session` write, so
+- spawn.py does not touch the task database; this skill owns the `set-session` write, so
   all coordinator-side DB writes go through one path.
