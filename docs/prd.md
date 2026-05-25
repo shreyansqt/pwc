@@ -104,6 +104,14 @@ This means:
    priority/notes. Persists across coordinator sessions; survives the coordinator
    being killed and restarted.
 
+   **Per-task detail** is three things, not a hand-maintained narrative:
+   structured fields (above), a freeform notes section (my private thoughts,
+   half-formed ideas), and a task-scoped view of the append-only events table.
+   That last one *is* the running narrative — every meaningful event is already
+   logged there with a timestamp for the log rollup, so the per-task timeline
+   comes for free as a projection of it rather than something the coordinator
+   has to remember to append to separately.
+
    **Typed reference set.** A task carries not one external reference but a
    small, typed, multi-valued set that accrues over the task's life (a Jira
    ticket becomes a branch becomes a PR). Two kinds:
@@ -144,9 +152,13 @@ This means:
    gentler, separate nudge ("waiting 14 days — ping them?"), not an archival
    candidate.
 
-3. **Next-action decision (`/pick-next`).** Given current ledger state, suggest
+3. **Next-action decision (`/next`).** Given current ledger state, suggest
    what to start or resume next. Consider blockers, external readiness, and my
-   own priorities.
+   own priorities. Always *suggests*, never auto-dispatches — picking what I
+   work on and spawning it without me in the loop would cross from "holds my
+   state" into "drives me," and the cost of a wrong auto-pick (a stray worker on
+   the wrong task to unwind) dwarfs the one keystroke confirmation costs. A
+   trust-it-and-go mode is a plausible later addition, not v1.
 
 4. **Worker dispatch (long-running tasks).** Spawn a Claude Code worker in a
    new terminal window — in the right working directory, with a context-loaded
@@ -168,7 +180,11 @@ This means:
 
 6. **Worker status tracking.** Workers update the ledger as they hit meaningful
    events (blocked, awaiting review, sent, done). Coordinator surfaces these in
-   the next briefing.
+   the next briefing. When a worker reports "blocked on X," the coordinator just
+   records it — no proactive unblocking (chasing a review, pinging a person) on
+   its own; that's the same overreach as auto-dispatch. The blocker still
+   surfaces naturally whenever a later `/brief` re-checks that task's external
+   state.
 
    **Liveness detection.** Self-reporting only covers workers healthy enough to
    report; a worker that crashed, was force-killed, or had its terminal closed
@@ -216,10 +232,17 @@ This means:
 
 ## Open questions
 
-- Should `/pick-next` ever auto-dispatch, or always wait for my confirmation?
-  (Lean: always confirm in v1.)
-- When a worker reports "blocked on X," does the coordinator do anything
-  proactive, or just record it? (Lean: just record in v1.)
-- Should per-task detail records include a running narrative the coordinator
-  appends to as things happen, or just structured fields? (Lean: structured
-  fields plus a freeform notes section.)
+Deliberately deferred to build time — designed for, but not specified, because
+the real cases are best understood when hit rather than guessed at now:
+
+- **Reconciliation conflict rules.** When external state and the ledger disagree
+  in the overlap (ledger says active worker / Jira says done; ledger says
+  awaiting review / GitHub says approved; CI went red since last touched), the
+  rule is "surface, never auto-resolve." The exact set of conflict shapes and
+  how each is presented is left for when they show up in practice.
+- **Inbound matching.** Deciding whether an inbound item is *new* or an *update*
+  to a task already tracked (same Slack thread vs. a new thread mentioning the
+  same ticket). The data model captures the raw identity refs needed to solve
+  this from day one; the matching logic itself is deferred. Getting it wrong
+  silently creates duplicates or swallows new items, so it's surfaced for
+  confirmation rather than resolved automatically.
