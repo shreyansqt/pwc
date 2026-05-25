@@ -1,12 +1,12 @@
 ---
 name: dispatch
-description: Act on a PWC task — either spawn a worker (a Claude Code session in its own iTerm2 window) for substantial work, or handle it inline for trivial work. Also covers resuming a task whose worker has stopped. The default is to spawn a worker.
+description: Act on a PWC task — either spawn a worker (a Claude Code session in its own iTerm2 tab) for substantial work, or handle it inline for trivial work. Also covers resuming a task whose worker has stopped. The default is to spawn a worker.
 ---
 
 # dispatch
 
 Turn a tracked task into action. dispatch decides whether the task warrants its own
-**worker** (a Claude Code session in a new iTerm2 window) or can be handled
+**worker** (a Claude Code session in a new iTerm2 tab) or can be handled
 **inline** by the coordinator, then does it. It also covers **resumption** — there
 is no separate resume command; picking a stopped task back up is just dispatching
 it again, reopening its prior session when one survives.
@@ -25,7 +25,7 @@ it again, reopening its prior session when one survives.
 - `python3 $SCRIPTS/liveness.py --session-ids <uuid>` — whether the task's existing
   session (if any) is currently running.
 - `python3 $SCRIPTS/spawn.py --task <id> --cwd <dir> --session-id <uuid> [--resume] [--prompt -]`
-  — open the worker window. Prints `{session_id, cwd, mode, transcript_expected}`.
+  — open the worker tab. Prints `{session_id, cwd, mode, transcript_expected}`.
 - `python3 $SCRIPTS/taskdb.py set-session --task <id> --session-id <uuid> --workdir <dir>`
   — record the pre-allocated session id at spawn (atomic with a `dispatched` event).
 - `python3 $SCRIPTS/taskdb.py update-task` / `log-event` — for inline outcomes.
@@ -37,7 +37,7 @@ it again, reopening its prior session when one survives.
 1. **Default to a worker.** Spawn one for anything substantial — real coding,
    multi-step investigation, sustained back-and-forth. Reserve **inline** for the
    genuinely trivial that can't grow legs (a one-line Slack reply, a status check).
-   The bias is deliberate: a needless spawn just wastes a window (harmless), but
+   The bias is deliberate: a needless spawn just wastes a tab (harmless), but
    inlining real work pollutes the coordinator's own context (the thing the whole
    design avoids). When unsure, spawn.
 
@@ -51,7 +51,7 @@ it again, reopening its prior session when one survives.
 3. **Decide fresh vs. resume.** If the task has a `session_id`, check it with
    `liveness.py`:
    - **Alive** → the worker already exists. Don't spawn a duplicate; just point the
-     user at its window. Stop.
+     user at its tab. Stop.
    - **Dead/gone, and its transcript still exists** → resume: call `spawn.py` with
      that same `--session-id` and `--resume`. The worker comes back with its full
      prior conversation.
@@ -97,7 +97,7 @@ it again, reopening its prior session when one survives.
 
 7. **Act directly** via the coordinator's own skills (e.g. `/slack-message`) and
    record the outcome with `taskdb.py log-event --task <id> --kind note --detail
-   "..."` (and `update-task --status done` if it's finished). Do not spawn a window.
+   "..."` (and `update-task --status done` if it's finished). Do not spawn a tab.
 
 8. **Promote if it grows.** If an inline task turns out bigger than expected, stop
    inlining and switch to the worker path (steps 2–6), seeding the new worker with

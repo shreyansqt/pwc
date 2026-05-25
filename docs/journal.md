@@ -6,11 +6,12 @@ I'd do differently. Newest entries at the top.
 ## 2026-05-25 (later) — first live worker spawn; the hard part isn't mechanical
 
 Set up iTerm2 (installed it, `pip install iterm2` into the MacPorts python3 that
-runs the scripts, enabled the Python API) and ran the first real spawns. Changed
-the layout from new windows to **split panes** per preference: first worker splits
-the coordinator's window horizontally, later workers tile vertically in that
-bottom region; layout state in `.pwc/iterm_layout.json`, self-healing. Verified
-live — splits land correctly.
+runs the scripts, enabled the Python API) and ran the first real spawns. Tried
+**split panes** first (first worker splits the coordinator's window horizontally,
+later workers tile vertically) — verified live, but it got cramped fast, so
+**switched to tabs**: each worker is a full-width tab, titled after the task, the
+coordinator's tab untouched. Tabs also dropped all the pane-layout state tracking
+(and the stray-`.pwc/` bug that came with it).
 
 Three path bugs surfaced only by running it for real, all now fixed:
 1. A spawned worker can't resolve `/pwc-report` — skills install at the workspace

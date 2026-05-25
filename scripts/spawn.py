@@ -40,7 +40,7 @@ def transcript_path(cwd: str, session_id: str) -> Path:
 
 
 def build_claude_command(*, session_id, resume, cwd, seed_prompt, name):
-    """Return (mode, shell_command_string) to run in the new window."""
+    """Return (mode, shell_command_string) to run in the new tab."""
     args = ["claude"]
     mode = "fresh"
     if resume and transcript_path(cwd, session_id).exists():
@@ -110,7 +110,7 @@ def main(argv=None):
     p.add_argument("--prompt", help="seed prompt text, or '-' to read from stdin")
     p.add_argument("--name")
     p.add_argument("--dry-run", action="store_true",
-                   help="print the command without opening a window (for testing)")
+                   help="print the command without opening a tab (for testing)")
     args = p.parse_args(argv)
 
     cwd = str(Path(args.cwd).expanduser())
