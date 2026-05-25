@@ -36,9 +36,10 @@ Me. One person, dogfooded daily.
 
 **Task.** The unit of work the coordinator tracks. Examples: implementing a Jira
 ticket, reviewing a specific PR, responding to a Slack thread, processing
-today's email, drafting a design doc. A task may have an *external reference*
-(Jira key, PR URL, Slack permalink) or be purely local. Each task has a stable
-internal ID the coordinator assigns.
+today's email, drafting a design doc. A task may carry one or more *external
+references* (Jira key, PR, Slack thread — see the typed reference set in
+capability 1) or be purely local. Each task has a stable internal ID the
+coordinator assigns.
 
 **Worker.** A Claude Code session spawned in a separate terminal window to act
 on a specific long-running task. Bound to one task at a time. Workers are
@@ -54,9 +55,12 @@ when it dispatches.
 
 The coordinator must be **stateless in its conversation context, stateful in
 its external memory.** I should be able to kill the coordinator session and
-start a fresh one at any moment with zero context loss — no `/resume`, no
-scrolling, no reconstruction. Every meaningful piece of state lives outside the
-conversation, in a durable local store the coordinator reads selectively.
+start a fresh one at any moment with zero context loss — no resuming the
+coordinator's prior session, no scrolling, no reconstruction. Every meaningful
+piece of state lives outside the conversation, in a durable local store the
+coordinator reads selectively. (Workers are different — dispatch may reopen a
+worker's prior session for continuity; it's only the *coordinator* that never
+needs resuming.)
 
 The store is a **local SQLite database**. All ledger access goes through the
 coordinator — it is the only reader and writer; there is no expectation of
@@ -68,9 +72,6 @@ holds by construction rather than by a hand-rolled atomic-write scheme.
 
 This means:
 
-- **No reliance on the coordinator's own conversation history** for anything
-  important. Anything the coordinator needs to "remember" tomorrow must be
-  written to durable memory today.
 - **No reliance on the coordinator's own conversation history** for anything
   important. Anything the coordinator needs to "remember" tomorrow must be
   written to durable memory today.
@@ -144,10 +145,11 @@ This means:
    **Staleness sweep.** End-of-day-style grooming folded in here: the brief
    flags tasks that are nominally active but untouched beyond a configurable
    threshold (default ~7–10 days, no meaningful event) *and* not explicitly
-   parked, and asks me to keep or drop each. Like everything else, staleness is a signal,
-   not a verdict — the coordinator never auto-archives on age (silently deleting
-   work I've stopped watching is the exact failure liveness detection exists to
-   prevent); it surfaces, I adjudicate. A task that *is* explicitly parked
+   parked, and asks me to keep or drop each. Like everything else, staleness is
+   a signal, not a verdict — the coordinator never auto-archives on age
+   (silently deleting work I've stopped watching is the exact failure liveness
+   detection exists to prevent); it surfaces, I adjudicate. A task that *is*
+   explicitly parked
    (blocked, awaiting review) is exempt from the sweep — long parking is a
    gentler, separate nudge ("waiting 14 days — ping them?"), not an archival
    candidate.
@@ -228,7 +230,7 @@ This means:
 
 - "Needs attention" auto-detection from worker *output* (workers self-report
   meaningful events instead; note this is distinct from liveness detection,
-  which the coordinator does do — see capability 7).
+  which the coordinator does do — see capability 6).
 - Dynamic parallelism caps.
 - A graphical UI — the coordinator lives in a terminal window.
 - Cross-machine sync.
