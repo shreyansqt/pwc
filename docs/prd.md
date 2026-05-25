@@ -56,38 +56,66 @@ The coordinator must be **stateless in its conversation context, stateful in
 its external memory.** I should be able to kill the coordinator session and
 start a fresh one at any moment with zero context loss — no `/resume`, no
 scrolling, no reconstruction. Every meaningful piece of state lives outside the
-conversation, on disk, in formats designed to be loaded selectively.
+conversation, in a durable local store the coordinator reads selectively.
+
+The store is a **local SQLite database**. All ledger access goes through the
+coordinator — it is the only reader and writer; there is no expectation of
+hand-editing the store directly. SQLite is chosen over plain files for one
+decisive reason: state changes that span the two memory tiers (e.g. spawning a
+worker updates both the task's detail and its summary line) commit as a single
+transaction, so the "kill the coordinator anytime with zero loss" guarantee
+holds by construction rather than by a hand-rolled atomic-write scheme.
 
 This means:
 
 - **No reliance on the coordinator's own conversation history** for anything
   important. Anything the coordinator needs to "remember" tomorrow must be
   written to durable memory today.
-- **Two-tier memory.** A small **index** the coordinator loads at the start of
-  every session (lightweight: list of active tasks with one-line status each),
-  and a larger **store** of per-task detail it reads on demand only when working
-  on that task.
-- **Memory is the source of truth, not the conversation.** If the index says a
-  task is blocked on review and the conversation thinks otherwise, the index wins.
-- **Coordinator boot routine.** On startup, the coordinator reads the index and
-  a small "where I left off" pointer (last activity timestamp, anything flagged
-  for follow-up). That's its entire context-restoration step. Fast,
+- **No reliance on the coordinator's own conversation history** for anything
+  important. Anything the coordinator needs to "remember" tomorrow must be
+  written to durable memory today.
+- **Two-tier access, one store.** The two tiers are not two stores but two
+  query shapes against the same database: a lightweight **summary** read at the
+  start of every session (one line of status per active task), and **per-task
+  detail** read on demand only when working on a given task. They cannot drift
+  from each other — they are projections of the same rows.
+- **Memory is the source of truth, not the conversation.** If the store says a
+  task is blocked on review and the conversation thinks otherwise, the store wins.
+- **Coordinator boot routine.** On startup, the coordinator reads the summary
+  and a small "where I left off" pointer (last activity timestamp, anything
+  flagged for follow-up). That's its entire context-restoration step. Fast,
   deterministic, identical every time.
-- **Writes are immediate and atomic.** Any state change — task created, status
-  updated, worker spawned, task done — is persisted before the coordinator moves
-  on. No "I'll save at end of session" semantics.
-
-The ledger is this memory, split into the two tiers: an index file the
-coordinator always reads, and per-task detail files it reads only as needed.
+- **Writes are immediate and transactional.** Any state change — task created,
+  status updated, worker spawned, task done — commits before the coordinator
+  moves on, and multi-tier changes commit atomically. No "I'll save at end of
+  session" semantics.
+- **History lives in the schema, not in git.** A SQLite file doesn't diff, so
+  the longitudinal record (what `/eod` and the journal draw on) comes from an
+  append-only events table inside the database, not from version control.
 
 ## Core capabilities
 
-1. **Durable work ledger.** Single source of truth for every active task, split
-   into an always-loaded index and on-demand per-task detail. Entries include:
-   internal task ID, type, external reference if any, short description, status,
-   worker session if spawned, last meaningful event, last touched, priority/notes.
-   Persists across coordinator sessions; survives the coordinator being killed
-   and restarted.
+1. **Durable work ledger.** A local SQLite database; single source of truth for
+   every active task. Read in two shapes — an always-loaded summary (one status
+   line per task) and on-demand per-task detail. A task record includes:
+   internal task ID, type, a typed reference set (see below), short description,
+   status, worker session if spawned, last meaningful event, last touched,
+   priority/notes. Persists across coordinator sessions; survives the coordinator
+   being killed and restarted.
+
+   **Typed reference set.** A task carries not one external reference but a
+   small, typed, multi-valued set that accrues over the task's life (a Jira
+   ticket becomes a branch becomes a PR). Two kinds:
+
+   - **Identity refs** — the stable handles used to answer "is this inbound
+     thing the same task?": Jira key, Slack channel ID + message timestamp, PR
+     URL/number. Store the raw, stable identifier (Slack `channel_id` + `ts`,
+     not a channel name or a derived link) — human labels and permalinks can be
+     reconstructed from IDs, but not matched against reliably.
+   - **Working-context refs** — what a worker needs to act and what resumption
+     needs to relocate: local working directory, branch name, clickable PR
+     link. These are machine-specific and (unlike identity refs) would not
+     survive a future multi-machine world.
 
 2. **Cold-start briefing (`/standup`).** Pulls latest state from connected
    sources (Jira, GitHub, Slack, email), reconciles with the ledger, surfaces
@@ -118,6 +146,19 @@ coordinator always reads, and per-task detail files it reads only as needed.
    events (blocked, awaiting review, sent, done). Coordinator surfaces these in
    the next briefing.
 
+   **Liveness detection.** Self-reporting only covers workers healthy enough to
+   report; a worker that crashed, was force-killed, or had its terminal closed
+   reports nothing and would otherwise read "in progress" forever — the ledger
+   lying about exactly the work I've stopped watching. So at briefing time the
+   coordinator checks whether each supposedly-alive worker's session is still
+   actually running (testing the stored session/process handle, not a label),
+   and for any that aren't, sets status to **"gone — needs triage."** This is
+   detection of death, not of outcome: a gone worker may have left finished,
+   unpushed work behind, so the coordinator never infers done/failed — it
+   surfaces the last known state and I adjudicate (resume, mark done, drop).
+   This stays within the on-demand model: liveness is evaluated at `/standup`,
+   not by a background daemon.
+
 8. **Resumption by task (`/resume <task>`).** Re-attach to an existing worker
    by task — referenced by external ID, internal ID, or fuzzy description.
    Before re-attaching, show me a card with current status and what's changed
@@ -130,7 +171,9 @@ coordinator always reads, and per-task detail files it reads only as needed.
 
 ## Out of scope for v1
 
-- "Needs attention" auto-detection from worker output (workers self-report instead).
+- "Needs attention" auto-detection from worker *output* (workers self-report
+  meaningful events instead; note this is distinct from liveness detection,
+  which the coordinator does do — see capability 7).
 - Dynamic parallelism caps.
 - A graphical UI — the coordinator lives in a terminal window.
 - Cross-machine sync.

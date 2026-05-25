@@ -95,6 +95,37 @@ the AI/orchestration space, with at least one direct competitor in the parallel
 Claude Code Mac app niche. Better to dogfood under "PWC" for a few weeks and
 name from a position of knowing what the thing actually is.
 
+## Why the store is SQLite, not plain files (supersedes the file-based assumption above)
+
+The two entries above ("stateless-in-storage" and "two-tier memory") were
+written assuming plain files on disk, and leaned on hand-inspectability and
+hand-editability as benefits. That assumption is now reversed: the store is a
+local SQLite database. Per this doc's append-only rule, the earlier entries
+stand as written — this entry records what changed and why.
+
+What flipped it: **all ledger access goes through the coordinator.** It is the
+only reader and writer; there is no plan to hand-edit the store. Once that's
+true, the two strongest arguments for files collapse — "I can `cat` and edit it
+by hand" is moot if I never do, and "an LLM reads files natively" is moot
+because the agent issues a tool call to read the store either way. What's left
+is durability, and there SQLite wins decisively: a state change that spans both
+memory tiers (spawning a worker updates a task's detail *and* its summary line)
+commits as one transaction. The "kill the coordinator anytime, zero loss"
+promise then holds by construction, instead of by a hand-rolled
+temp-file-then-rename scheme plus a derived-index reconciliation to paper over
+torn multi-file writes. The two tiers stop being two file types and become two
+query shapes against one store, which also means they can never drift.
+
+Cost paid: the ledger is no longer a pile of git-diffable text, so the
+longitudinal record can't come from version control. It moves *into* the
+schema as an append-only events table — which is arguably where a build/work
+log belonged anyway.
+
+Note this also dates the "ledger is plain files" enabler cited under GUI /
+dashboard below; a TUI or web view now reads the SQLite store rather than flat
+files. The point stands — the data is still external to the conversation and
+trivially queryable — only the substrate changed.
+
 ## Forward-compatibility considerations (not v1 work)
 
 Things we're not building, but are designing in a way that doesn't preclude:
