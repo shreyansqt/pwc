@@ -169,8 +169,8 @@ This means:
    - **Directory** — spawns in the task's working directory (from its
      working-context refs), so the worker lands where the code is.
    - **New vs. existing session** — if the task has a prior Claude Code session
-     whose transcript still exists on disk (the session ID was captured when its
-     worker registered), dispatch reopens *that* session (`claude --resume`) for
+     whose transcript still exists on disk (the coordinator recorded its session
+     ID at spawn time), dispatch reopens *that* session (`claude --resume`) for
      the richest continuity — the worker comes back with its own full
      conversation intact. Otherwise it starts a fresh session.
    - **Initial prompt** — for a fresh session, the prompt is seeded from the
@@ -178,8 +178,12 @@ This means:
      starting cold; for a reopened session, little or no seeding is needed since
      the transcript carries it.
 
-   The worker registers itself in the ledger on startup so the coordinator knows
-   it's alive (and so its session ID is on file for a future reopen).
+   The coordinator records the worker's session ID in the ledger at spawn time
+   (by pre-allocating it and passing `--session-id`), so the worker is tracked —
+   and reopenable — from the instant it launches. The worker itself writes
+   status events ("blocked," "awaiting review," "done") to the ledger as it hits
+   them; see design notes for why identity is coordinator-assigned but status is
+   worker-reported.
 
    **Dispatch covers resumption — there is no separate resume command.** Picking
    a task back up (a worker that's "gone — needs triage," or any parked task) is

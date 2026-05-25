@@ -27,29 +27,53 @@ read only when actually working on that task.
 The index is what makes the cold-start briefing fast and consistent. The detail
 files are what make resumption rich.
 
-## Why workers self-register via a skill
+## How a worker's session ID is captured (and why status stays worker-reported)
 
 Earlier alternative considered: spawn a worker, then guess its session ID by
 inspecting `~/.claude/projects/<slug>/` filesystem timestamps. Works, but has
 race conditions (two workers spawned in the same second) and depends on
 implementation details of Claude Code's session storage.
 
-Better: each worker calls `/register-worker <task-id>` on startup, writing its
-own session ID and task association to the ledger. Inverts the data flow from
-"coordinator guesses" to "worker declares." Same mechanism extends to status
-updates ("blocked," "awaiting review," "done") — workers report; coordinator
-reads.
+Two ways to get the session ID without guessing it:
 
-If Claude Code's `--session-id` flag works in our version, an even cleaner
-variant: pre-allocate the session ID before spawning, pass it in. No
-registration step needed at all. To investigate during build.
+- **Self-registration (B):** the worker calls `/register-worker <task-id>` on
+  startup, writing its own session ID and task association to the ledger.
+  Inverts the data flow from "coordinator guesses" to "worker declares."
+- **Pre-allocation (C):** the coordinator generates the session ID, passes it on
+  the spawn command (`--session-id <uuid>`), and records it in the ledger as it
+  spawns. The ID is known before the worker process even exists.
 
-The captured session ID earns its keep twice over, which raises the stakes on
-getting this right: it's what liveness detection tests to tell a live worker
-from a dead one, *and* it's what lets dispatch reopen a task's prior session
-(`claude --resume`) instead of starting cold. Pre-allocation is the more
-attractive option for the second use — knowing the ID before spawn means
-dispatch can decide new-vs-reopen without a round-trip through registration.
+**Decision: C is the plan, B is the fallback.** C wins on three counts, all
+sharpened by decisions made after this entry was first written:
+
+1. **Reopen needs the ID up front.** Dispatch decides new-vs-reopen from the
+   session ID on file. C provides it by construction at spawn time; B only
+   provides it after a boot-time callback, leaving a window where the coordinator
+   has spawned something it can't yet identify.
+2. **No startup hole.** Under B, a worker that crashes during startup before
+   `/register-worker` fires is an orphan the coordinator never recorded — a gap
+   in the exact liveness/tracking guarantee this mechanism exists to provide.
+   Under C the row is written at spawn, so even an instantly-dead worker is
+   already in the ledger as "spawned, then gone."
+3. **Fewer moving parts.** No registration skill, no boot handshake, no race
+   between registration and the coordinator's next read.
+
+C rests on one empirical unknown — does `--session-id` actually work and
+reliably set the session in the installed Claude Code version? That's a single
+narrow probe at build time, not an open design question; if the flag proves
+unreliable, fall back to B.
+
+**Status reporting is separate and survives either way.** Identity (which
+session is which task) is what C absorbs. Ongoing worker reports throughout a
+task's life — "blocked," "awaiting review," "done" — are a distinct concern;
+workers write those events to the ledger regardless of how identity was
+established. So the worker-side skill shrinks from register-and-report to just
+self-*reporting*; C handles the registration half.
+
+Either way the captured session ID earns its keep twice over, which is why
+getting it right matters: it's what liveness detection tests to tell a live
+worker from a dead one, *and* it's what lets dispatch reopen a task's prior
+session (`claude --resume`) instead of starting cold.
 
 ## Why short-lived tasks are inline rather than spawned workers
 
