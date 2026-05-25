@@ -90,8 +90,9 @@ This means:
   moves on, and multi-tier changes commit atomically. No "I'll save at end of
   session" semantics.
 - **History lives in the schema, not in git.** A SQLite file doesn't diff, so
-  the longitudinal record (what `/eod` and the journal draw on) comes from an
-  append-only events table inside the database, not from version control.
+  the longitudinal record (what `/brief`'s log rollup and the journal draw on)
+  comes from an append-only events table inside the database, not from version
+  control.
 
 ## Core capabilities
 
@@ -117,39 +118,42 @@ This means:
      link. These are machine-specific and (unlike identity refs) would not
      survive a future multi-machine world.
 
-2. **Cold-start briefing (`/standup`).** The whole-portfolio operation. Walks
-   every task already in the ledger, re-checks external state for each against
-   its connected source (Jira, GitHub, Slack, email), runs reconciliation
-   (surfacing conflicts — review came back, CI went red, worker gone), *and*
-   notices new inbound that looks like a task — then presents a prioritized
-   portfolio view. Complete and comparatively expensive: N source round-trips
-   plus a reconciliation pass. Designed to be the *first thing* I run after
-   starting the coordinator, run once or twice a day. Answers "where does all my
-   work stand right now?" — and produces the same useful briefing whether the
-   coordinator has been alive for ten minutes or just booted fresh.
+2. **Briefing (`/brief`).** The single interactive surface — run it anytime
+   (morning to orient, midday to check inbound, close to roll up), it always
+   does the same whole-portfolio operation. It walks every task in the ledger,
+   re-checks external state for each against its connected source (Jira, GitHub,
+   Slack, email), runs reconciliation (surfacing conflicts — review came back,
+   CI went red, worker gone), notices new inbound that looks like a task, sweeps
+   for staleness (see below), captures a longitudinal log entry of what's
+   happened since the last brief, archives done tasks, and presents a
+   prioritized portfolio view. Answers "where does all my work stand right now?"
+   — and produces the same useful briefing whether the coordinator has been
+   alive for ten minutes or just booted fresh. v1 keeps this as the *only*
+   command deliberately: a lighter inbound-only variant is an obvious later
+   split if running the full reconcile several times a day turns out too heavy,
+   but that friction should be felt before it's optimized away.
 
-3. **Inbound surface (`/whats-new`).** The inbound-only operation, and the
-   distinction from `/standup` is *scope, not intensity*: `/whats-new`
-   deliberately does **not** re-reconcile the existing portfolio — it looks only
-   at the inbound edge (what's landed since I last looked) and asks whether to
-   promote any of it into tasks. That refusal is the feature: it's the cheap
-   check I fire several times a day between focused blocks, and re-litigating my
-   whole portfolio every time would make it too heavy to keep using. Answers
-   "did anything new come in?" and nothing else. When I promote an item, the
-   coordinator reconciles *that item only* (e.g. checks a new PR's CI before
-   registering it) so I have enough context for the inline-vs-worker call —
-   never fanning out to the rest of the portfolio.
+   **Staleness sweep.** End-of-day-style grooming folded in here: the brief
+   flags tasks that are nominally active but untouched beyond a configurable
+   threshold (default ~7–10 days, no meaningful event) *and* not explicitly
+   parked, and asks me to keep or drop each. Like everything else, staleness is a signal,
+   not a verdict — the coordinator never auto-archives on age (silently deleting
+   work I've stopped watching is the exact failure liveness detection exists to
+   prevent); it surfaces, I adjudicate. A task that *is* explicitly parked
+   (blocked, awaiting review) is exempt from the sweep — long parking is a
+   gentler, separate nudge ("waiting 14 days — ping them?"), not an archival
+   candidate.
 
-4. **Next-action decision (`/pick-next`).** Given current ledger state, suggest
+3. **Next-action decision (`/pick-next`).** Given current ledger state, suggest
    what to start or resume next. Consider blockers, external readiness, and my
    own priorities.
 
-5. **Worker dispatch (long-running tasks).** Spawn a Claude Code worker in a
+4. **Worker dispatch (long-running tasks).** Spawn a Claude Code worker in a
    new terminal window — in the right working directory, with a context-loaded
    initial prompt. Worker registers itself in the ledger so the coordinator
    knows it's alive.
 
-6. **Inline handling (short-lived tasks).** The coordinator decides inline vs.
+5. **Inline handling (short-lived tasks).** The coordinator decides inline vs.
    worker at dispatch, and **the default is worker** — inline is reserved for the
    genuinely trivial that can't grow legs (a status check, a one-token reply).
    The bias is deliberate: the failure cost is asymmetric. Worker-when-inline-
@@ -162,7 +166,7 @@ This means:
    an inline task surprises it by growing, it can spin the remainder out into a
    worker rather than absorbing it.
 
-7. **Worker status tracking.** Workers update the ledger as they hit meaningful
+6. **Worker status tracking.** Workers update the ledger as they hit meaningful
    events (blocked, awaiting review, sent, done). Coordinator surfaces these in
    the next briefing.
 
@@ -176,18 +180,14 @@ This means:
    detection of death, not of outcome: a gone worker may have left finished,
    unpushed work behind, so the coordinator never infers done/failed — it
    surfaces the last known state and I adjudicate (resume, mark done, drop).
-   This stays within the on-demand model: liveness is evaluated at `/standup`,
+   This stays within the on-demand model: liveness is evaluated at `/brief`,
    not by a background daemon.
 
-8. **Resumption by task (`/resume <task>`).** Re-attach to an existing worker
+7. **Resumption by task (`/resume <task>`).** Re-attach to an existing worker
    by task — referenced by external ID, internal ID, or fuzzy description.
    Before re-attaching, show me a card with current status and what's changed
    externally since I last touched it. This is *worker* resumption, distinct
    from the coordinator itself, which never needs explicit resumption.
-
-9. **End-of-day rollup (`/eod`).** Walk today's ledger activity, produce a
-   longitudinal log entry. Archive done tasks. Updates the durable memory so
-   tomorrow's cold-start briefing reflects today's work.
 
 ## Out of scope for v1
 
@@ -198,7 +198,7 @@ This means:
 - A graphical UI — the coordinator lives in a terminal window.
 - Cross-machine sync.
 - Auto-promoting inbound items into tasks without my confirmation.
-- Background polling — sources are checked on-demand via `/standup` and `/whats-new`.
+- Background polling — sources are checked on-demand via `/brief`.
 - Multi-user / coworker-to-coworker coordination (deliberately deferred; see
   design notes for forward-compatibility hygiene).
 
