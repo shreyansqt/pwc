@@ -30,7 +30,9 @@ of the way.
 - `python3 $SCRIPTS/worker_status.py --session-ids <uuid>` — whether the task's existing
   session (if any) is currently running.
 - `python3 $SCRIPTS/spawn.py --task <id> --cwd <dir> --session-id <uuid> [--resume] [--prompt -]`
-  — open the worker tab. Prints `{session_id, cwd, mode, transcript_expected}`.
+  — open the worker tab and type the seed into its input box (without submitting).
+  Prints `{session_id, cwd, mode, transcript_expected, seed}` where `seed` is
+  `in-box` / `skipped` / `boot-timeout`.
 - `python3 $SCRIPTS/taskdb.py set-session --task <id> --session-id <uuid> --workdir <dir>`
   — record the pre-allocated session id at spawn (atomic with a `dispatched` event).
 - `python3 $SCRIPTS/taskdb.py update-task` / `log-event` — for inline outcomes.
@@ -95,11 +97,24 @@ of the way.
    `spawn.py` (so the id is known before the process exists). Pipe the seed prompt
    via `--prompt -`.
 
-6. **Record it immediately.** Right after spawn, run
-   `taskdb.py set-session --task <id> --session-id <uuid> --workdir <dir>`. This
-   writes the session id and a `dispatched` event so the task is tracked from the
-   instant the worker starts — even one that dies on startup is recorded (the worker-status check
-   will later mark it `gone`).
+   **The seed is placed in the worker's input box, NOT auto-submitted.** `spawn.py`
+   types the briefing into the new session's prompt box and stops — it does not press
+   Enter. This is deliberate: auto-submitting raced claude's startup and the
+   keystrokes were silently lost, and it gave the user no chance to read the briefing
+   first. The spawn result reports the outcome in `seed`: `"in-box"` (typed and
+   waiting), `"skipped"` (no seed), or `"boot-timeout"` (the TUI was slow to draw;
+   the seed was typed but may not have landed — tell the user to check).
+
+6. **Record it, then tell the user to press Enter.** Right after spawn, run
+   `taskdb.py set-session --task <id> --session-id <uuid> --workdir <dir>` (writes the
+   session id and a `dispatched` event, so the task is tracked from the instant the
+   worker starts — even one that dies on startup is recorded; the worker-status check
+   will later mark it `gone`). Then, in your reply to the user, **explicitly tell them
+   the seed briefing is sitting in the new tab's input box and they just need to
+   review it and press Enter to start the worker.** Do not claim the worker is already
+   running — it isn't until the user submits. If `seed` came back `"boot-timeout"`,
+   warn them the briefing may not have landed and to paste it themselves if the box is
+   empty (the exact text is what you piped in).
 
 ### Inline path
 

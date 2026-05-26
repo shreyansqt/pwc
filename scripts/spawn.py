@@ -62,8 +62,19 @@ def spawn(*, cwd, command, seed_prompt=None, title=None):
 
     Each worker gets its own full-width tab (switchable with Cmd-1/2/...), leaving
     the coordinator's tab untouched. `command` launches claude interactively; if a
-    `seed_prompt` is given, it's typed into the session after it starts (not baked
-    into the launch command), keeping claude interactive and dodging shell quoting.
+    `seed_prompt` is given, it's typed into the session's input box after claude
+    boots — but deliberately *not* submitted. The seed sits in the box for the user
+    to read and send with Enter. This is intentional: auto-submitting was racy (the
+    keystrokes raced claude's startup and were silently lost) and gave the user no
+    chance to glance at the briefing first. Leaving it in the box is both reliable
+    and reviewable.
+
+    Readiness is detected by polling the rendered screen for claude's input box
+    rather than a fixed sleep, so we type only after the box can accept input.
+    `placement["seed"]` reports what happened: "in-box" (typed, awaiting the user's
+    Enter), "skipped" (no seed), or "boot-timeout" (the TUI never drew within the
+    timeout; the seed was typed anyway but may not have landed — surfaced so the
+    caller can tell the user to verify).
     """
     try:
         import iterm2  # lazy: non-spawn use of this module shouldn't need it
@@ -72,8 +83,36 @@ def spawn(*, cwd, command, seed_prompt=None, title=None):
 
     placement = {}
 
-    async def _main(connection):
+    async def _await_ready(session, timeout=30.0, interval=0.5):
+        """Wait until claude's TUI has drawn its input box and can accept text.
+
+        A fresh interactive session writes no transcript until the first message is
+        submitted, so the transcript file is NOT a usable readiness signal here.
+        Instead poll the rendered screen for claude's input prompt (the ">" box and
+        its hint line), which appears once the TUI is up. Falls back to returning
+        True at timeout so we still type the seed into the box (it just sits there
+        either way, since we never auto-submit).
+        """
         import asyncio
+        waited = 0.0
+        while waited < timeout:
+            try:
+                contents = await session.async_get_screen_contents()
+                text = "\n".join(
+                    contents.line(i).string
+                    for i in range(contents.number_of_lines)
+                )
+            except Exception:  # noqa: BLE001 — screen read is best-effort
+                text = ""
+            # claude's prompt box draws a ">" and a shortcut hint once interactive.
+            if "│ >" in text or "for shortcuts" in text or "Bypassing" in text:
+                await asyncio.sleep(0.3)
+                return True
+            await asyncio.sleep(interval)
+            waited += interval
+        return False
+
+    async def _main(connection):
         app = await iterm2.async_get_app(connection)
         window = app.current_terminal_window
         if window is None:
@@ -100,11 +139,15 @@ def spawn(*, cwd, command, seed_prompt=None, title=None):
         # Launch claude in the new shell.
         await session.async_send_text(command + "\r")
 
-        if seed_prompt:
-            # Wait for claude to boot, then type the briefing and submit it.
-            await asyncio.sleep(5)
-            await session.async_send_text(seed_prompt)
-            await session.async_send_text("\r")
+        if not seed_prompt:
+            placement["seed"] = "skipped"
+            return
+
+        # Wait for claude to be ready, then type the briefing into the input box —
+        # WITHOUT a trailing "\r". The user reviews it and presses Enter to send.
+        ready = await _await_ready(session)
+        await session.async_send_text(seed_prompt)
+        placement["seed"] = "in-box" if ready else "boot-timeout"
 
     try:
         iterm2.run_until_complete(_main)
