@@ -91,7 +91,7 @@ This means:
   moves on, and multi-tier changes commit atomically. No "I'll save at end of
   session" semantics.
 - **History lives in the schema, not in git.** A SQLite file doesn't diff, so
-  the longitudinal record (what `/brief`'s recap and the journal draw on)
+  the longitudinal record (what `/show-work`'s recap and the journal draw on)
   comes from an append-only events table inside the database, not from version
   control.
 
@@ -127,7 +127,7 @@ This means:
      link. These are machine-specific and (unlike identity refs) would not
      survive a future multi-machine world.
 
-2. **Briefing (`/brief`).** The single interactive surface — run it anytime
+2. **Briefing (`/show-work`).** The single interactive surface — run it anytime
    (morning to orient, midday to check inbound, close to roll up), it always
    does the same all-tasks operation. It walks every task in the task database,
    re-checks external state for each against its connected source (Jira, GitHub,
@@ -154,7 +154,7 @@ This means:
    gentler, separate nudge ("waiting 14 days — ping them?"), not an archival
    candidate.
 
-3. **Next-action decision (`/next`).** Given current task database state, suggest
+3. **Next-action decision (`/pick-work`).** Given current task database state, suggest
    what to start or resume next. Consider blockers, external readiness, and my
    own priorities. Always *suggests*, never auto-dispatches — picking what I
    work on and spawning it without me in the loop would cross from "holds my
@@ -191,7 +191,7 @@ This means:
    makes that continuous: reopen the prior session when it's still there, else a
    fresh session seeded from durable storage. Two tiers of continuity, prior
    session preferred, our stored detail as the fallback. Re-orientation — "what
-   changed externally since I last touched this" — comes from `/brief`'s per-task
+   changed externally since I last touched this" — comes from `/show-work`'s per-task
    reconciliation, which already runs on every task, so no dedicated catch-up
    step is needed. A first-time dispatch is just resumption with no prior session
    and empty history.
@@ -214,7 +214,7 @@ This means:
    the next briefing. When a worker reports "blocked on X," the coordinator just
    records it — no proactive unblocking (chasing a review, pinging a person) on
    its own; that's the same overreach as auto-dispatch. The blocker still
-   surfaces naturally whenever a later `/brief` re-checks that task's external
+   surfaces naturally whenever a later `/show-work` re-checks that task's external
    state.
 
    **worker-status check.** Self-reporting only covers workers healthy enough to
@@ -227,7 +227,7 @@ This means:
    detection of death, not of outcome: a gone worker may have left finished,
    unpushed work behind, so the coordinator never infers done/failed — it
    surfaces the last known state and I adjudicate (resume, mark done, drop).
-   This stays within the on-demand model: worker-status check is evaluated at `/brief`,
+   This stays within the on-demand model: worker-status check is evaluated at `/show-work`,
    not by a background daemon.
 
 ## Out of scope for v1
@@ -239,7 +239,7 @@ This means:
 - A graphical UI — the coordinator lives in a terminal window.
 - Cross-machine sync.
 - Auto-promoting inbound items into tasks without my confirmation.
-- Background polling — sources are checked on-demand via `/brief`.
+- Background polling — sources are checked on-demand via `/show-work`.
 - Multi-user / coworker-to-coworker coordination (deliberately deferred; see
   design notes for forward-compatibility hygiene).
 

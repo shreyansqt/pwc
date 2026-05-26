@@ -50,32 +50,37 @@ gone | note`.
 
 ## Commands
 
-**`/brief`** — The one command you run to see everything. Reads the task database,
-checks external sources, sweeps for problems, and renders a prioritized view of all
-your tasks. Run it anytime — morning to orient, midday to check in, close to wrap up.
+**`/find-work`** — Explores external sources (Jira, GitHub, Slack, email) for items
+that might be new tasks, and queues the ones you confirm. The *inbound* edge:
+brings new work in. Surfaces candidates only — never adds a task without your say-so.
 
-**`/next`** — Suggests what to work on or resume next. Suggests only; never starts
+**`/show-work`** — Reports on the work you're *already tracking*: reads the task
+database, reconciles each task against its source, sweeps for dead workers and stale
+tasks, recaps, and renders a prioritized view. Run it anytime — morning to orient,
+midday to check in, close to wrap up. (Finding *new* work is `/find-work`.)
+
+**`/pick-work`** — Suggests what to work on or resume next. Suggests only; never starts
 work on its own.
 
-**`/start`** — Turns a task into action: either starts a **worker** (the default,
+**`/start-work`** — Turns a task into action: either starts a **worker** (the default,
 for substantial work) or handles it **inline** (for trivial work). Also covers
 resuming a stopped task by reopening its prior session.
 
-**`/pwc-report`** — Used *by a worker* to report status (blocked / awaiting-review /
+**`/report-status`** — Used *by a worker* to report status (blocked / awaiting-review /
 done / note) back to the task database. (Workers usually run the underlying
 `taskdb.py log-event` command directly, since the skill isn't on their path from a
 repo — see the dispatch notes.)
 
-## Behaviors / mechanisms (mostly inside `/brief`)
+## Behaviors / mechanisms (mostly inside `/show-work`)
 
 **Inline (handling)** — The coordinator doing a trivial task *itself* in its own
 session instead of starting a worker. Reserved for quick things (a one-line reply).
 
-**Reconciliation** — `/brief` re-checking each task against its external source
+**Reconciliation** — `/show-work` re-checking each task against its external source
 (Jira / GitHub / Slack / email) and *surfacing* disagreements. Rule: surface, never
 auto-resolve.
 
-**New tasks (noticing)** — `/brief` spotting things in your inboxes that might be
+**New tasks (noticing)** — `/show-work` spotting things in your inboxes that might be
 new tasks and asking whether to add each. Never auto-adds.
 
 **Worker-status check** — Checking whether a worker is *actually still running*
@@ -90,9 +95,9 @@ verdict — surfaces for keep/drop, never auto-archives. Parked tasks are exempt
 **Parked** — A task deliberately waiting on something external (a review, a reply).
 Exempt from the staleness sweep; gets a gentler "still waiting?" nudge instead.
 
-**Recap** — `/brief` summarizing what changed since the last brief, written as one
+**Recap** — `/show-work` summarizing what changed since the last brief, written as one
 event. The longitudinal record the build journal and "what did I do this week"
-reviews draw on. Also how `/brief` bounds "since the last brief."
+reviews draw on. Also how `/show-work` bounds "since the last brief."
 
 ## Worker lifecycle terms
 
@@ -102,5 +107,5 @@ session, and how the worker-status check sees whether it's running (the uuid is 
 the worker's command line).
 
 **Resume / resumption** — Reopening a worker's *prior* session (with its full
-conversation) rather than starting fresh. No separate command — it's just `/start`
+conversation) rather than starting fresh. No separate command — it's just `/start-work`
 reopening an existing session when one survives.

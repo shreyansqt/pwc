@@ -1,9 +1,9 @@
 ---
-name: start
+name: start-work
 description: Act on a PWC task — either spawn a worker (a Claude Code session in its own iTerm2 tab) for substantial work, or handle it inline for trivial work. Also covers resuming a task whose worker has stopped. The default is to spawn a worker.
 ---
 
-# /start
+# /start-work
 
 Turn a tracked task into action. /start decides whether the task warrants its own
 **worker** (a Claude Code session in a new iTerm2 tab) or can be handled
@@ -66,7 +66,7 @@ it again, reopening its prior session when one survives.
    **Reporting instruction — give the worker the full script command, not the
    skill.** A worker runs in a repo (e.g. `service-banking`), which creates two
    traps to avoid:
-   - `/pwc-report` is *not* resolvable from the worker's cwd (skills install at the
+   - `/report-status` is *not* resolvable from the worker's cwd (skills install at the
      workspace root), so seed the literal `taskdb.py` command instead.
    - The task database lives at the *workspace root* (`<workspace>/.pwc/taskdb.db`), but
      `taskdb.py` auto-discovers from cwd — which, from a repo, finds the wrong
@@ -81,7 +81,7 @@ it again, reopening its prior session when one survives.
        --kind <blocked|awaiting-review|done|note> --detail "<what happened>"
    Report when you hit a meaningful event (blocked, up for review, done).
    ```
-   Do not tell the worker to use `/pwc-report`, and do not omit `--workspace`.
+   Do not tell the worker to use `/report-status`, and do not omit `--workspace`.
 
 5. **Pre-allocate and spawn.** Generate a UUID, pass it as `--session-id` to
    `spawn.py` (so the id is known before the process exists). Pipe the seed prompt

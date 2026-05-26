@@ -1,20 +1,20 @@
 ---
-name: pwc-report
+name: report-status
 description: For a PWC worker to report its status back to the coordinator's task database — blocked, awaiting review, done, or a freeform note. Run this when you hit a meaningful event in the task you were started on.
 ---
 
-# /pwc-report
+# /report-status
 
 A thin reporting channel for a worker to record status to the task database. As you hit
-meaningful events, record them so the coordinator's next `/brief` reflects
+meaningful events, record them so the coordinator's next `/show-work` reflects
 reality — the coordinator reads the task database, it does not watch your window.
 
 This is a worker's only write to the task database: an append to the event log. It does
 not change task fields the coordinator owns.
 
 > **Note for spawned workers:** PWC's skills are installed at the *workspace root*,
-> but you run in a repo, so this `/pwc-report` skill is usually **not
-> resolvable from your cwd**. Your /start prompt therefore gave you the literal
+> but you run in a repo, so this `/report-status` skill is usually **not
+> resolvable from your cwd**. Your /start-work prompt therefore gave you the literal
 > `taskdb.py log-event ...` command to run directly — use that. This SKILL.md
 > documents the same call for when the skill *is* available (e.g. the coordinator
 > reporting an inline task's outcome from the workspace root).

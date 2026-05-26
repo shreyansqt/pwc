@@ -49,21 +49,21 @@ back here) and `<workspace>/.pwc/taskdb.db`. Because the skills are symlinks,
 - **Python 3** (stdlib `sqlite3` — no packages needed for the task database).
 - **iTerm2** with the Python API enabled (Preferences → General → Magic → *Enable
   Python API*) and `pip install iterm2` — required only for spawning workers.
-- `pgrep` (standard on macOS) — for worker-status check checks.
+- `pgrep` (standard on macOS) — for worker-status checks.
 
 ## Use
 
 Start a Claude Code session **in the workspace** and:
 
-- **`/brief`** — the all-tasks briefing. Run it anytime (morning to orient,
+- **`/show-work`** — the all-tasks briefing. Run it anytime (morning to orient,
   midday to check in, close to wrap up). Reconciles against your sources, sweeps for
   dead workers and stale tasks, notices new tasks, recaps the day, and presents a
   prioritized view.
-- **`/next`** — suggests what to start or resume next. Suggests only; never acts
+- **`/pick-work`** — suggests what to start or resume next. Suggests only; never acts
   without your confirmation.
-- **`/start`** — turns a task into action: spawns a worker (default) or handles it
+- **`/start-work`** — turns a task into action: spawns a worker (default) or handles it
   inline. Also resumes a stopped task by reopening its prior session.
-- **`/pwc-report`** — used *by a worker* to report status (blocked / awaiting-review
+- **`/report-status`** — used *by a worker* to report status (blocked / awaiting-review
   / done / note) back to the task database.
 
 ## Inspecting the task database directly

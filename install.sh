@@ -19,7 +19,7 @@ if [[ ! -d "$WS" ]]; then
   exit 1
 fi
 
-SKILLS=(brief next start pwc-report)
+SKILLS=(find-work show-work pick-work start-work report-status)
 
 mkdir -p "$WS/.claude/skills" "$WS/.pwc"
 
@@ -33,4 +33,4 @@ python3 "$PWC_SRC/scripts/taskdb.py" --workspace "$WS" init
 echo "pwc: installed into $WS"
 echo "     skills: ${SKILLS[*]}"
 echo "     task database: $WS/.pwc/taskdb.db"
-echo "     run /brief in a Claude Code session started in $WS"
+echo "     run /show-work in a Claude Code session started in $WS"

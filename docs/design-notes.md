@@ -157,6 +157,25 @@ dashboard below; a TUI or web view now reads the SQLite store rather than flat
 files. The point stands — the data is still external to the conversation and
 trivially queryable — only the substrate changed.
 
+## Command vocabulary + splitting find-work out of show-work (build-time)
+
+The PRD describes a single `/brief` that does everything, including noticing new
+inbound work — we'd collapsed an earlier `/whats-new` into it for v1 simplicity.
+During the build (and a vocabulary pass for daily-use comfort) two things changed:
+
+- **Renamed to a verb-phrase family** so the command surface is self-documenting
+  and visually distinct from the team-skills commands: `/brief` → `/show-work`,
+  `/next` → `/pick-work`, `/start` (was the unnamed "dispatch") → `/start-work`,
+  `/pwc-report` → `/report-status`.
+- **Split finding new work back out** into its own `/find-work`. The intent
+  separation reads cleanly with verb names — *find* new work (the inbound edge,
+  scans external sources, surfaces candidates, queues on confirm) vs. *show* where
+  already-tracked work stands (reconcile + sweeps + recap, no source-scan for new
+  items). This is exactly the `/whats-new` seam the PRD predicted might re-split;
+  the verb names make "find vs. show" clearer than "brief vs. whats-new" was.
+
+The no-auto-promote rule is unchanged: `/find-work` surfaces, the user confirms.
+
 ## Forward-compatibility considerations (not v1 work)
 
 Things we're not building, but are designing in a way that doesn't preclude:
@@ -172,5 +191,6 @@ Things we're not building, but are designing in a way that doesn't preclude:
   matters.
 - **GUI / dashboard.** A small Textual TUI or web view over the task database would
   let me glance at task state without invoking the coordinator. Enabled
-  by: task database is plain files. Build only if the terminal interface turns out to
+  by: the task database is a queryable SQLite store behind one CLI. Build only if
+  the terminal interface turns out to
   be a real friction point.

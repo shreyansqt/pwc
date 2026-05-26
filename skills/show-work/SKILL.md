@@ -1,9 +1,9 @@
 ---
-name: brief
+name: show-work
 description: The PWC coordinator's all-tasks briefing. Reads the durable task database and presents a prioritized view of all in-flight work. Run it anytime — morning to orient, midday to check in, close to wrap up. This is the first thing to run after starting (or restarting) the coordinator.
 ---
 
-# /brief
+# /show-work
 
 The single interactive surface of the PWC coordinator. It reads the durable
 SQLite task database and renders a prioritized view of all your tasks in flight, so the
@@ -12,9 +12,10 @@ useful briefing whether the coordinator booted ten minutes ago or just now — a
 state lives in the task database, not in this conversation.
 
 This skill is built in layers, all present below: render, worker-status sweep,
-staleness sweep, external reconciliation, noticing new tasks, and a recap +
-archive. Reconciliation *conflict resolution rules* and new-task *matching logic*
-are deliberately left to be handled as real cases arise (see Notes).
+staleness sweep, external reconciliation, and a recap + archive. It reports on work
+you're *already tracking*; bringing in *new* work from external sources is a
+separate command, `/find-work`. Reconciliation *conflict resolution rules* are
+deliberately left to be handled as real cases arise (see Notes).
 
 ## Configuration
 
@@ -42,16 +43,13 @@ are deliberately left to be handled as real cases arise (see Notes).
   tasks untouched for longer than N days. The staleness-sweep candidates.
 - `python3 $SCRIPTS/taskdb.py parked-aging --threshold-days <N>` — parked tasks
   aged beyond N days; the gentler "still waiting?" nudge.
-- `python3 $SCRIPTS/taskdb.py find-refs --ref-type <t> --value <v>` — find tasks
-  carrying a given identity reference. Used in noticing new tasks to tell whether an
-  item is already tracked.
 - `python3 $SCRIPTS/taskdb.py events --since <ISO>` — events since a timestamp;
   the source for the recap.
-- `python3 $SCRIPTS/taskdb.py log-event --task <id> --kind reconcile|new-task|recap --detail "..."`
-  — record reconciliation observations, promoted new-task items, and the recap.
+- `python3 $SCRIPTS/taskdb.py log-event --task <id> --kind reconcile|recap --detail "..."`
+  — record reconciliation observations and the recap.
 - `python3 $SCRIPTS/taskdb.py archive --task <id>` — archive a done task so it
   leaves the active summary.
-- **External sources** (reconciliation + new tasks), via the workspace's already
+- **External sources** (for reconciliation), via the workspace's already
   permissioned tools: Jira (`mcp__atlassian__getJiraIssue`), GitHub
   (`gh pr view`, `gh run list`), Slack (`slack_read_thread`), email (Gmail MCP).
 
@@ -95,18 +93,7 @@ are deliberately left to be handled as real cases arise (see Notes).
    task database to match the source, and do not apply a fixed rule set — the catalog of
    conflict shapes and how to handle each is intentionally learned case by case.
 
-5. **Notice new tasks** (skip on a quick read). Scan the sources for items that look
-   like they could be new tasks — assigned Jira tickets, review requests, Slack
-   threads that mention you, unread email that needs action. For each candidate,
-   check whether it's already tracked: `find-refs --ref-type <t> --value <v>` on
-   its identity ref. If a task already carries that ref, it's an update to existing
-   work, not new — fold it into that task's reconciliation, don't duplicate.
-   For genuinely new items, **surface them and ask** whether to promote each into a
-   task; never auto-promote. On promotion, `add-task` + `add-ref` (identity ref)
-   and `log-event --kind new-task`. *(The automatic new-vs-update decision is
-   deliberately left manual for now — you present, the user confirms.)*
-
-6. **Recap + archive.** Summarize what changed since the last brief: read
+5. **Recap + archive.** Summarize what changed since the last brief: read
    `events --since <last-brief-time>` (a task-DB-level `recap` event marks each
    brief, so "last brief" = the most recent `recap`). Write a concise one-line
    `log-event --kind recap` (task_id omitted = task-DB-level, not tied to one task)
@@ -114,7 +101,7 @@ are deliberately left to be handled as real cases arise (see Notes).
    session's net activity. Then archive any task the user has confirmed done:
    `archive --task <id>` (drops it from the active summary).
 
-7. **Render a prioritized briefing** from the summary JSON. Do not dump raw JSON —
+6. **Render a prioritized briefing** from the summary JSON. Do not dump raw JSON —
    present a scannable view. Group and order so the user can triage at a glance:
 
    - Lead with anything needing attention: tasks whose `status` is `gone`
@@ -130,13 +117,13 @@ are deliberately left to be handled as real cases arise (see Notes).
    a hint that a worker session is attached (`session_id` is non-null). Keep each
    task to roughly one line; this is an index, not a report.
 
-8. **Summarize the shape of your work** in a sentence or two: how many active,
+7. **Summarize the shape of your work** in a sentence or two: how many active,
    how many parked, anything flagged for attention (gone workers, stale tasks,
    reconciliation conflicts, new tasks). This is the orientation the user is
    actually after.
 
-9. **Offer next moves, don't take them.** End by pointing at what the user might do
-   (e.g. "drill into a task, or run `/next` for a suggestion"). Beyond the worker-status
+8. **Offer next moves, don't take them.** End by pointing at what the user might do
+   (e.g. "drill into a task, or run `/pick-work` for a suggestion"). Beyond the worker-status
    and staleness sweeps above (which only flag and, for dead workers, mark `gone`),
    do not dispatch work or otherwise mutate tasks unless the user asks.
 
@@ -145,13 +132,11 @@ are deliberately left to be handled as real cases arise (see Notes).
 - **The task database is the source of truth, not this conversation.** If something here
   disagrees with what you remember from earlier in the session, the task database wins.
   Never invent tasks or statuses that aren't in the `summary` output.
-- **Stay light.** `/brief` should not pull full `detail` for every task — that
+- **Stay light.** `/show-work` should not pull full `detail` for every task — that
   defeats the two-tier design. Load `detail` only for a task the user is focusing on.
-- **Two deferred-by-design behaviors.** (1) *Reconciliation conflict rules* — the
-  step detects and surfaces task-DB-vs-external disagreement, but the rules for
-  resolving each conflict shape are not codified; handle them as they arise. (2)
-  *New-task matching* — the `find-refs` query to check whether an item is already
-  tracked exists, but the automatic new-vs-update decision is not built; surface
-  candidates and let the user confirm.
+- **Deferred-by-design:** *reconciliation conflict rules* — step 4 detects and
+  surfaces task-DB-vs-external disagreement, but the rules for resolving each
+  conflict shape are not codified; handle them as they arise. (Finding new work and
+  the new-vs-update matching that goes with it now live in `/find-work`.)
 - Archived (done-and-rolled-up) tasks are intentionally absent from `summary`. If
   the user asks about completed work, add `--include-archived`.
