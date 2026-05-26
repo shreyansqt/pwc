@@ -66,6 +66,20 @@ tracking): find brings new work in; show tells you where existing work stands.
    then `add-ref --kind identity --ref-type <t> --value <raw-id>` to attach its
    identity reference, then `log-event --kind new-task`. Report back what was queued.
 
+6. **Cross-link related Slack threads onto each Jira task.** A Jira ticket and its
+   Slack discussion are one piece of work — track them together, don't spin up a
+   separate Slack task for a thread that's really about an existing ticket. For each
+   queued Jira task, search the configured Slack channels for related thread(s):
+   - by the **ticket key** (e.g. search `SMT-917`), and
+   - by **topic keywords** from the title, to catch threads that discuss it without
+     naming the key.
+   Filter out bot posts (Jira/Calendar/Rotation app messages) — the signal is human
+   discussion and `@`-mentions. For each genuine match, attach the thread's permalink
+   as a working ref:
+   `add-ref --task <id> --kind working --ref-type slack --value <thread-permalink> --label "<channel> thread"`.
+   (Build the permalink from the thread's `thread_ts`.) Only create a *standalone*
+   slack task when a thread has no matching ticket. Report which threads were linked.
+
 ## Notes
 
 - **Surface, never auto-promote** — this is a hard rule (a PWC non-goal is adding
