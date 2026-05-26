@@ -11,8 +11,7 @@ This workspace uses **PWC** to track in-flight work. Tasks live in a local datab
 - `/start-work` — act on a task: spawn a worker (own tab) or handle it inline.
 - `/report-status` — record where a task stands.
 
-**If you are the coordinator session** (a session the user opened to manage work,
-not a worker spawned to do one task), open by running `/show-work` so the user is
-oriented. **If you are a worker** (you were given a specific task to work on), do
-*not* run `/show-work` — just do your task.
+To see where your work stands, run `/show-work`. If you were spawned as a worker
+on a specific task, just do that task — the PWC commands are for coordinating work,
+not for a worker to run.
 <!-- PWC:END -->
