@@ -40,6 +40,12 @@ def db_path(workspace: str | os.PathLike[str] | None = None) -> Path:
     return root / ".pwc" / "taskdb.db"
 
 
+def config_path(workspace: str | os.PathLike[str] | None = None) -> Path:
+    """Resolve <workspace>/.pwc/sources.json — the per-workspace sources config."""
+    root = Path(workspace).resolve() if workspace else find_workspace_root()
+    return root / ".pwc" / "sources.json"
+
+
 def now_iso() -> str:
     """Current time, ISO8601 UTC, second precision (sorts lexically)."""
     return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

@@ -57,10 +57,14 @@ Two parts:
 
 Start a Claude Code session **in the workspace** and:
 
+- **`/setup-workspace`** — run once per workspace first: configures which external
+  sources of work apply here (and re-run anytime to change them).
+- **`/find-work`** — scans the configured sources for things that might be new
+  tasks and queues the ones you confirm. The inbound edge.
 - **`/show-work`** — the all-tasks briefing. Run it anytime (morning to orient,
-  midday to check in, close to wrap up). Reconciles against your sources, sweeps for
-  dead workers and stale tasks, notices new tasks, recaps the day, and presents a
-  prioritized view.
+  midday to check in, close to wrap up). Reconciles already-tracked tasks against
+  their sources, sweeps for dead workers and stale tasks, recaps the day, and
+  presents a prioritized view.
 - **`/pick-work`** — suggests what to start or resume next. Suggests only; never acts
   without your confirmation.
 - **`/start-work`** — turns a task into action: spawns a worker (default) or handles it

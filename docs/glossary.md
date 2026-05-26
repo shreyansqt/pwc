@@ -31,6 +31,12 @@ source of truth for all your tasks. "The task database wins" = if your memory (o
 the conversation) disagrees with it, the database is right. Accessed only through
 `taskdb.py`, never edited by hand.
 
+**Sources config** — The JSON file at `<workspace>/.pwc/sources.json` declaring
+which external sources `/find-work` scans for this workspace and how (which Jira
+project + JQL, which GitHub org, which Slack channels, …). Written by
+`/setup-workspace`, read by `/find-work`. Per-workspace, so different workspaces
+draw work from different places.
+
 ## Data (what's in the task database — three tables)
 
 **Task** — One unit of work the coordinator tracks (a Jira ticket, a PR review, a
@@ -50,9 +56,14 @@ gone | note`.
 
 ## Commands
 
-**`/find-work`** — Explores external sources (Jira, GitHub, Slack, email) for items
-that might be new tasks, and queues the ones you confirm. The *inbound* edge:
-brings new work in. Surfaces candidates only — never adds a task without your say-so.
+**`/setup-workspace`** — One-time (per workspace) onboarding: figures out which
+external sources of work apply here and how to query each, then writes the
+**sources config**. Run again anytime to change what `/find-work` scans.
+
+**`/find-work`** — Explores the configured external sources (Jira, GitHub, Slack,
+email) for items that might be new tasks, and queues the ones you confirm. The
+*inbound* edge: brings new work in. Surfaces candidates only — never adds a task
+without your say-so. (Reads the sources config; run `/setup-workspace` first.)
 
 **`/show-work`** — Reports on the work you're *already tracking*: reads the task
 database, reconciles each task against its source, sweeps for dead workers and stale

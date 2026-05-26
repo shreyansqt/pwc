@@ -22,7 +22,7 @@ if [[ ! -d "$WS" ]]; then
   exit 1
 fi
 
-SKILLS=(find-work show-work pick-work start-work report-status)
+SKILLS=(setup-workspace find-work show-work pick-work start-work report-status)
 GLOBAL_SKILLS="$HOME/.claude/skills"
 
 # 1. Global skills — visible from any cwd (so workers in a repo can resolve them).
