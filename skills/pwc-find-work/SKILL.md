@@ -1,14 +1,14 @@
 ---
-name: find-work
+name: pwc-find-work
 description: Explore external sources (Jira, GitHub, Slack, email) for things that might be new PWC tasks, and queue the ones you confirm. Surfaces candidates only — never adds a task without your say-so.
 ---
 
-# /find-work
+# /pwc-find-work
 
-Look outward for work that isn't tracked yet. `/find-work` scans your external
+Look outward for work that isn't tracked yet. `/pwc-find-work` scans your external
 sources for items that look like they could be tasks — and proposes them. Nothing
 is added to the task database until you confirm. This is the *inbound* edge of PWC,
-deliberately separate from `/show-work` (which reports on work you're already
+deliberately separate from `/pwc-show-work` (which reports on work you're already
 tracking): find brings new work in; show tells you where existing work stands.
 
 ## Configuration
@@ -37,7 +37,7 @@ tracking): find brings new work in; show tells you where existing work stands.
 ## Steps
 
 1. **Read the sources config** with `sources.py enabled`. If it's empty (no sources
-   configured), tell the user to run `/setup-workspace` first and stop — there's
+   configured), tell the user to run `/pwc-setup-workspace` first and stop — there's
    nothing to scan until sources are set up.
 
 2. **Scan each enabled source** using its configured parameters: run the configured
@@ -47,7 +47,7 @@ tracking): find brings new work in; show tells you where existing work stands.
 
 3. **Drop anything already tracked.** For each candidate, run `find-refs` on its
    identity reference (Jira key, PR, Slack channel+ts). If a task already carries
-   that ref, it's not new — skip it (it'll be handled by `/show-work`'s
+   that ref, it's not new — skip it (it'll be handled by `/pwc-show-work`'s
    reconciliation). This prevents duplicates.
 
 4. **Surface the genuinely-new candidates and ask.** Present them as a short list
@@ -69,10 +69,10 @@ tracking): find brings new work in; show tells you where existing work stands.
 ## Notes
 
 - **Surface, never auto-promote** — this is a hard rule (a PWC non-goal is adding
-  tasks without confirmation). `/find-work` proposes; you decide.
+  tasks without confirmation). `/pwc-find-work` proposes; you decide.
 - **Whether a candidate is *new* or an *update* to an existing task** is decided by
   `find-refs` on identity references. The automatic matching logic beyond that exact
   check is deliberately left for real cases — when unsure, surface it and let the
   user say "that's the same as t_00xx."
-- `/find-work` does not reconcile or report on existing tasks — that's `/show-work`.
-  Run `/find-work` to bring new work in, `/show-work` to see where everything stands.
+- `/pwc-find-work` does not reconcile or report on existing tasks — that's `/pwc-show-work`.
+  Run `/pwc-find-work` to bring new work in, `/pwc-show-work` to see where everything stands.

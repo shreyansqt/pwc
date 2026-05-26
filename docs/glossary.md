@@ -32,9 +32,9 @@ the conversation) disagrees with it, the database is right. Accessed only throug
 `taskdb.py`, never edited by hand.
 
 **Sources config** — The JSON file at `<workspace>/.pwc/sources.json` declaring
-which external sources `/find-work` scans for this workspace and how (which Jira
+which external sources `/pwc-find-work` scans for this workspace and how (which Jira
 project + JQL, which GitHub org, which Slack channels, …). Written by
-`/setup-workspace`, read by `/find-work`. Per-workspace, so different workspaces
+`/pwc-setup-workspace`, read by `/pwc-find-work`. Per-workspace, so different workspaces
 draw work from different places.
 
 ## Data (what's in the task database — three tables)
@@ -62,42 +62,42 @@ gone | note`.
 
 ## Commands
 
-**`/setup-workspace`** — One-time (per workspace) onboarding: figures out which
+**`/pwc-setup-workspace`** — One-time (per workspace) onboarding: figures out which
 external sources of work apply here and how to query each, then writes the
-**sources config**. Run again anytime to change what `/find-work` scans.
+**sources config**. Run again anytime to change what `/pwc-find-work` scans.
 
-**`/find-work`** — Explores the configured external sources (Jira, GitHub, Slack,
+**`/pwc-find-work`** — Explores the configured external sources (Jira, GitHub, Slack,
 email) for items that might be new tasks, and queues the ones you confirm. The
 *inbound* edge: brings new work in. Surfaces candidates only — never adds a task
-without your say-so. (Reads the sources config; run `/setup-workspace` first.)
+without your say-so. (Reads the sources config; run `/pwc-setup-workspace` first.)
 
-**`/show-work`** — Reports on the work you're *already tracking*: reads the task
+**`/pwc-show-work`** — Reports on the work you're *already tracking*: reads the task
 database, reconciles each task against its source, sweeps for dead workers and stale
 tasks, recaps, and renders a prioritized view. Run it anytime — morning to orient,
-midday to check in, close to wrap up. (Finding *new* work is `/find-work`.)
+midday to check in, close to wrap up. (Finding *new* work is `/pwc-find-work`.)
 
-**`/pick-work`** — Suggests what to work on or resume next. Suggests only; never starts
+**`/pwc-pick-work`** — Suggests what to work on or resume next. Suggests only; never starts
 work on its own.
 
-**`/start-work`** — Turns a task into action: either starts a **worker** (the default,
+**`/pwc-start-work`** — Turns a task into action: either starts a **worker** (the default,
 for substantial work) or handles it **inline** (for trivial work). Also covers
 resuming a stopped task by reopening its prior session.
 
-**`/report-status`** — Used *by a worker* to report status (blocked / awaiting-review /
+**`/pwc-report-status`** — Used *by a worker* to report status (blocked / awaiting-review /
 done / note) back to the task database. (Workers usually run the underlying
 `taskdb.py log-event` command directly, since the skill isn't on their path from a
 repo — see the dispatch notes.)
 
-## Behaviors / mechanisms (mostly inside `/show-work`)
+## Behaviors / mechanisms (mostly inside `/pwc-show-work`)
 
 **Inline (handling)** — The coordinator doing a trivial task *itself* in its own
 session instead of starting a worker. Reserved for quick things (a one-line reply).
 
-**Reconciliation** — `/show-work` re-checking each task against its external source
+**Reconciliation** — `/pwc-show-work` re-checking each task against its external source
 (Jira / GitHub / Slack / email) and *surfacing* disagreements. Rule: surface, never
 auto-resolve.
 
-**New tasks (noticing)** — `/show-work` spotting things in your inboxes that might be
+**New tasks (noticing)** — `/pwc-show-work` spotting things in your inboxes that might be
 new tasks and asking whether to add each. Never auto-adds.
 
 **Worker-status check** — Checking whether a worker is *actually still running*
@@ -112,9 +112,9 @@ verdict — surfaces for keep/drop, never auto-archives. Parked tasks are exempt
 **Parked** — A task deliberately waiting on something external (a review, a reply).
 Exempt from the staleness sweep; gets a gentler "still waiting?" nudge instead.
 
-**Recap** — `/show-work` summarizing what changed since the last brief, written as one
+**Recap** — `/pwc-show-work` summarizing what changed since the last brief, written as one
 event. The longitudinal record the build journal and "what did I do this week"
-reviews draw on. Also how `/show-work` bounds "since the last brief."
+reviews draw on. Also how `/pwc-show-work` bounds "since the last brief."
 
 ## Worker lifecycle terms
 
@@ -124,5 +124,5 @@ session, and how the worker-status check sees whether it's running (the uuid is 
 the worker's command line).
 
 **Resume / resumption** — Reopening a worker's *prior* session (with its full
-conversation) rather than starting fresh. No separate command — it's just `/start-work`
+conversation) rather than starting fresh. No separate command — it's just `/pwc-start-work`
 reopening an existing session when one survives.

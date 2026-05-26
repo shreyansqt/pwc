@@ -23,10 +23,13 @@ pwc/                      # this repo — the SOURCE (develop & commit here)
   scripts/                # shared deterministic mechanism ("the hands")
     taskdb.py             #   single read/write path to the task database (CLI, JSON I/O)
     spawn.py              #   spawn a worker in an iTerm2 window
-    worker_status.py           #   is a worker session still running? (pgrep)
+    worker_status.py      #   is a worker session still running? (pgrep)
+    sources.py            #   per-workspace sources config (read/write/validate)
+    claude_md.py          #   splice the PWC section into a workspace CLAUDE.md
     pwc_db.py, _common.py #   shared connection / discovery helpers
-  skills/                 # the coordinator's brain (SKILL.md each)
-    brief/  next/  start/  pwc-report/
+  skills/                 # the coordinator's brain (SKILL.md each, pwc- prefixed)
+    pwc-setup-workspace/  pwc-find-work/  pwc-show-work/
+    pwc-pick-work/  pwc-start-work/  pwc-report-status/
   install.sh              # symlink skills globally + init a workspace's task database
 ```
 
@@ -58,19 +61,19 @@ Two parts:
 
 Start a Claude Code session **in the workspace** and:
 
-- **`/setup-workspace`** — run once per workspace first: configures which external
+- **`/pwc-setup-workspace`** — run once per workspace first: configures which external
   sources of work apply here (and re-run anytime to change them).
-- **`/find-work`** — scans the configured sources for things that might be new
+- **`/pwc-find-work`** — scans the configured sources for things that might be new
   tasks and queues the ones you confirm. The inbound edge.
-- **`/show-work`** — the all-tasks briefing. Run it anytime (morning to orient,
+- **`/pwc-show-work`** — the all-tasks briefing. Run it anytime (morning to orient,
   midday to check in, close to wrap up). Reconciles already-tracked tasks against
   their sources, sweeps for dead workers and stale tasks, recaps the day, and
   presents a prioritized view.
-- **`/pick-work`** — suggests what to start or resume next. Suggests only; never acts
+- **`/pwc-pick-work`** — suggests what to start or resume next. Suggests only; never acts
   without your confirmation.
-- **`/start-work`** — turns a task into action: spawns a worker (default) or handles it
+- **`/pwc-start-work`** — turns a task into action: spawns a worker (default) or handles it
   inline. Also resumes a stopped task by reopening its prior session.
-- **`/report-status`** — used *by a worker* to report status (blocked / awaiting-review
+- **`/pwc-report-status`** — used *by a worker* to report status (blocked / awaiting-review
   / done / note) back to the task database.
 
 ## Inspecting the task database directly

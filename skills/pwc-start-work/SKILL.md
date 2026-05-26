@@ -1,17 +1,17 @@
 ---
-name: start-work
+name: pwc-start-work
 description: Act on a PWC task — either spawn a worker (a Claude Code session in its own iTerm2 tab) for substantial work, or handle it inline for trivial work. Also covers resuming a task whose worker has stopped. The default is to spawn a worker.
 ---
 
-# /start-work
+# /pwc-start-work
 
-Turn a tracked task into action. `/start-work` decides whether the task warrants
+Turn a tracked task into action. `/pwc-start-work` decides whether the task warrants
 its own **worker** (a Claude Code session in a new iTerm2 tab) or can be handled
 **inline** by the coordinator, then does it. It also covers **resumption** — there
 is no separate resume command; picking a stopped task back up is just starting
 it again, reopening its prior session when one survives.
 
-A worker is a normal Claude Code session that *you* drive — `/start-work` opens it
+A worker is a normal Claude Code session that *you* drive — `/pwc-start-work` opens it
 in the right repo with the task's context pre-loaded so you can begin immediately.
 It does not coerce the session into acting autonomously; it sets it up and gets out
 of the way.
@@ -82,12 +82,12 @@ of the way.
    to take over. For a resumed session, little or no seed is needed.
 
    **Don't put a reporting instruction in the seed.** PWC's skills are installed
-   globally (`~/.claude/skills/`), so a worker *can* resolve `/report-status` — but
+   globally (`~/.claude/skills/`), so a worker *can* resolve `/pwc-report-status` — but
    a fresh worker still won't (and shouldn't) run a reporting command just because
    the opening message told it to. So leave reporting out of the seed entirely.
    Reporting happens later, once there's trust and context: the worker can run
-   `/report-status` when *you* ask it to, or you can run `/report-status` from the
-   coordinator to record where a task stands. Either way `/show-work`'s
+   `/pwc-report-status` when *you* ask it to, or you can run `/pwc-report-status` from the
+   coordinator to record where a task stands. Either way `/pwc-show-work`'s
    worker-status check still notices when a worker session ends and flags the task
    for triage, so nothing is lost if no explicit report is made.
 

@@ -1,21 +1,21 @@
 ---
-name: report-status
+name: pwc-report-status
 description: Record a status update on a PWC task — blocked, awaiting review, done, or a freeform note. Run from the coordinator (at the workspace root) to log where a task stands, e.g. after checking in on a worker or finishing an inline task.
 ---
 
-# /report-status
+# /pwc-report-status
 
-Record where a task stands into the task database, so the next `/show-work`
+Record where a task stands into the task database, so the next `/pwc-show-work`
 reflects reality — the coordinator reads the task database, it does not watch
 worker tabs. This is an append to the event log; it does not change the structured
 fields the coordinator owns.
 
 Run this **from the coordinator** to record where a task stands (after checking in
 on a worker, or to log the outcome of an inline task you handled). A **worker can
-also run it** — PWC's skills are installed globally, so `/report-status` resolves
+also run it** — PWC's skills are installed globally, so `/pwc-report-status` resolves
 in any session — but only once it's warmed up and *you've asked it to*; a fresh
 worker correctly won't run a reporting command just because its opening message
-said so, and the `/start-work` seed deliberately doesn't ask. So in practice
+said so, and the `/pwc-start-work` seed deliberately doesn't ask. So in practice
 reporting is human-initiated: you run it from the coordinator, or you tell the
 worker to.
 
@@ -51,7 +51,7 @@ worker to.
 ## Notes
 
 - This records **events**; it does not archive or change task status fields —
-  `/show-work` handles archiving a confirmed-done task.
+  `/pwc-show-work` handles archiving a confirmed-done task.
 - You don't need to record "still working" — silence means in progress. If a worker
-  session ends without a final report, `/show-work`'s worker-status check notices
+  session ends without a final report, `/pwc-show-work`'s worker-status check notices
   and flags the task for triage anyway.

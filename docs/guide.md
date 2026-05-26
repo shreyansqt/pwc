@@ -29,50 +29,50 @@ claude
 That session is your coordinator. (The `side-projects/pwc` repo is just where PWC's
 code lives — you only go there to change PWC itself.)
 
-## First time in a workspace: `/setup-workspace`
+## First time in a workspace: `/pwc-setup-workspace`
 
 Run once to tell PWC where this workspace's work comes from:
 
 ```
-/setup-workspace
+/pwc-setup-workspace
 ```
 
 It detects what's available (your `gh` auth, Jira projects, Slack channels), asks a
 few questions, and writes `<workspace>/.pwc/sources.json`. Re-run it anytime to
-change what gets scanned. Until you do this, `/find-work` has nothing to scan.
+change what gets scanned. Until you do this, `/pwc-find-work` has nothing to scan.
 
 ## A normal day
 
 The five commands map to moments in your day. A typical flow:
 
-**1. Pull in new work — `/find-work`**
+**1. Pull in new work — `/pwc-find-work`**
 Scans your configured sources for things that look like tasks (assigned tickets,
 review requests, threads mentioning you) and shows them as candidates. You confirm
 which to actually track — nothing is added without your say-so. Run it in the
 morning, or whenever you want to catch up on what's landed.
 
-**2. See where everything stands — `/show-work`**
+**2. See where everything stands — `/pwc-show-work`**
 Your prioritized list of all tracked work. It reconciles each task against its
 source (did that review come back? did CI go red?), flags any worker whose session
 has died ("gone — needs triage"), surfaces stale tasks, and writes a short recap.
 This is the "where am I?" command — run it to orient at the start of a session, to
 check in midday, or to wrap up.
 
-**3. Decide what's next — `/pick-work`**
+**3. Decide what's next — `/pwc-pick-work`**
 Given the current list, it suggests what to start or resume. It only *suggests* —
 it won't start anything without you saying so.
 
-**4. Act on a task — `/start-work`**
+**4. Act on a task — `/pwc-start-work`**
 Turns a task into action. For substantial work it spawns a **worker** — a new
 Claude Code session in its own iTerm2 tab, opened in the right repo with the task's
 context already loaded, ready for you to drive. For something trivial (a one-line
 reply) it just handles it inline. If you pick a task that already had a worker which
-since stopped, `/start-work` reopens that prior session instead of starting cold.
+since stopped, `/pwc-start-work` reopens that prior session instead of starting cold.
 
-**5. Record where a task stands — `/report-status`**
+**5. Record where a task stands — `/pwc-report-status`**
 Logs that a task is blocked / awaiting review / done / or a note. Run it from the
 coordinator when you check in on a worker, or tell a worker to run it. You don't
-have to report constantly — silence means "in progress," and `/show-work` notices
+have to report constantly — silence means "in progress," and `/pwc-show-work` notices
 on its own when a worker session ends.
 
 ## Working with workers
@@ -83,19 +83,19 @@ on its own when a worker session ends.
 - Each worker gets its **own iTerm2 tab** (⌘1, ⌘2, … to switch). The coordinator
   stays in its own tab.
 - A worker won't blindly run commands its opening message tells it to (that's
-  correct, safe behavior). So **reporting is your job**: run `/report-status` from
+  correct, safe behavior). So **reporting is your job**: run `/pwc-report-status` from
   the coordinator, or ask the worker to once you're working with it.
-- If you close a worker tab or it crashes, nothing breaks — the next `/show-work`
+- If you close a worker tab or it crashes, nothing breaks — the next `/pwc-show-work`
   notices the session is gone and flags the task so you can resume, finish, or drop
   it.
 
 ## Resuming and restarting
 
-- **Resume a task:** just `/start-work` it again. If its worker's prior session
+- **Resume a task:** just `/pwc-start-work` it again. If its worker's prior session
   still exists, you get it back with full conversation; otherwise a fresh worker
   seeded with the task's history.
 - **Restart the coordinator:** close it and start a new `claude` in the workspace.
-  Run `/show-work` and you're exactly where you left off — the whole point of the
+  Run `/pwc-show-work` and you're exactly where you left off — the whole point of the
   database-backed design. No `/resume`, no scrolling.
 
 ## Multiple workspaces
@@ -104,7 +104,7 @@ PWC is per-workspace. Each workspace gets its own `.pwc/` (its own task database
 sources config), so work never mixes between, say, `acme` and a personal-projects
 workspace. The skills are installed globally, so they're available in any workspace;
 they just operate on whichever workspace's `.pwc/` they find from the current
-directory. To use PWC in a new workspace: `cd` there, run `/setup-workspace`, go.
+directory. To use PWC in a new workspace: `cd` there, run `/pwc-setup-workspace`, go.
 
 ## When something feels off
 

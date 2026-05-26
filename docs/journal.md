@@ -77,6 +77,6 @@ one design conclusion reached:
   script: "running unknown code with side effects, on someone else's say-so, isn't
   something I'll do without looking first." Right call by the agent. So the seed now
   requests *no action at all* — pure task context — and **status reporting moved to
-  the human** (`/report-status` run from the coordinator). Verified: spawn opens a
+  the human** (`/pwc-report-status` run from the coordinator). Verified: spawn opens a
   live, oriented worker tab; coordinator-run reporting logs correctly; the
   worker-status check sees the live session. Full v1 lifecycle confirmed.

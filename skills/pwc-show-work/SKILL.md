@@ -1,9 +1,9 @@
 ---
-name: show-work
+name: pwc-show-work
 description: The PWC coordinator's all-tasks briefing. Reads the durable task database and presents a prioritized view of all in-flight work. Run it anytime — morning to orient, midday to check in, close to wrap up. This is the first thing to run after starting (or restarting) the coordinator.
 ---
 
-# /show-work
+# /pwc-show-work
 
 The single interactive surface of the PWC coordinator. It reads the durable
 SQLite task database and renders a prioritized view of all your tasks in flight, so the
@@ -14,7 +14,7 @@ state lives in the task database, not in this conversation.
 This skill is built in layers, all present below: render, worker-status sweep,
 staleness sweep, external reconciliation, and a recap + archive. It reports on work
 you're *already tracking*; bringing in *new* work from external sources is a
-separate command, `/find-work`. Reconciliation *conflict resolution rules* are
+separate command, `/pwc-find-work`. Reconciliation *conflict resolution rules* are
 deliberately left to be handled as real cases arise (see Notes).
 
 ## Configuration
@@ -123,7 +123,7 @@ deliberately left to be handled as real cases arise (see Notes).
    actually after.
 
 8. **Offer next moves, don't take them.** End by pointing at what the user might do
-   (e.g. "drill into a task, or run `/pick-work` for a suggestion"). Beyond the worker-status
+   (e.g. "drill into a task, or run `/pwc-pick-work` for a suggestion"). Beyond the worker-status
    and staleness sweeps above (which only flag and, for dead workers, mark `gone`),
    do not dispatch work or otherwise mutate tasks unless the user asks.
 
@@ -132,11 +132,11 @@ deliberately left to be handled as real cases arise (see Notes).
 - **The task database is the source of truth, not this conversation.** If something here
   disagrees with what you remember from earlier in the session, the task database wins.
   Never invent tasks or statuses that aren't in the `summary` output.
-- **Stay light.** `/show-work` should not pull full `detail` for every task — that
+- **Stay light.** `/pwc-show-work` should not pull full `detail` for every task — that
   defeats the two-tier design. Load `detail` only for a task the user is focusing on.
 - **Deferred-by-design:** *reconciliation conflict rules* — step 4 detects and
   surfaces task-DB-vs-external disagreement, but the rules for resolving each
   conflict shape are not codified; handle them as they arise. (Finding new work and
-  the new-vs-update matching that goes with it now live in `/find-work`.)
+  the new-vs-update matching that goes with it now live in `/pwc-find-work`.)
 - Archived (done-and-rolled-up) tasks are intentionally absent from `summary`. If
   the user asks about completed work, add `--include-archived`.

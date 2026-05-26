@@ -22,7 +22,7 @@ if [[ ! -d "$WS" ]]; then
   exit 1
 fi
 
-SKILLS=(setup-workspace find-work show-work pick-work start-work report-status)
+SKILLS=(pwc-setup-workspace pwc-find-work pwc-show-work pwc-pick-work pwc-start-work pwc-report-status)
 GLOBAL_SKILLS="$HOME/.claude/skills"
 
 # 1. Global skills — visible from any cwd (so workers in a repo can resolve them).
@@ -37,7 +37,7 @@ mkdir -p "$WS/.pwc"
 python3 "$PWC_SRC/scripts/taskdb.py" --workspace "$WS" init
 
 # 3. Splice the PWC section into the workspace CLAUDE.md so every session there
-#    knows PWC is set up (and the coordinator opens with /show-work). Idempotent;
+#    knows PWC is set up (and the coordinator opens with /pwc-show-work). Idempotent;
 #    leaves any existing CLAUDE.md content untouched.
 python3 "$PWC_SRC/scripts/claude_md.py" --target "$WS/CLAUDE.md"
 
@@ -45,4 +45,4 @@ echo "pwc: installed"
 echo "     skills (global): ${SKILLS[*]}  ->  $GLOBAL_SKILLS"
 echo "     task database:    $WS/.pwc/taskdb.db"
 echo "     CLAUDE.md:        PWC section added to $WS/CLAUDE.md"
-echo "     run /show-work in a Claude Code session started in $WS"
+echo "     run /pwc-show-work in a Claude Code session started in $WS"

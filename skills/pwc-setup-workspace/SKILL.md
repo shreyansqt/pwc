@@ -1,17 +1,17 @@
 ---
-name: setup-workspace
-description: Onboard a workspace to PWC — figure out which external sources of work apply here (Jira, GitHub, Slack, email) and how to query each, then write the per-workspace sources config that /find-work uses. Run this once per workspace, or again to change what /find-work scans.
+name: pwc-setup-workspace
+description: Onboard a workspace to PWC — figure out which external sources of work apply here (Jira, GitHub, Slack, email) and how to query each, then write the per-workspace sources config that /pwc-find-work uses. Run this once per workspace, or again to change what /pwc-find-work scans.
 ---
 
-# /setup-workspace
+# /pwc-setup-workspace
 
 Set up (or reconfigure) what work PWC pulls into *this* workspace. Different
 workspaces draw work from different places — one is Jira + GitHub + Slack, another
-is just GitHub, another only local notes — so the sources `/find-work` scans are
+is just GitHub, another only local notes — so the sources `/pwc-find-work` scans are
 configured per workspace, not hardcoded. This command figures out what applies
 here, with you, and writes the config.
 
-The result is `<workspace>/.pwc/sources.json`. `/find-work` reads it; nothing else
+The result is `<workspace>/.pwc/sources.json`. `/pwc-find-work` reads it; nothing else
 depends on the exact contents, so it's safe to re-run anytime to adjust.
 
 ## Configuration
@@ -69,12 +69,12 @@ depends on the exact contents, so it's safe to re-run anytime to adjust.
    Heed any validation warnings it prints (e.g. an enabled source missing a required
    field) and fix them with the user before finishing.
 
-6. **Confirm** what was written and tell the user they can now run `/find-work` to
-   scan these sources, and re-run `/setup-workspace` anytime to change them.
+6. **Confirm** what was written and tell the user they can now run `/pwc-find-work` to
+   scan these sources, and re-run `/pwc-setup-workspace` anytime to change them.
 
 ## Notes
 
-- This only configures **what to scan** — it doesn't fetch work itself. `/find-work`
+- This only configures **what to scan** — it doesn't fetch work itself. `/pwc-find-work`
   does the scanning and surfaces candidates (which the user confirms before anything
   is queued). Setup and finding are separate steps.
 - Detection is best-effort. If a source can't be auto-detected (e.g. an MCP isn't

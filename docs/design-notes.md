@@ -164,17 +164,17 @@ inbound work — we'd collapsed an earlier `/whats-new` into it for v1 simplicit
 During the build (and a vocabulary pass for daily-use comfort) two things changed:
 
 - **Renamed to a verb-phrase family** so the command surface is self-documenting
-  and visually distinct from the team-skills commands: `/brief` → `/show-work`,
-  `/next` → `/pick-work`, `/start` (was the unnamed "dispatch") → `/start-work`,
-  `/pwc-report` → `/report-status`.
-- **Split finding new work back out** into its own `/find-work`. The intent
+  and visually distinct from the team-skills commands: `/brief` → `/pwc-show-work`,
+  `/next` → `/pwc-pick-work`, `/start` (was the unnamed "dispatch") → `/pwc-start-work`,
+  `/pwc-report` → `/pwc-report-status`.
+- **Split finding new work back out** into its own `/pwc-find-work`. The intent
   separation reads cleanly with verb names — *find* new work (the inbound edge,
   scans external sources, surfaces candidates, queues on confirm) vs. *show* where
   already-tracked work stands (reconcile + sweeps + recap, no source-scan for new
   items). This is exactly the `/whats-new` seam the PRD predicted might re-split;
   the verb names make "find vs. show" clearer than "brief vs. whats-new" was.
 
-The no-auto-promote rule is unchanged: `/find-work` surfaces, the user confirms.
+The no-auto-promote rule is unchanged: `/pwc-find-work` surfaces, the user confirms.
 
 ## Workers are human-driven in v1 (the seed briefs, it doesn't command)
 
@@ -185,7 +185,7 @@ a PWC worker role." The original vision leaned toward semi-autonomous workers
 (accept the task, do it, self-report, finish), which is exactly what a vanilla
 session reasonably won't do when handed "you are a worker, run these commands."
 
-Decision for v1: **workers are human-driven.** PWC's job at `/start-work` is to be
+Decision for v1: **workers are human-driven.** PWC's job at `/pwc-start-work` is to be
 a *dispatcher and context-loader* — open the session in the right repo with the
 task's context pre-loaded — not to coerce autonomy. So the seed prompt is reframed
 from *imperative* ("act as a worker, run these") to *informative* ("here's your
@@ -195,7 +195,7 @@ distrust.
 
 Consequences: status reporting becomes best-effort rather than mandated (the
 human, or the session when natural, records events) — and nothing breaks if a
-report is skipped, because `/show-work`'s worker-status check still notices when a
+report is skipped, because `/pwc-show-work`'s worker-status check still notices when a
 session ends. Self-driving workers remain a plausible later direction (likely via a
 trusted entry skill that *is* the role, so it's read as legitimate rather than a
 suspicious prompt), but they're explicitly out of scope for v1.
@@ -210,10 +210,10 @@ side effects, on someone else's say-so, isn't something I'll do without looking
 first." That is *correct* security behavior we don't want to engineer around. So
 the rule tightened: **the seed requests no action at all — it is pure task
 context.** Reporting is human-initiated, not driven by the seed: run
-`/report-status` from the coordinator to record where a task stands, or tell a
+`/pwc-report-status` from the coordinator to record where a task stands, or tell a
 warmed-up worker to run it. (Skills are installed **globally** in `~/.claude/skills/`
 precisely so a worker — which runs in a repo, not the workspace root — *can* resolve
-`/report-status` once it's been asked; the constraint was never "the skill is
+`/pwc-report-status` once it's been asked; the constraint was never "the skill is
 unavailable," it's "a cold worker won't run a command on a seed's say-so.") Also
 note the launch mechanics that the same test fixed: spawn a normal
 shell tab and *type* the `claude` launch into it (interactive claude needs a real
