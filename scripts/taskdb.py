@@ -198,10 +198,10 @@ def cmd_find_refs(args):
 def cmd_add_task(args):
     conn = pwc_db.connect(args.workspace)
     with conn:
-        # Id is meaningful: caller passes --id (a Jira key, or a <source>-<slug> the
-        # skill built from the conventions). If omitted, fall back to a slug of the
-        # title. Either way, dedup against existing ids and aliases.
-        base = args.id or slugify(args.title)
+        # Id is meaningful: caller passes --task (a Jira key, or a <source>-<slug>
+        # the skill built from the conventions). If omitted, fall back to a slug of
+        # the title. Either way, dedup against existing ids and aliases.
+        base = args.task or slugify(args.title)
         tid = _dedup_id(conn, base)
         ts = now_iso()
         conn.execute(
@@ -224,7 +224,7 @@ def cmd_update_task(args):
         old = _require_task(conn, args.task)
         tid = old["id"]  # canonical
         sets, params, changes = [], [], []
-        for field in ("status", "priority", "notes", "parked_reason", "workdir"):
+        for field in ("title", "status", "priority", "notes", "parked_reason", "workdir"):
             val = getattr(args, field)
             if val is not None:
                 sets.append(f"{field} = ?")
@@ -397,8 +397,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_find_refs)
 
     s = sub.add_parser("add-task")
-    s.add_argument("--id", help="meaningful id (Jira key or <source>-<slug>); "
-                                "deduped if taken. Defaults to a slug of the title.")
+    s.add_argument("--task", help="meaningful id (Jira key or <source>-<slug>); "
+                                  "deduped if taken. Defaults to a slug of the title.")
     s.add_argument("--type", required=True)
     s.add_argument("--title", required=True)
     s.add_argument("--status", default="active")
@@ -412,6 +412,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("update-task")
     s.add_argument("--task", required=True)
+    s.add_argument("--title")
     s.add_argument("--status")
     s.add_argument("--priority", type=int)
     s.add_argument("--notes")
