@@ -74,5 +74,11 @@ tracking): find brings new work in; show tells you where existing work stands.
   `find-refs` on identity references. The automatic matching logic beyond that exact
   check is deliberately left for real cases — when unsure, surface it and let the
   user say "that's the same as t_00xx."
+- **When two tickets are really one piece of work** (e.g. a backend ticket and its
+  frontend ticket that ship together), don't fake the combine with a stray extra ref
+  and a notes blob. Queue them, then `taskdb.py merge --from <absorbed> --into <survivor>`:
+  the survivor inherits both ids as identity refs (so neither gets re-proposed),
+  plus the absorbed task's history and aliases, and the absorbed id still resolves
+  via `--task`. Confirm the direction with the user (which id survives) before merging.
 - `/pwc-find-work` does not reconcile or report on existing tasks — that's `/pwc-show-work`.
   Run `/pwc-find-work` to bring new work in, `/pwc-show-work` to see where everything stands.

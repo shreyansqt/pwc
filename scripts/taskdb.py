@@ -361,6 +361,87 @@ def cmd_promote(args):
     emit(pwc_db.row_to_dict(out))
 
 
+def cmd_merge(args):
+    """Merge one task INTO another: `--from` is absorbed into `--into`, which survives.
+
+    The surviving task inherits the absorbed task's identity/working refs (so its
+    Jira keys etc. now resolve to the survivor — `find-work` won't re-propose them)
+    and its event history. The absorbed id and any aliases it had become aliases of
+    the survivor, so `--task <absorbed-id>` keeps resolving. The absorbed row is then
+    deleted. This is the real "these two tickets are one piece of work" operation —
+    use it instead of faking a combine with a stray extra ref + notes.
+
+    Refs are de-duplicated by (kind, ref_type, value) so a shared ref isn't doubled.
+    The survivor's own fields (title, status, priority, ...) are untouched except
+    that the absorbed task's notes, if any, are appended to the survivor's notes.
+    """
+    conn = pwc_db.connect(args.workspace)
+    with conn:
+        survivor = _require_task(conn, args.into)
+        absorbed = _require_task(conn, getattr(args, "from"))
+        into_id, from_id = survivor["id"], absorbed["id"]
+        if into_id == from_id:
+            fail("cannot merge a task into itself")
+        ts = now_iso()
+
+        # 1. Move refs, skipping ones the survivor already has (by identity tuple).
+        existing = {
+            (r["kind"], r["ref_type"], r["value"])
+            for r in conn.execute(
+                "SELECT kind, ref_type, value FROM task_refs WHERE task_id = ?",
+                (into_id,),
+            ).fetchall()
+        }
+        for r in conn.execute(
+            "SELECT id, kind, ref_type, value FROM task_refs WHERE task_id = ?",
+            (from_id,),
+        ).fetchall():
+            if (r["kind"], r["ref_type"], r["value"]) in existing:
+                conn.execute("DELETE FROM task_refs WHERE id = ?", (r["id"],))
+            else:
+                conn.execute(
+                    "UPDATE task_refs SET task_id = ? WHERE id = ?", (into_id, r["id"])
+                )
+
+        # 2. Move event history onto the survivor.
+        conn.execute(
+            "UPDATE events SET task_id = ? WHERE task_id = ?", (into_id, from_id)
+        )
+
+        # 3. Re-point the absorbed task's aliases, then make its id an alias too.
+        conn.execute(
+            "UPDATE task_aliases SET task_id = ? WHERE task_id = ?", (into_id, from_id)
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO task_aliases (alias, task_id, created_at) "
+            "VALUES (?,?,?)",
+            (from_id, into_id, ts),
+        )
+
+        # 4. Fold the absorbed notes into the survivor's notes.
+        if absorbed["notes"]:
+            merged_notes = (
+                f"{survivor['notes']}\n\n[merged from {from_id}] {absorbed['notes']}"
+                if survivor["notes"]
+                else f"[merged from {from_id}] {absorbed['notes']}"
+            )
+            conn.execute(
+                "UPDATE tasks SET notes = ?, updated_at = ? WHERE id = ?",
+                (merged_notes, ts, into_id),
+            )
+
+        # 5. Delete the absorbed row (its children are already re-pointed).
+        conn.execute("DELETE FROM tasks WHERE id = ?", (from_id,))
+
+        _insert_event(
+            conn, task_id=into_id, source="coordinator", kind="note",
+            detail=f"merged {from_id} into {into_id} (refs, history, aliases absorbed)",
+            at=ts,
+        )
+        out = conn.execute("SELECT * FROM tasks WHERE id = ?", (into_id,)).fetchone()
+    emit(pwc_db.row_to_dict(out))
+
+
 # ── arg parsing ───────────────────────────────────────────────────────────---
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="taskdb.py", description=__doc__)
@@ -455,6 +536,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--task", required=True, help="current id or alias")
     s.add_argument("--new-id", required=True, help="new canonical id, e.g. a Jira key")
     s.set_defaults(func=cmd_promote)
+
+    s = sub.add_parser("merge", help="absorb one task into another (they're one piece of work)")
+    s.add_argument("--from", dest="from", required=True,
+                   help="task absorbed and deleted; its id becomes an alias of --into")
+    s.add_argument("--into", required=True, help="surviving task; inherits refs + history")
+    s.set_defaults(func=cmd_merge)
 
     return p
 
