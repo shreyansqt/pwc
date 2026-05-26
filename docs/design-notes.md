@@ -209,9 +209,13 @@ prior context establishing that PWC opened this session… running unknown code 
 side effects, on someone else's say-so, isn't something I'll do without looking
 first." That is *correct* security behavior we don't want to engineer around. So
 the rule tightened: **the seed requests no action at all — it is pure task
-context.** Reporting moves entirely to the human (run `/report-status` from the
-coordinator, which sits at the workspace root where the skill resolves), not the
-worker. Also note the launch mechanics that the same test fixed: spawn a normal
+context.** Reporting is human-initiated, not driven by the seed: run
+`/report-status` from the coordinator to record where a task stands, or tell a
+warmed-up worker to run it. (Skills are installed **globally** in `~/.claude/skills/`
+precisely so a worker — which runs in a repo, not the workspace root — *can* resolve
+`/report-status` once it's been asked; the constraint was never "the skill is
+unavailable," it's "a cold worker won't run a command on a seed's say-so.") Also
+note the launch mechanics that the same test fixed: spawn a normal
 shell tab and *type* the `claude` launch into it (interactive claude needs a real
 TTY; running it as the tab's `command=` program gave it none and the tab closed
 instantly), and deliver the seed by typing it in after boot rather than as a

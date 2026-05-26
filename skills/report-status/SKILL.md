@@ -10,12 +10,14 @@ reflects reality — the coordinator reads the task database, it does not watch
 worker tabs. This is an append to the event log; it does not change the structured
 fields the coordinator owns.
 
-Run this **from the coordinator** (which sits at the workspace root, where this
-skill resolves). It is *not* run by spawned workers: a freshly spawned worker
-correctly won't execute a reporting command on a seed's say-so, and shouldn't be
-asked to — so status reporting is the human's job, done here. Use it when you check
-in on a worker and want to record its state, or to log the outcome of an inline
-task you handled yourself.
+Run this **from the coordinator** to record where a task stands (after checking in
+on a worker, or to log the outcome of an inline task you handled). A **worker can
+also run it** — PWC's skills are installed globally, so `/report-status` resolves
+in any session — but only once it's warmed up and *you've asked it to*; a fresh
+worker correctly won't run a reporting command just because its opening message
+said so, and the `/start-work` seed deliberately doesn't ask. So in practice
+reporting is human-initiated: you run it from the coordinator, or you tell the
+worker to.
 
 ## Configuration
 

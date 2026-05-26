@@ -26,23 +26,25 @@ pwc/                      # this repo — the SOURCE (develop & commit here)
     pwc_db.py, _common.py #   shared connection / discovery helpers
   skills/                 # the coordinator's brain (SKILL.md each)
     brief/  next/  start/  pwc-report/
-  install.sh              # symlink skills into a workspace + init its task database
+  install.sh              # symlink skills globally + init a workspace's task database
 ```
 
 Runtime state lives **in each workspace**, never here: `<workspace>/.pwc/taskdb.db`.
 
 ## Install
 
-PWC installs per-workspace by symlinking its skills into the workspace's
-`.claude/skills/` and initializing a task database — the same pattern as `team-skills`.
-
 ```bash
 ./install.sh ~/work/acme     # or omit the arg for that default
 ```
 
-This creates `<workspace>/.claude/skills/{brief,next,start,pwc-report}` (symlinks
-back here) and `<workspace>/.pwc/taskdb.db`. Because the skills are symlinks,
-`git pull` in this repo upgrades every installed workspace at once.
+Two parts:
+
+- **Skills go global** — symlinked into `~/.claude/skills/` so *every* Claude Code
+  session sees them, in any directory. This matters because a spawned worker runs
+  inside a repo (not the workspace root), and a workspace-local skill wouldn't
+  resolve there. Because they're symlinks, `git pull` in this repo upgrades them all.
+- **The task database is per-workspace** — `<workspace>/.pwc/taskdb.db`, created on
+  install (only if absent). Each workspace keeps its own tasks.
 
 ### Prerequisites
 

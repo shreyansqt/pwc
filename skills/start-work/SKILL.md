@@ -81,13 +81,15 @@ of the way.
    start with?"* so the session settles into a normal interactive state for the user
    to take over. For a resumed session, little or no seed is needed.
 
-   **Status reporting is the user's job, not the worker's.** Because a worker won't
-   run the reporting command on a seed's say-so (nor should it), reporting back to
-   PWC is done by the human — run `/report-status` from the *coordinator* (which is
-   at the workspace root, where the skill resolves), or note the outcome when you
-   next `/show-work`. Either way `/show-work`'s worker-status check still notices
-   when a worker session ends and flags the task for triage, so nothing is lost if
-   no explicit report is made.
+   **Don't put a reporting instruction in the seed.** PWC's skills are installed
+   globally (`~/.claude/skills/`), so a worker *can* resolve `/report-status` — but
+   a fresh worker still won't (and shouldn't) run a reporting command just because
+   the opening message told it to. So leave reporting out of the seed entirely.
+   Reporting happens later, once there's trust and context: the worker can run
+   `/report-status` when *you* ask it to, or you can run `/report-status` from the
+   coordinator to record where a task stands. Either way `/show-work`'s
+   worker-status check still notices when a worker session ends and flags the task
+   for triage, so nothing is lost if no explicit report is made.
 
 5. **Pre-allocate and spawn.** Generate a UUID, pass it as `--session-id` to
    `spawn.py` (so the id is known before the process exists). Pipe the seed prompt
