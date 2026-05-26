@@ -1,0 +1,106 @@
+# Glossary
+
+The PWC vocabulary, in one place. Terms are grouped by what kind of thing they are.
+
+## Actors
+
+**Coordinator** — The single Claude Code session you talk to. It holds all your
+in-flight work, briefs you, suggests what's next, and starts workers. Runs in the
+workspace root and deliberately stays *light* — it orchestrates, it doesn't do the
+task work itself. Stateless in conversation: kill it and start a fresh one anytime
+with zero loss, because everything important lives in the task database.
+
+**Worker** — A *separate* Claude Code session the coordinator starts to do one
+task's actual work (the coding, the investigation). Runs in its own iTerm2 **tab**,
+in the relevant repo. Bound to one task. Reports status back to the task database.
+
+## Places
+
+**Workspace** — A top-level directory that is one coherent body of work, containing
+many repos (e.g. `~/work/acme`). PWC is installed *per workspace*;
+each gets its own task database. The coordinator runs here.
+
+**Repo** — One git repo inside a workspace (`service-backend`, `service-banking`, …).
+A worker is started in the repo its task concerns (or the workspace root).
+
+**Source repo** — Where PWC's own code lives (`side-projects/pwc`), distinct from
+where it *runs* (a workspace). Installed into a workspace via symlinks.
+
+**Task database** — The SQLite file at `<workspace>/.pwc/taskdb.db`. The single
+source of truth for all your tasks. "The task database wins" = if your memory (or
+the conversation) disagrees with it, the database is right. Accessed only through
+`taskdb.py`, never edited by hand.
+
+## Data (what's in the task database — three tables)
+
+**Task** — One unit of work the coordinator tracks (a Jira ticket, a PR review, a
+Slack reply, a doc). Has a stable id like `t_0007` and a **status** (active,
+blocked, awaiting-review, done, gone, …).
+
+**Reference** — An external handle a task carries (`task_refs` table). Two kinds:
+*identity* references (Jira key, PR URL, Slack ids) used to recognize "is this the
+same task?", and *working-context* references (repo, branch) used to start a worker
+in the right place. A task accrues references over its life.
+
+**Event** — An append-only log entry on a task (created, dispatched, status,
+blocked, done, …). A task's events *are* its timeline/narrative. Also the source
+the **recap** draws on. Kinds: `created | dispatched | status | blocked |
+awaiting-review | done | reconcile | new-task | stale-flag | recap | archived |
+gone | note`.
+
+## Commands
+
+**`/brief`** — The one command you run to see everything. Reads the task database,
+checks external sources, sweeps for problems, and renders a prioritized view of all
+your tasks. Run it anytime — morning to orient, midday to check in, close to wrap up.
+
+**`/next`** — Suggests what to work on or resume next. Suggests only; never starts
+work on its own.
+
+**`/start`** — Turns a task into action: either starts a **worker** (the default,
+for substantial work) or handles it **inline** (for trivial work). Also covers
+resuming a stopped task by reopening its prior session.
+
+**`/pwc-report`** — Used *by a worker* to report status (blocked / awaiting-review /
+done / note) back to the task database. (Workers usually run the underlying
+`taskdb.py log-event` command directly, since the skill isn't on their path from a
+repo — see the dispatch notes.)
+
+## Behaviors / mechanisms (mostly inside `/brief`)
+
+**Inline (handling)** — The coordinator doing a trivial task *itself* in its own
+session instead of starting a worker. Reserved for quick things (a one-line reply).
+
+**Reconciliation** — `/brief` re-checking each task against its external source
+(Jira / GitHub / Slack / email) and *surfacing* disagreements. Rule: surface, never
+auto-resolve.
+
+**New tasks (noticing)** — `/brief` spotting things in your inboxes that might be
+new tasks and asking whether to add each. Never auto-adds.
+
+**Worker-status check** — Checking whether a worker is *actually still running*
+(via `pgrep` on its session id). A worker that's no longer running gets its task
+flagged **"gone — needs triage."** Detects death, not outcome — a gone worker may
+have left finished-but-unpushed work, so the coordinator never assumes done/failed.
+(Distinct from a task's *status* field.)
+
+**Staleness (sweep)** — Flagging active tasks untouched too long. A signal, not a
+verdict — surfaces for keep/drop, never auto-archives. Parked tasks are exempt.
+
+**Parked** — A task deliberately waiting on something external (a review, a reply).
+Exempt from the staleness sweep; gets a gentler "still waiting?" nudge instead.
+
+**Recap** — `/brief` summarizing what changed since the last brief, written as one
+event. The longitudinal record the build journal and "what did I do this week"
+reviews draw on. Also how `/brief` bounds "since the last brief."
+
+## Worker lifecycle terms
+
+**Session id** — A UUID the coordinator generates *before* starting a worker
+(`claude --session-id <uuid>`). Does double duty: it's how `--resume` reopens the
+session, and how the worker-status check sees whether it's running (the uuid is in
+the worker's command line).
+
+**Resume / resumption** — Reopening a worker's *prior* session (with its full
+conversation) rather than starting fresh. No separate command — it's just `/start`
+reopening an existing session when one survives.

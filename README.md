@@ -11,7 +11,8 @@ SQLite task database. Kill the coordinator and start a fresh one anytime — the
 context to lose, because nothing important lives in the conversation.
 
 See [`docs/prd.md`](docs/prd.md) and [`docs/design-notes.md`](docs/design-notes.md)
-for the full design and the reasoning behind it.
+for the full design and the reasoning behind it, and
+[`docs/glossary.md`](docs/glossary.md) for the vocabulary.
 
 ## Layout
 
