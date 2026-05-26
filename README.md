@@ -10,9 +10,10 @@ deterministic mechanism is Python scripts, and all state lives in a per-workspac
 SQLite task database. Kill the coordinator and start a fresh one anytime — there is no
 context to lose, because nothing important lives in the conversation.
 
-See [`docs/prd.md`](docs/prd.md) and [`docs/design-notes.md`](docs/design-notes.md)
-for the full design and the reasoning behind it, and
-[`docs/glossary.md`](docs/glossary.md) for the vocabulary.
+**New to PWC? Start with the [user guide](docs/guide.md)** — the practical
+how-to-use walkthrough. See also [`docs/prd.md`](docs/prd.md) and
+[`docs/design-notes.md`](docs/design-notes.md) for the full design and the
+reasoning behind it, and [`docs/glossary.md`](docs/glossary.md) for the vocabulary.
 
 ## Layout
 
