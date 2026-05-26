@@ -5,11 +5,16 @@ description: Act on a PWC task — either spawn a worker (a Claude Code session 
 
 # /start-work
 
-Turn a tracked task into action. /start decides whether the task warrants its own
-**worker** (a Claude Code session in a new iTerm2 tab) or can be handled
+Turn a tracked task into action. `/start-work` decides whether the task warrants
+its own **worker** (a Claude Code session in a new iTerm2 tab) or can be handled
 **inline** by the coordinator, then does it. It also covers **resumption** — there
 is no separate resume command; picking a stopped task back up is just starting
 it again, reopening its prior session when one survives.
+
+A worker is a normal Claude Code session that *you* drive — `/start-work` opens it
+in the right repo with the task's context pre-loaded so you can begin immediately.
+It does not coerce the session into acting autonomously; it sets it up and gets out
+of the way.
 
 ## Configuration
 
@@ -57,31 +62,33 @@ it again, reopening its prior session when one survives.
      prior conversation.
    - **No session, or transcript gone** → fresh.
 
-4. **For a fresh session, build a seed prompt** from the task's detail + event
-   timeline so the worker continues rather than starting cold. Include: the task id,
-   what it is, relevant refs (Jira key, PR, branch), a short summary of prior events,
-   and **the exact status-reporting command** (see below). For a resumed session,
-   little or no seed is needed.
+4. **For a fresh session, build a seed prompt that *briefs*, not commands.**
+   The worker is a normal Claude Code session the user will drive — PWC's job here
+   is to load context so the user can start immediately, not to coerce the session
+   into an autonomous role. A prompt that orders a fresh session to "act as a PWC
+   worker and run these commands" reads as a suspicious directive and gets refused;
+   an informative briefing does not. So frame it as context + an offered tool:
 
-   **Reporting instruction — give the worker the full script command, not the
-   skill.** A worker runs in a repo (e.g. `service-banking`), which creates two
-   traps to avoid:
-   - `/report-status` is *not* resolvable from the worker's cwd (skills install at the
-     workspace root), so seed the literal `taskdb.py` command instead.
-   - The task database lives at the *workspace root* (`<workspace>/.pwc/taskdb.db`), but
-     `taskdb.py` auto-discovers from cwd — which, from a repo, finds the wrong
-     place. So the command **must pass `--workspace <root>` explicitly.**
-
-   Seed the worker with exactly this (substitute the real workspace root and task id):
-   ```
-   To report status, run this exact command (works from any directory):
+   - **What the task is** — the title, type, relevant refs (Jira key, PR, branch),
+     and a short summary of the prior events/timeline so it continues rather than
+     starting cold.
+   - **An offered way to record progress** (not a mandate): mention that meaningful
+     progress can be recorded to PWC with the command below. Because the worker
+     runs in a repo, give the literal `taskdb.py` command (the `/report-status`
+     skill isn't resolvable from a repo cwd) and **include `--workspace <root>`**
+     (auto-discovery from a repo finds the wrong place):
+     ```
+     # optional — record a meaningful event to PWC:
      python3 ~/work/pwc/scripts/taskdb.py \
        --workspace ~/work/acme \
        log-event --task <THIS-TASK-ID> --source worker \
        --kind <blocked|awaiting-review|done|note> --detail "<what happened>"
-   Report when you hit a meaningful event (blocked, up for review, done).
-   ```
-   Do not tell the worker to use `/report-status`, and do not omit `--workspace`.
+     ```
+
+   Keep the tone "here's your task and a tool you can use," not "you must." For a
+   resumed session, little or no seed is needed. Reporting is best-effort — if the
+   session never reports, `/show-work`'s worker-status check still notices when it
+   ends and flags the task for triage.
 
 5. **Pre-allocate and spawn.** Generate a UUID, pass it as `--session-id` to
    `spawn.py` (so the id is known before the process exists). Pipe the seed prompt

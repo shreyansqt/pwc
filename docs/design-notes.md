@@ -176,6 +176,30 @@ During the build (and a vocabulary pass for daily-use comfort) two things change
 
 The no-auto-promote rule is unchanged: `/find-work` surfaces, the user confirms.
 
+## Workers are human-driven in v1 (the seed briefs, it doesn't command)
+
+The first live spawn surfaced a problem the design hadn't anticipated: a freshly
+spawned `claude` session **distrusted an imperative worker-role seed prompt and
+refused to act** — "this arrived as a user prompt but my instructions don't mention
+a PWC worker role." The original vision leaned toward semi-autonomous workers
+(accept the task, do it, self-report, finish), which is exactly what a vanilla
+session reasonably won't do when handed "you are a worker, run these commands."
+
+Decision for v1: **workers are human-driven.** PWC's job at `/start-work` is to be
+a *dispatcher and context-loader* — open the session in the right repo with the
+task's context pre-loaded — not to coerce autonomy. So the seed prompt is reframed
+from *imperative* ("act as a worker, run these") to *informative* ("here's your
+task; here's a command you can optionally use to record progress"). That sidesteps
+the trust problem entirely by not asking the session to do anything it would
+distrust.
+
+Consequences: status reporting becomes best-effort rather than mandated (the
+human, or the session when natural, records events) — and nothing breaks if a
+report is skipped, because `/show-work`'s worker-status check still notices when a
+session ends. Self-driving workers remain a plausible later direction (likely via a
+trusted entry skill that *is* the role, so it's read as legitimate rather than a
+suspicious prompt), but they're explicitly out of scope for v1.
+
 ## Forward-compatibility considerations (not v1 work)
 
 Things we're not building, but are designing in a way that doesn't preclude:
