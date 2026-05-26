@@ -55,8 +55,14 @@ tracking): find brings new work in; show tells you where existing work stands.
    actionable). For each, ask whether to queue it as a task. **Never auto-add** —
    the user confirms each one.
 
-5. **Queue the confirmed ones.** For each the user approves:
-   `add-task --type <jira|pr-review|slack|email|...> --title "..." [--workdir <repo>]`,
+5. **Queue the confirmed ones.** For each the user approves, first **derive its id
+   from the source's `id_convention`** (from the sources config):
+   - `jira-key` → use the Jira key verbatim as `--id` (e.g. `SMT-874`).
+   - `<prefix>-slug` → `--id <prefix>-<short-slug-of-title>` (e.g. `slack-deploy-window`).
+   - multi-source or unclear → use the config's top-level `id_fallback`.
+   `taskdb.py` dedups the id automatically if it's taken, so don't worry about
+   collisions. Then:
+   `add-task --id <derived-id> --type <jira|pr-review|slack|email|...> --title "..." [--workdir <repo>]`,
    then `add-ref --kind identity --ref-type <t> --value <raw-id>` to attach its
    identity reference, then `log-event --kind new-task`. Report back what was queued.
 

@@ -49,12 +49,27 @@ depends on the exact contents, so it's safe to re-run anytime to adjust.
    Sources the user doesn't want are recorded with `"enabled": false` (so it's
    clear they were considered and declined, and easy to turn on later).
 
-4. **Write the config** by piping the assembled JSON to `sources.py set --json -`.
-   The shape is `{"sources": {"<name>": {"enabled": <bool>, ...params}}}`. Heed any
-   validation warnings it prints (e.g. an enabled source missing a required field)
-   and fix them with the user before finishing.
+4. **Confirm the id conventions** — how a new task's *id* is derived from each
+   source. These are meaningful ids, not numbers. Propose sensible defaults and let
+   the user adjust:
+   - **Jira** → `"jira-key"` (use the ticket key itself, e.g. `SMT-874`). This is
+     almost always what you want for Jira.
+   - **GitHub / Slack / email / etc.** → `"<prefix>-slug"` — a prefix plus a slug of
+     the title (e.g. `slack-deploy-window`, `email-invoice-priya`). Confirm the
+     prefix per source (defaults: the source name).
+   - **General fallback** (`id_fallback`, top-level) → for tasks that span multiple
+     sources or have none. Default `"task-slug"` (a plain title slug, `task-` prefix
+     optional). Confirm one value.
+   Store each source's choice as `"id_convention"` on that source, and the fallback
+   as a top-level `"id_fallback"`.
 
-5. **Confirm** what was written and tell the user they can now run `/find-work` to
+5. **Write the config** by piping the assembled JSON to `sources.py set --json -`.
+   The shape is
+   `{"sources": {"<name>": {"enabled": <bool>, "id_convention": "...", ...params}}, "id_fallback": "task-slug"}`.
+   Heed any validation warnings it prints (e.g. an enabled source missing a required
+   field) and fix them with the user before finishing.
+
+6. **Confirm** what was written and tell the user they can now run `/find-work` to
    scan these sources, and re-run `/setup-workspace` anytime to change them.
 
 ## Notes

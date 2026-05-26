@@ -28,15 +28,38 @@ _SUMMARY_COLS = (
 )
 
 
-# ── id assignment ───────────────────────────────────────────────────────────
-def _next_task_id(conn) -> str:
-    """Sequential stable id like t_0007. Stable across archives (max+1 over all)."""
+# ── ids: slugify, dedup, resolve-through-aliases ──────────────────────────────
+import re as _re
+
+
+def slugify(text: str, maxwords: int = 4) -> str:
+    """Lowercase, alphanumeric-and-hyphen slug from free text (first few words)."""
+    words = _re.findall(r"[a-z0-9]+", (text or "").lower())
+    slug = "-".join(words[:maxwords])
+    return slug or "task"
+
+
+def _dedup_id(conn, base: str) -> str:
+    """Return `base`, or base-2/-3/... if it (or an alias) is already taken."""
+    candidate, n = base, 1
+    while conn.execute(
+        "SELECT 1 FROM tasks WHERE id = ? "
+        "UNION SELECT 1 FROM task_aliases WHERE alias = ?",
+        (candidate, candidate),
+    ).fetchone():
+        n += 1
+        candidate = f"{base}-{n}"
+    return candidate
+
+
+def _resolve_id(conn, task_id: str) -> str | None:
+    """Map any id or former alias to the current canonical tasks.id (or None)."""
+    if conn.execute("SELECT 1 FROM tasks WHERE id = ?", (task_id,)).fetchone():
+        return task_id
     row = conn.execute(
-        "SELECT id FROM tasks WHERE id LIKE 't\\_%' ESCAPE '\\' "
-        "ORDER BY CAST(SUBSTR(id, 3) AS INTEGER) DESC LIMIT 1"
+        "SELECT task_id FROM task_aliases WHERE alias = ?", (task_id,)
     ).fetchone()
-    n = (int(row["id"][2:]) + 1) if row else 1
-    return f"t_{n:04d}"
+    return row["task_id"] if row else None
 
 
 def _touch_last_event(conn, task_id: str, at: str) -> None:
@@ -58,10 +81,11 @@ def _insert_event(conn, *, task_id, source, kind, detail, at=None) -> int:
 
 
 def _require_task(conn, task_id: str):
-    row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
-    if row is None:
+    """Fetch a task by id OR a former alias. Returns the canonical row."""
+    canonical = _resolve_id(conn, task_id)
+    if canonical is None:
         fail(f"no task {task_id!r}")
-    return row
+    return conn.execute("SELECT * FROM tasks WHERE id = ?", (canonical,)).fetchone()
 
 
 # ── reads ────────────────────────────────────────────────────────────────────
@@ -81,21 +105,27 @@ def cmd_summary(args):
 
 def cmd_detail(args):
     conn = pwc_db.connect(args.workspace)
-    task = pwc_db.row_to_dict(_require_task(conn, args.task))
+    row = _require_task(conn, args.task)
+    tid = row["id"]  # canonical, in case args.task was an alias
+    task = pwc_db.row_to_dict(row)
     refs = conn.execute(
         "SELECT kind, ref_type, value, label, created_at FROM task_refs "
         "WHERE task_id = ? ORDER BY id",
-        (args.task,),
+        (tid,),
     ).fetchall()
     events = conn.execute(
         "SELECT at, source, kind, detail FROM events "
         "WHERE task_id = ? ORDER BY at, id",
-        (args.task,),
+        (tid,),
+    ).fetchall()
+    aliases = conn.execute(
+        "SELECT alias FROM task_aliases WHERE task_id = ? ORDER BY created_at", (tid,)
     ).fetchall()
     emit({
         "task": task,
         "refs": pwc_db.rows_to_dicts(refs),
         "events": pwc_db.rows_to_dicts(events),
+        "aliases": [a["alias"] for a in aliases],
     })
 
 
@@ -168,7 +198,11 @@ def cmd_find_refs(args):
 def cmd_add_task(args):
     conn = pwc_db.connect(args.workspace)
     with conn:
-        tid = _next_task_id(conn)
+        # Id is meaningful: caller passes --id (a Jira key, or a <source>-<slug> the
+        # skill built from the conventions). If omitted, fall back to a slug of the
+        # title. Either way, dedup against existing ids and aliases.
+        base = args.id or slugify(args.title)
+        tid = _dedup_id(conn, base)
         ts = now_iso()
         conn.execute(
             "INSERT INTO tasks (id, type, title, status, priority, notes, "
@@ -188,6 +222,7 @@ def cmd_update_task(args):
     conn = pwc_db.connect(args.workspace)
     with conn:
         old = _require_task(conn, args.task)
+        tid = old["id"]  # canonical
         sets, params, changes = [], [], []
         for field in ("status", "priority", "notes", "parked_reason", "workdir"):
             val = getattr(args, field)
@@ -203,31 +238,31 @@ def cmd_update_task(args):
             fail("update-task: nothing to change")
         sets.append("updated_at = ?")
         params.append(now_iso())
-        params.append(args.task)
+        params.append(tid)
         conn.execute(f"UPDATE tasks SET {', '.join(sets)} WHERE id = ?", params)
         # Log a status event when status changed, else a generic note of the change.
         if args.status is not None and old["status"] != args.status:
-            _insert_event(conn, task_id=args.task, source="coordinator",
+            _insert_event(conn, task_id=tid, source="coordinator",
                           kind="status", detail=f"status -> {args.status}")
         elif changes:
-            _insert_event(conn, task_id=args.task, source="coordinator",
+            _insert_event(conn, task_id=tid, source="coordinator",
                           kind="note", detail="; ".join(changes))
-        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (args.task,)).fetchone()
+        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (tid,)).fetchone()
     emit(pwc_db.row_to_dict(row))
 
 
 def cmd_add_ref(args):
     conn = pwc_db.connect(args.workspace)
     with conn:
-        _require_task(conn, args.task)
+        tid = _require_task(conn, args.task)["id"]
         conn.execute(
             "INSERT INTO task_refs (task_id, kind, ref_type, value, label, created_at) "
             "VALUES (?,?,?,?,?,?)",
-            (args.task, args.kind, args.ref_type, args.value, args.label, now_iso()),
+            (tid, args.kind, args.ref_type, args.value, args.label, now_iso()),
         )
         row = conn.execute(
             "SELECT * FROM task_refs WHERE task_id = ? ORDER BY id DESC LIMIT 1",
-            (args.task,),
+            (tid,),
         ).fetchone()
     emit(pwc_db.row_to_dict(row))
 
@@ -236,9 +271,8 @@ def cmd_log_event(args):
     """The single write path workers use. Append-only into events (+ last_event_at)."""
     conn = pwc_db.connect(args.workspace)
     with conn:
-        if args.task:
-            _require_task(conn, args.task)
-        eid = _insert_event(conn, task_id=args.task, source=args.source,
+        tid = _require_task(conn, args.task)["id"] if args.task else None
+        eid = _insert_event(conn, task_id=tid, source=args.source,
                             kind=args.kind, detail=args.detail)
         row = conn.execute("SELECT * FROM events WHERE id = ?", (eid,)).fetchone()
     emit(pwc_db.row_to_dict(row))
@@ -248,32 +282,32 @@ def cmd_set_session(args):
     """Record the pre-allocated worker session id at spawn, atomic with a dispatched event."""
     conn = pwc_db.connect(args.workspace)
     with conn:
-        _require_task(conn, args.task)
+        tid = _require_task(conn, args.task)["id"]
         sets = ["session_id = ?", "updated_at = ?"]
         params = [args.session_id, now_iso()]
         if args.workdir is not None:
             sets.append("workdir = ?")
             params.append(args.workdir)
-        params.append(args.task)
+        params.append(tid)
         conn.execute(f"UPDATE tasks SET {', '.join(sets)} WHERE id = ?", params)
-        _insert_event(conn, task_id=args.task, source="coordinator",
+        _insert_event(conn, task_id=tid, source="coordinator",
                       kind="dispatched", detail=f"session {args.session_id}")
-        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (args.task,)).fetchone()
+        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (tid,)).fetchone()
     emit(pwc_db.row_to_dict(row))
 
 
 def cmd_archive(args):
     conn = pwc_db.connect(args.workspace)
     with conn:
-        _require_task(conn, args.task)
+        tid = _require_task(conn, args.task)["id"]
         ts = now_iso()
         conn.execute(
             "UPDATE tasks SET archived_at = ?, updated_at = ? WHERE id = ?",
-            (ts, ts, args.task),
+            (ts, ts, tid),
         )
-        _insert_event(conn, task_id=args.task, source="coordinator",
+        _insert_event(conn, task_id=tid, source="coordinator",
                       kind="archived", detail="archived", at=ts)
-        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (args.task,)).fetchone()
+        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (tid,)).fetchone()
     emit(pwc_db.row_to_dict(row))
 
 
@@ -281,15 +315,50 @@ def cmd_set_status_gone(args):
     """Liveness convenience: mark a vanished worker's task 'gone — needs triage'."""
     conn = pwc_db.connect(args.workspace)
     with conn:
-        _require_task(conn, args.task)
+        tid = _require_task(conn, args.task)["id"]
         conn.execute(
             "UPDATE tasks SET status = 'gone', updated_at = ? WHERE id = ?",
-            (now_iso(), args.task),
+            (now_iso(), tid),
         )
-        _insert_event(conn, task_id=args.task, source="brief", kind="gone",
+        _insert_event(conn, task_id=tid, source="brief", kind="gone",
                       detail="worker session no longer running — needs triage")
-        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (args.task,)).fetchone()
+        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (tid,)).fetchone()
     emit(pwc_db.row_to_dict(row))
+
+
+def cmd_promote(args):
+    """Give a task a new canonical id (e.g. a Jira key it just gained), keeping its
+    old id as an alias so prior references still resolve. Re-points the task row,
+    its refs, events, and any existing aliases to the new id."""
+    conn = pwc_db.connect(args.workspace)
+    with conn:
+        row = _require_task(conn, args.task)
+        old_id, new_id = row["id"], args.new_id
+        if new_id == old_id:
+            fail(f"task is already {new_id!r}")
+        if _resolve_id(conn, new_id) is not None:
+            fail(f"id {new_id!r} is already taken")
+        ts = now_iso()
+        # Re-key the row and everything that references it. FKs are deferred within
+        # the transaction; insert the new tasks row, repoint children, drop the old.
+        conn.execute("PRAGMA defer_foreign_keys = ON")
+        conn.execute("UPDATE tasks SET id = ?, updated_at = ? WHERE id = ?",
+                     (new_id, ts, old_id))
+        conn.execute("UPDATE task_refs SET task_id = ? WHERE task_id = ?",
+                     (new_id, old_id))
+        conn.execute("UPDATE events SET task_id = ? WHERE task_id = ?",
+                     (new_id, old_id))
+        conn.execute("UPDATE task_aliases SET task_id = ? WHERE task_id = ?",
+                     (new_id, old_id))
+        # Record the old id as an alias so it keeps resolving.
+        conn.execute(
+            "INSERT INTO task_aliases (alias, task_id, created_at) VALUES (?,?,?)",
+            (old_id, new_id, ts),
+        )
+        _insert_event(conn, task_id=new_id, source="coordinator", kind="note",
+                      detail=f"promoted: id {old_id} -> {new_id} (old id kept as alias)")
+        out = conn.execute("SELECT * FROM tasks WHERE id = ?", (new_id,)).fetchone()
+    emit(pwc_db.row_to_dict(out))
 
 
 # ── arg parsing ───────────────────────────────────────────────────────────---
@@ -328,6 +397,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_find_refs)
 
     s = sub.add_parser("add-task")
+    s.add_argument("--id", help="meaningful id (Jira key or <source>-<slug>); "
+                                "deduped if taken. Defaults to a slug of the title.")
     s.add_argument("--type", required=True)
     s.add_argument("--title", required=True)
     s.add_argument("--status", default="active")
@@ -378,6 +449,11 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("set-status-gone")
     s.add_argument("--task", required=True)
     s.set_defaults(func=cmd_set_status_gone)
+
+    s = sub.add_parser("promote")
+    s.add_argument("--task", required=True, help="current id or alias")
+    s.add_argument("--new-id", required=True, help="new canonical id, e.g. a Jira key")
+    s.set_defaults(func=cmd_promote)
 
     return p
 

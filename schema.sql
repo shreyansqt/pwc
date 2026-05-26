@@ -6,7 +6,10 @@ PRAGMA journal_mode = WAL;        -- coordinator reads + worker appends concurre
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS tasks (
-  id            TEXT PRIMARY KEY,              -- coordinator-assigned stable id (e.g. "t_0007")
+  id            TEXT PRIMARY KEY,              -- meaningful id: a Jira key ("SMT-874") or
+                                               -- <source>-<slug> ("slack-deploy-window"). Canonical;
+                                               -- a task promoted to a Jira key keeps its old id in
+                                               -- task_aliases. Resolve all lookups through aliases.
   type          TEXT NOT NULL,                 -- jira|pr-review|slack|email|doc|local|...
   title         TEXT NOT NULL,                 -- short description
   status        TEXT NOT NULL DEFAULT 'active',-- active|blocked|awaiting-review|done|gone|...
@@ -25,6 +28,17 @@ CREATE TABLE IF NOT EXISTS tasks (
 
 CREATE INDEX IF NOT EXISTS idx_tasks_active ON tasks(archived_at);
 CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id);
+
+-- Old ids a task has been known by. When a task gains a Jira key it is *promoted*:
+-- its canonical tasks.id becomes the key, and its prior id is recorded here so old
+-- references (events, the user's memory, a seeded worker) still resolve. Every
+-- `--task <id>` lookup checks tasks.id first, then falls back to this table.
+CREATE TABLE IF NOT EXISTS task_aliases (
+  alias      TEXT PRIMARY KEY,                 -- a former id, e.g. "slack-deploy-window"
+  task_id    TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,  -- current canonical id
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_aliases_task ON task_aliases(task_id);
 
 -- Typed, multi-valued reference set. Identity refs (for inbound matching) and
 -- working-context refs (for dispatch). Normalized so the deferred matcher can

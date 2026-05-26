@@ -12,13 +12,24 @@ Config shape (JSON):
     "sources": {
       "jira":   {"enabled": true,  "project": "SMT",
                  "jql": "assignee = currentUser() AND statusCategory != Done",
-                 "default_type": "jira"},
+                 "id_convention": "jira-key"},
       "github": {"enabled": true,  "org": "taxit-tech",
-                 "watch": ["review-requested", "assigned"]},
-      "slack":  {"enabled": true,  "channels": ["#eng", "#support"]},
-      "email":  {"enabled": false}
-    }
+                 "watch": ["review-requested", "assigned"],
+                 "id_convention": "github-slug"},
+      "slack":  {"enabled": true,  "channels": ["#eng", "#support"],
+                 "id_convention": "slack-slug"},
+      "email":  {"enabled": false, "id_convention": "email-slug"}
+    },
+    "id_fallback": "task-slug"
   }
+
+Task ids are meaningful and derived per-source at creation. "id_convention" tells
+/find-work how to build a new task's id from a given source:
+  - "jira-key"   : use the Jira key itself (e.g. SMT-874).
+  - "<p>-slug"   : a prefix plus a slug of the title (e.g. slack-deploy-window).
+"id_fallback" is the convention for multi-source or sourceless tasks (default a
+plain slug). taskdb.py dedups whatever id is produced; a task that later gains a
+Jira key can be `promote`d to it (old id kept as an alias).
 
 Usage:
   sources.py show                 # print the config as JSON (init-empty if absent)

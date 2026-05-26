@@ -40,8 +40,14 @@ draw work from different places.
 ## Data (what's in the task database — three tables)
 
 **Task** — One unit of work the coordinator tracks (a Jira ticket, a PR review, a
-Slack reply, a doc). Has a stable id like `t_0007` and a **status** (active,
-blocked, awaiting-review, done, gone, …).
+Slack reply, a doc). Has a **meaningful id** derived from its source — a Jira key
+(`SMT-874`) or a `<source>-<slug>` (`slack-deploy-window`) — set per the workspace's
+id conventions and frozen at creation. A task that later gains a Jira key can be
+*promoted* to it, keeping the old id as an **alias** so prior references still
+resolve. Also has a **status** (active, blocked, awaiting-review, done, gone, …).
+
+**Alias** — A former id a task was known by, kept after a promotion so old
+references (events, your memory, a seeded worker) still resolve to the current id.
 
 **Reference** — An external handle a task carries (`task_refs` table). Two kinds:
 *identity* references (Jira key, PR URL, Slack ids) used to recognize "is this the
