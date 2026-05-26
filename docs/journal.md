@@ -61,3 +61,22 @@ Not yet exercised live: the actual iTerm2 window-open and the full worker lifecy
 (spawn → report → kill → `/brief` flags gone → resume), pending the iTerm2 setup.
 Command construction is verified via `spawn.py --dry-run`.
 
+
+## 2026-05-26 (later) — worker lifecycle works, in iTerm, human-driven
+
+Ran the full spawn → drive → report loop live in iTerm. Two real bugs fixed and
+one design conclusion reached:
+
+- **Tab closed instantly / no transcript.** Interactive `claude` needs a real TTY;
+  launching it as iTerm2's `async_create_tab(command=...)` program gave it none, so
+  it exited and the tab vanished. Fix: open a normal shell tab and *type* the
+  `claude` launch into it. Also stopped passing the seed as a shell argument
+  (fragile quoting + made claude one-shot) — now type it into the session after boot.
+- **Worker refuses to run a seeded command — and that's correct.** Even a polite,
+  informative seed got declined because it asked the worker to *run* the reporting
+  script: "running unknown code with side effects, on someone else's say-so, isn't
+  something I'll do without looking first." Right call by the agent. So the seed now
+  requests *no action at all* — pure task context — and **status reporting moved to
+  the human** (`/report-status` run from the coordinator). Verified: spawn opens a
+  live, oriented worker tab; coordinator-run reporting logs correctly; the
+  worker-status check sees the live session. Full v1 lifecycle confirmed.

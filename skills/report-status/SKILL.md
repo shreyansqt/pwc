@@ -1,59 +1,55 @@
 ---
 name: report-status
-description: For a PWC worker to report its status back to the coordinator's task database — blocked, awaiting review, done, or a freeform note. Run this when you hit a meaningful event in the task you were started on.
+description: Record a status update on a PWC task — blocked, awaiting review, done, or a freeform note. Run from the coordinator (at the workspace root) to log where a task stands, e.g. after checking in on a worker or finishing an inline task.
 ---
 
 # /report-status
 
-A thin reporting channel for a worker to record status to the task database. As you hit
-meaningful events, record them so the coordinator's next `/show-work` reflects
-reality — the coordinator reads the task database, it does not watch your window.
+Record where a task stands into the task database, so the next `/show-work`
+reflects reality — the coordinator reads the task database, it does not watch
+worker tabs. This is an append to the event log; it does not change the structured
+fields the coordinator owns.
 
-This is a worker's only write to the task database: an append to the event log. It does
-not change task fields the coordinator owns.
-
-> **Note for spawned workers:** PWC's skills are installed at the *workspace root*,
-> but you run in a repo, so this `/report-status` skill is usually **not
-> resolvable from your cwd**. Your /start-work prompt therefore gave you the literal
-> `taskdb.py log-event ...` command to run directly — use that. This SKILL.md
-> documents the same call for when the skill *is* available (e.g. the coordinator
-> reporting an inline task's outcome from the workspace root).
+Run this **from the coordinator** (which sits at the workspace root, where this
+skill resolves). It is *not* run by spawned workers: a freshly spawned worker
+correctly won't execute a reporting command on a seed's say-so, and shouldn't be
+asked to — so status reporting is the human's job, done here. Use it when you check
+in on a worker and want to record its state, or to log the outcome of an inline
+task you handled yourself.
 
 ## Configuration
 
 - **Scripts directory**: `~/work/pwc/scripts` (`$SCRIPTS`).
-- **Workspace**: your current directory; the task database is auto-discovered from it.
-- **Your task id**: given to you in your opening prompt (e.g. `t_0007`). If you
-  don't have one, you weren't started by PWC — don't report.
+- **Workspace**: the coordinator's current directory; task database auto-discovered.
+- **Task id**: the task you're recording against (e.g. `t_0007`).
 
 ## Tools
 
-- `python3 $SCRIPTS/taskdb.py log-event --task <your-id> --source worker --kind <kind> --detail "<what happened>"`
+- `python3 $SCRIPTS/taskdb.py log-event --task <id> --source worker --kind <kind> --detail "<what happened>"`
 
 ## Steps
 
 1. **Pick the kind** that matches the event:
-   - `blocked` — you can't proceed (waiting on a person, a dependency, a decision).
-     Put what you're blocked on in `--detail`.
+   - `blocked` — can't proceed (waiting on a person, a dependency, a decision).
+     Put what it's blocked on in `--detail`.
    - `awaiting-review` — work is up for review (PR opened, sent for feedback).
    - `done` — the task's work is complete.
    - `note` — anything else worth recording (a finding, a direction change).
 
-2. **Report it:**
+2. **Record it** (use `--source worker` for a worker's state, `--source coordinator`
+   for an inline outcome you handled):
    ```
-   python3 $SCRIPTS/taskdb.py log-event --task <your-id> --source worker \
+   python3 $SCRIPTS/taskdb.py log-event --task <id> --source <worker|coordinator> \
      --kind <blocked|awaiting-review|done|note> --detail "<concise description>"
    ```
 
-3. **Keep `--detail` concise and factual** — one line the coordinator can read at a
-   glance in the next brief. Report when state actually changes, not continuously.
+3. **Keep `--detail` concise and factual** — one line the next brief can read at a
+   glance.
 
 ## Notes
 
-- Always use `--source worker`. Always use your own task id.
-- You report **events**; you do not set task status, archive, or touch other tasks.
-  The coordinator owns those. Reporting `done` signals completion — the coordinator
-  decides when to archive.
-- You don't need to report that you're "still working" — silence means in progress.
-  If your session dies without a final report, the coordinator's worker-status check will
-  notice and flag the task for triage.
+- This records **events**; it does not archive or change task status fields —
+  `/show-work` handles archiving a confirmed-done task.
+- You don't need to record "still working" — silence means in progress. If a worker
+  session ends without a final report, `/show-work`'s worker-status check notices
+  and flags the task for triage anyway.

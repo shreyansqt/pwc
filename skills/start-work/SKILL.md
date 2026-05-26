@@ -62,33 +62,32 @@ of the way.
      prior conversation.
    - **No session, or transcript gone** → fresh.
 
-4. **For a fresh session, build a seed prompt that *briefs*, not commands.**
-   The worker is a normal Claude Code session the user will drive — PWC's job here
-   is to load context so the user can start immediately, not to coerce the session
-   into an autonomous role. A prompt that orders a fresh session to "act as a PWC
-   worker and run these commands" reads as a suspicious directive and gets refused;
-   an informative briefing does not. So frame it as context + an offered tool:
+4. **For a fresh session, build a seed prompt that is *pure task context* — it
+   requests no action at all.** The worker is a normal Claude Code session the user
+   drives. Live testing showed that a fresh session will (correctly) refuse to *run
+   any command* a seed message tells it to — even a "harmless" reporting command —
+   because it can't verify an opaque script from an unrelated directory is safe just
+   from a description. That refusal is good behavior, not a bug to defeat. So the
+   seed must not instruct the worker to run *anything*. It only briefs:
 
-   - **What the task is** — the title, type, relevant refs (Jira key, PR, branch),
-     and a short summary of the prior events/timeline so it continues rather than
-     starting cold.
-   - **An offered way to record progress** (not a mandate): mention that meaningful
-     progress can be recorded to PWC with the command below. Because the worker
-     runs in a repo, give the literal `taskdb.py` command (the `/report-status`
-     skill isn't resolvable from a repo cwd) and **include `--workspace <root>`**
-     (auto-discovery from a repo finds the wrong place):
-     ```
-     # optional — record a meaningful event to PWC:
-     python3 ~/work/pwc/scripts/taskdb.py \
-       --workspace ~/work/acme \
-       log-event --task <THIS-TASK-ID> --source worker \
-       --kind <blocked|awaiting-review|done|note> --detail "<what happened>"
-     ```
+   - **What the task is** — title, type, relevant refs (Jira key, PR, branch), and a
+     short summary of the prior events/timeline so the worker starts oriented rather
+     than cold.
+   - **What "done" looks like** — the goal, so when the user starts driving the
+     worker already understands the objective.
 
-   Keep the tone "here's your task and a tool you can use," not "you must." For a
-   resumed session, little or no seed is needed. Reporting is best-effort — if the
-   session never reports, `/show-work`'s worker-status check still notices when it
-   ends and flags the task for triage.
+   That's it. No "run this command," no reporting instruction, no "stay open and
+   wait." End with something like *"Ready when you are — what would you like to
+   start with?"* so the session settles into a normal interactive state for the user
+   to take over. For a resumed session, little or no seed is needed.
+
+   **Status reporting is the user's job, not the worker's.** Because a worker won't
+   run the reporting command on a seed's say-so (nor should it), reporting back to
+   PWC is done by the human — run `/report-status` from the *coordinator* (which is
+   at the workspace root, where the skill resolves), or note the outcome when you
+   next `/show-work`. Either way `/show-work`'s worker-status check still notices
+   when a worker session ends and flags the task for triage, so nothing is lost if
+   no explicit report is made.
 
 5. **Pre-allocate and spawn.** Generate a UUID, pass it as `--session-id` to
    `spawn.py` (so the id is known before the process exists). Pipe the seed prompt

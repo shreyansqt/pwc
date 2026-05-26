@@ -200,6 +200,23 @@ session ends. Self-driving workers remain a plausible later direction (likely vi
 trusted entry skill that *is* the role, so it's read as legitimate rather than a
 suspicious prompt), but they're explicitly out of scope for v1.
 
+**Sharpened by the live test (2026-05-26):** even an *informative, non-imperative*
+seed still got the worker to (correctly) refuse — because it asked the worker to
+*run a command* (the reporting line), and a fresh session reasonably won't execute
+an opaque script from an unrelated directory on a message's say-so alone. The
+worker's verbatim reasoning: "the command writes outside this workspace… I have no
+prior context establishing that PWC opened this session… running unknown code with
+side effects, on someone else's say-so, isn't something I'll do without looking
+first." That is *correct* security behavior we don't want to engineer around. So
+the rule tightened: **the seed requests no action at all — it is pure task
+context.** Reporting moves entirely to the human (run `/report-status` from the
+coordinator, which sits at the workspace root where the skill resolves), not the
+worker. Also note the launch mechanics that the same test fixed: spawn a normal
+shell tab and *type* the `claude` launch into it (interactive claude needs a real
+TTY; running it as the tab's `command=` program gave it none and the tab closed
+instantly), and deliver the seed by typing it in after boot rather than as a
+fragile shell-quoted argument.
+
 ## Forward-compatibility considerations (not v1 work)
 
 Things we're not building, but are designing in a way that doesn't preclude:
