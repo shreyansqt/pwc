@@ -86,21 +86,29 @@ of the way.
      than cold.
    - **What "done" looks like** — the goal, so when the user starts driving the
      worker already understands the objective.
+   - **A closing-report instruction** — ask the worker, *once it has finished the
+     work or hit a blocker it can't clear*, to record where it landed by running
+     `/pwc-report-status` for this task id (the right `--kind` — `done`/`blocked`/
+     `awaiting-review` — with `--set-status` to match, and `--workspace <root>` since
+     a worker runs inside a repo). This is a *closing* step, explicitly scoped to
+     "when you're done," so the coordinator's board reflects the outcome without the
+     user hand-reconciling. See the timing rule below.
 
-   That's it. No "run this command now," no reporting instruction, no "stay open and
-   wait." End with something like *"Ready when you are — what would you like to
-   start with?"* so the session settles into a normal interactive state for the user
-   to take over. For a resumed session, little or no seed is needed.
+   That's it on context. End with something like *"Ready when you are — what would
+   you like to start with?"* so the session settles into a normal interactive state
+   for the user to take over. For a resumed session, little or no seed is needed.
 
-   **Don't put a reporting instruction in the seed.** PWC's skills are installed
-   globally (`~/.claude/skills/`), so a worker *can* resolve `/pwc-report-status` — but
-   a fresh worker still won't (and shouldn't) run a reporting command just because
-   the opening message told it to. So leave reporting out of the seed entirely.
-   Reporting happens later, once there's trust and context: the worker can run
-   `/pwc-report-status` when *you* ask it to, or you can run `/pwc-report-status` from the
-   coordinator to record where a task stands. Either way `/pwc-show-work`'s
-   worker-status check still notices when a worker session ends and flags the task
-   for triage, so nothing is lost if no explicit report is made.
+   **Reporting: at completion, not on startup.** PWC's skills are installed globally
+   (`~/.claude/skills/`), so a worker can resolve `/pwc-report-status` — and because
+   it's a real, named skill (not an opaque shell line), a warmed-up worker can invoke
+   it deliberately. The one hard rule: **don't ask the worker to report *on spawn* or
+   mid-flight** — a fresh worker shouldn't run anything before it's done real work,
+   and `/pwc-show-work` already notices a vanished session on its own. So the seed's
+   reporting ask is strictly the *closing* step ("when you're done or blocked, run
+   `/pwc-report-status`"), never "report now" and never "report at every step." The
+   user can also run `/pwc-report-status` from the coordinator at any time; and if the
+   worker ends without reporting, `/pwc-show-work`'s worker-status check still flags
+   it (and preserves any status it did report), so nothing is lost.
 
 5. **Pre-allocate and spawn.** Generate a UUID, pass it as `--session-id` to
    `spawn.py` (so the id is known before the process exists). Pipe the seed prompt
