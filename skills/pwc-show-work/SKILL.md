@@ -66,11 +66,22 @@ threads) is `/pwc-find-work`.
    `active`, `blocked`, `awaiting-review` — not already `gone`, `done`, archived).
    Pass them as a JSON list of `{task, session_id}` to
    `python3 $SCRIPTS/worker_status.py --json -`. For each result with `alive: false`,
-   run `taskdb.py set-status-gone --task <id>`. This detects **death, not
-   outcome** — a gone worker may have left finished, unpushed work behind, so
-   never infer done or failed; just flag it for the user to triage (resume, mark
-   done, or drop). If a sweep changed any statuses, re-run `summary` so the
-   briefing reflects them.
+   run `taskdb.py set-status-gone --task <id>`.
+
+   A dead session is **death, not outcome** — but it is *not* automatically `gone`.
+   `set-status-gone` distinguishes two endings:
+   - **Ended after reporting** — the worker logged a status change or a
+     `/pwc-report-status` note after it was dispatched, then the session closed
+     (the normal flow: do the work, report, close the tab). Here the task's status
+     is *real and recent*, so the command **preserves it** and just detaches the
+     finished `session_id`. Do not treat this as needing triage.
+   - **Vanished** — the session died with nothing said since dispatch. Only this
+     becomes `gone — needs triage` (resume, mark done, or drop); it may have left
+     finished-but-unpushed work, so never infer done or failed.
+
+   So you can run `set-status-gone` on every dead session uniformly — it won't
+   clobber a worker's just-reported status. (Use `--force` only to deliberately mark
+   a reported task `gone`.) If the sweep changed anything, re-run `summary`.
 
 3. **Staleness sweep.** Run `taskdb.py stale --threshold-days 7` and
    `taskdb.py parked-aging --threshold-days 14`. Staleness is a **signal, not a
