@@ -175,6 +175,23 @@ def cmd_events(args):
     emit(pwc_db.rows_to_dicts(rows))
 
 
+def cmd_find_session(args):
+    """The non-archived task currently holding this worker session id (or null).
+
+    Reverse of `set-session`: maps a `claude --session-id <uuid>` back to its task,
+    so a worker that knows only its own session id can find its task. Returns the
+    same summary shape as `summary`, or `null` if no task carries that session.
+    """
+    conn = pwc_db.connect(args.workspace)
+    row = conn.execute(
+        f"SELECT {_SUMMARY_COLS} FROM tasks "
+        "WHERE session_id = ? AND archived_at IS NULL "
+        "ORDER BY updated_at DESC LIMIT 1",
+        (args.session_id,),
+    ).fetchone()
+    emit(pwc_db.row_to_dict(row))
+
+
 def cmd_find_refs(args):
     """Tasks carrying a ref matching (ref_type, value). The inbound-matcher query path."""
     conn = pwc_db.connect(args.workspace)
@@ -533,6 +550,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--ref-type")
     s.add_argument("--kind", choices=("identity", "working"))
     s.set_defaults(func=cmd_find_refs)
+
+    s = sub.add_parser("find-session")
+    s.add_argument("--session-id", required=True,
+                   help="a worker's claude session uuid; returns its task (or null)")
+    s.set_defaults(func=cmd_find_session)
 
     s = sub.add_parser("add-task")
     s.add_argument("--task", help="meaningful id (Jira key or <source>-<slug>); "
