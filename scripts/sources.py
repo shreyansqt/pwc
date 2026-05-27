@@ -35,6 +35,15 @@ skill in the worker's seed (as available, never commanded). Configured once at
 /setup-workspace by scanning the available skills; reused on every spawn so the right
 skill is offered without the user imposing it later. Unknown/extra keys are allowed.
 
+"triage" configures /pwc-triage-slack — the coordinator's Slack inbox-sorting pass:
+  "triage": {
+    "channels": [{"name": "your-team-channel", "id": "C00000000"}],
+    "scan_dms": true,
+    "last_triaged": "2026-05-27T12:00:00Z"   // watermark; only scan messages after this
+  }
+The watermark advances each run (incremental). On first run (absent), fall back to a
+recent window (~24h).
+
 Task ids are meaningful and derived per-source at creation. "id_convention" tells
 /find-work how to build a new task's id from a given source:
   - "jira-key"   : use the Jira key itself (e.g. SMT-874).
@@ -48,6 +57,8 @@ Usage:
   sources.py set --json -         # replace the whole config from JSON on stdin
   sources.py enabled              # print only the enabled sources (what /find-work scans)
   sources.py skill-hints [--type T]  # the task-type -> skill(s) map (or one type's list)
+  sources.py triage               # the triage config (channels + last_triaged watermark)
+  sources.py set-triaged --at T   # advance the triage watermark after a triage pass
 
 All output is JSON on stdout; diagnostics on stderr; exit 1 on error.
 """
@@ -132,6 +143,31 @@ def cmd_skill_hints(args):
         emit(hints)
 
 
+def cmd_triage(args):
+    """The triage config (channels + last_triaged watermark), or {} if unset.
+
+    /pwc-triage-slack reads this to know which channels/DMs to sweep and from when.
+    """
+    data = _load(args.workspace)
+    emit(data.get("triage", {}) or {})
+
+
+def cmd_set_triaged(args):
+    """Advance the triage watermark to a timestamp (call after a triage pass).
+
+    Updates triage.last_triaged in place, preserving the rest of the config.
+    """
+    data = _load(args.workspace)
+    triage = data.setdefault("triage", {})
+    if not isinstance(triage, dict):
+        fail("set-triaged: existing 'triage' is not an object")
+    triage["last_triaged"] = args.at
+    p = config_path(args.workspace)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(data, indent=2) + "\n")
+    emit({"written": str(p), "last_triaged": args.at})
+
+
 def cmd_set(args):
     """Replace the whole config from a JSON body on stdin (--json -)."""
     if args.json != "-":
@@ -160,6 +196,10 @@ def main(argv=None):
     s = sub.add_parser("skill-hints")
     s.add_argument("--type", help="return only this task type's hints (a list)")
     s.set_defaults(func=cmd_skill_hints)
+    sub.add_parser("triage").set_defaults(func=cmd_triage)
+    s = sub.add_parser("set-triaged")
+    s.add_argument("--at", required=True, help="ISO8601 watermark to store as last_triaged")
+    s.set_defaults(func=cmd_set_triaged)
     args = p.parse_args(argv)
     try:
         args.func(args)

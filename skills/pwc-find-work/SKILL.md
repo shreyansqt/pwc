@@ -128,3 +128,7 @@ tracking): find brings new work in; show tells you where existing work stands.
   via `--task`. Confirm the direction with the user (which id survives) before merging.
 - `/pwc-find-work` does not reconcile or report on existing tasks — that's `/pwc-show-work`.
   Run `/pwc-find-work` to bring new work in, `/pwc-show-work` to see where everything stands.
+- **Sorting the Slack inbox is `/pwc-triage-slack`'s job.** find-work scans Slack
+  narrowly (new mentions + replies on tracked threads) to *queue tasks*; triage
+  sweeps the whole `#your-team-channel` + DMs to *sort every message* (tasks,
+  replies, FYIs, updates). For "what's piled up in Slack," run `/pwc-triage-slack`.

@@ -22,7 +22,7 @@ if [[ ! -d "$WS" ]]; then
   exit 1
 fi
 
-SKILLS=(pwc-setup-workspace pwc-find-work pwc-show-work pwc-show-task pwc-pick-work pwc-start-work pwc-report-status)
+SKILLS=(pwc-setup-workspace pwc-find-work pwc-show-work pwc-show-task pwc-pick-work pwc-start-work pwc-report-status pwc-triage-slack)
 GLOBAL_SKILLS="$HOME/.claude/skills"
 
 # 1. Global skills — visible from any cwd (so workers in a repo can resolve them).
