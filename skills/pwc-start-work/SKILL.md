@@ -32,7 +32,7 @@ of the way.
 - `python3 $SCRIPTS/spawn.py --task <id> --cwd <dir> --session-id <uuid> [--resume] [--prompt -]`
   — open the worker tab and type the seed into its input box (without submitting).
   Prints `{session_id, cwd, mode, transcript_expected, seed}` where `seed` is
-  `in-box` / `skipped` / `boot-timeout`.
+  `in-box` / `skipped` / `not-typed`.
 - `python3 $SCRIPTS/taskdb.py set-session --task <id> --session-id <uuid> --workdir <dir>`
   — record the pre-allocated session id at spawn (atomic with a `dispatched` event).
 - `python3 $SCRIPTS/taskdb.py update-task` / `log-event` — for inline outcomes.
@@ -102,8 +102,8 @@ of the way.
    Enter. This is deliberate: auto-submitting raced claude's startup and the
    keystrokes were silently lost, and it gave the user no chance to read the briefing
    first. The spawn result reports the outcome in `seed`: `"in-box"` (typed and
-   waiting), `"skipped"` (no seed), or `"boot-timeout"` (the TUI was slow to draw;
-   the seed was typed but may not have landed — tell the user to check).
+   waiting), `"skipped"` (no seed), or `"not-typed"` (the TUI never drew within the
+   timeout, so the seed was NOT typed — tell the user to paste it manually).
 
 6. **Record it, then tell the user to press Enter.** Right after spawn, run
    `taskdb.py set-session --task <id> --session-id <uuid> --workdir <dir>` (writes the
@@ -112,9 +112,9 @@ of the way.
    will later mark it `gone`). Then, in your reply to the user, **explicitly tell them
    the seed briefing is sitting in the new tab's input box and they just need to
    review it and press Enter to start the worker.** Do not claim the worker is already
-   running — it isn't until the user submits. If `seed` came back `"boot-timeout"`,
-   warn them the briefing may not have landed and to paste it themselves if the box is
-   empty (the exact text is what you piped in).
+   running — it isn't until the user submits. If `seed` came back `"not-typed"`, tell
+   them the briefing was not entered and to paste it themselves (the exact text is
+   what you piped in).
 
 ### Inline path
 

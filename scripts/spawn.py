@@ -71,10 +71,10 @@ def spawn(*, cwd, command, seed_prompt=None, title=None):
 
     Readiness is detected by polling the rendered screen for claude's input box
     rather than a fixed sleep, so we type only after the box can accept input.
-    `placement["seed"]` reports what happened: "in-box" (typed, awaiting the user's
-    Enter), "skipped" (no seed), or "boot-timeout" (the TUI never drew within the
-    timeout; the seed was typed anyway but may not have landed — surfaced so the
-    caller can tell the user to verify).
+    `placement["seed"]` reports what happened: "in-box" (typed into the box, awaiting
+    the user's Enter), "skipped" (no seed), or "not-typed" (the TUI never drew within
+    the timeout, so the seed was NOT typed — surfaced so the caller tells the user to
+    paste it manually).
     """
     try:
         import iterm2  # lazy: non-spawn use of this module shouldn't need it
@@ -94,6 +94,11 @@ def spawn(*, cwd, command, seed_prompt=None, title=None):
         either way, since we never auto-submit).
         """
         import asyncio
+        # Markers claude's interactive TUI draws once it can accept input. Cover the
+        # current prompt glyph ("❯"), the boxed ">" some builds use, and the footer
+        # hints ("for shortcuts", "auto mode on", "esc to interrupt", "Bypassing").
+        markers = ("❯", "│ >", "for shortcuts", "auto mode on",
+                   "esc to interrupt", "Bypassing")
         waited = 0.0
         while waited < timeout:
             try:
@@ -104,8 +109,7 @@ def spawn(*, cwd, command, seed_prompt=None, title=None):
                 )
             except Exception:  # noqa: BLE001 — screen read is best-effort
                 text = ""
-            # claude's prompt box draws a ">" and a shortcut hint once interactive.
-            if "│ >" in text or "for shortcuts" in text or "Bypassing" in text:
+            if any(m in text for m in markers):
                 await asyncio.sleep(0.3)
                 return True
             await asyncio.sleep(interval)
@@ -143,11 +147,18 @@ def spawn(*, cwd, command, seed_prompt=None, title=None):
             placement["seed"] = "skipped"
             return
 
-        # Wait for claude to be ready, then type the briefing into the input box —
-        # WITHOUT a trailing "\r". The user reviews it and presses Enter to send.
+        # Type the briefing into the input box ONLY once the TUI is confirmed ready —
+        # and WITHOUT a trailing "\r" so it sits there for the user to review and
+        # submit with Enter. If readiness can't be confirmed within the timeout, do
+        # NOT type: dumping a multi-line block into a shell/boot screen risks it being
+        # consumed or partially submitted. Report "not-typed" so the caller tells the
+        # user to paste it manually.
         ready = await _await_ready(session)
-        await session.async_send_text(seed_prompt)
-        placement["seed"] = "in-box" if ready else "boot-timeout"
+        if ready:
+            await session.async_send_text(seed_prompt)
+            placement["seed"] = "in-box"
+        else:
+            placement["seed"] = "not-typed"
 
     try:
         iterm2.run_until_complete(_main)
