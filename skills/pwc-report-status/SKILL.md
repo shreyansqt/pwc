@@ -22,36 +22,52 @@ worker to.
 ## Configuration
 
 - **Scripts directory**: `~/work/pwc/scripts` (`$SCRIPTS`).
-- **Workspace**: the coordinator's current directory; task database auto-discovered.
-- **Task id**: the task you're recording against (e.g. `t_0007`).
+- **Workspace**: where the task database lives (`<workspace>/.pwc/taskdb.db`).
+  - From the **coordinator** (running at the workspace root), it's auto-discovered —
+    no flag needed.
+  - From a **worker**, you are inside a *repo under* the workspace (e.g.
+    `…/acme/service-banking`), so auto-discovery walking *up* never finds the
+    workspace's `.pwc/`. **You MUST pass `--workspace <workspace-root>` explicitly**
+    (e.g. `--workspace ~/work/acme`). Without it the command reads the
+    wrong/empty db and your report silently goes nowhere.
+- **Task id**: the task you're recording against (e.g. `SMT-921`) — stated in the
+  `/pwc-start-work` seed. If unsure, `/pwc-show-task` resolves it.
 
 ## Tools
 
-- `python3 $SCRIPTS/taskdb.py log-event --task <id> --source worker --kind <kind> --detail "<what happened>"`
+- `python3 $SCRIPTS/taskdb.py log-event --task <id> --source <src> --kind <kind> --detail "<what>" [--set-status <status>] [--workspace <root>]`
+  — the single write path. With `--set-status`, the SAME call also moves the task's
+  status field (so `/pwc-show-work` reflects it), not just an event.
 
 ## Steps
 
-1. **Pick the kind** that matches the event:
-   - `blocked` — can't proceed (waiting on a person, a dependency, a decision).
-     Put what it's blocked on in `--detail`.
-   - `awaiting-review` — work is up for review (PR opened, sent for feedback).
-   - `done` — the task's work is complete.
-   - `note` — anything else worth recording (a finding, a direction change).
+1. **Pick the kind** — for the status-bearing ones, *also* pass `--set-status` with
+   the same value so the task's status field moves (not just the event log):
+   - `blocked` — can't proceed (waiting on a person, dependency, decision). Put what
+     it's blocked on in `--detail`. → `--set-status blocked`
+   - `awaiting-review` — work is up for review (PR opened / sent for feedback).
+     → `--set-status awaiting-review`
+   - `done` — the task's work is complete. → `--set-status done`
+   - `note` — anything else worth recording (a finding, a direction change). **No
+     `--set-status`** — a note doesn't change status.
 
-2. **Record it** (use `--source worker` for a worker's state, `--source coordinator`
-   for an inline outcome you handled):
+2. **Record it.** Use `--source worker` for a worker's own state, `--source
+   coordinator` for an inline outcome you handled. **From a worker, include
+   `--workspace <root>`** (see Configuration):
    ```
    python3 $SCRIPTS/taskdb.py log-event --task <id> --source <worker|coordinator> \
-     --kind <blocked|awaiting-review|done|note> --detail "<concise description>"
+     --kind <blocked|awaiting-review|done|note> --detail "<concise description>" \
+     [--set-status <blocked|awaiting-review|done>] [--workspace <workspace-root>]
    ```
+   The command is `log-event` and the task flag is `--task` (not `list`, not `--ref`).
 
 3. **Keep `--detail` concise and factual** — one line the next brief can read at a
    glance.
 
 ## Notes
 
-- This records **events**; it does not archive or change task status fields —
-  `/pwc-show-work` handles archiving a confirmed-done task.
+- `--set-status` updates the status field in the same transaction; `note` is
+  event-only. Archiving a confirmed-done task is still `/pwc-show-work`'s job.
 - You don't need to record "still working" — silence means in progress. If a worker
   session ends without a final report, `/pwc-show-work`'s worker-status check notices
   and flags the task for triage anyway.

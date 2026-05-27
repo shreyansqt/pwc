@@ -285,13 +285,29 @@ def cmd_add_ref(args):
 
 
 def cmd_log_event(args):
-    """The single write path workers use. Append-only into events (+ last_event_at)."""
+    """The single write path workers use. Append-only into events (+ last_event_at).
+
+    With `--set-status`, the same transaction also updates the task's status field —
+    so a worker reporting `blocked`/`awaiting-review`/`done` moves the task there
+    rather than just logging an event that `show-work` then shows out of sync. Emits
+    the task row when status was set (so the caller sees the new status), else the
+    event row. Requires `--task` when `--set-status` is given.
+    """
     conn = pwc_db.connect(args.workspace)
     with conn:
         tid = _require_task(conn, args.task)["id"] if args.task else None
+        if args.set_status and tid is None:
+            fail("log-event --set-status requires --task")
         eid = _insert_event(conn, task_id=tid, source=args.source,
                             kind=args.kind, detail=args.detail)
-        row = conn.execute("SELECT * FROM events WHERE id = ?", (eid,)).fetchone()
+        if args.set_status and tid is not None:
+            conn.execute(
+                "UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?",
+                (args.set_status, now_iso(), tid),
+            )
+            row = conn.execute("SELECT * FROM tasks WHERE id = ?", (tid,)).fetchone()
+        else:
+            row = conn.execute("SELECT * FROM events WHERE id = ?", (eid,)).fetchone()
     emit(pwc_db.row_to_dict(row))
 
 
@@ -595,6 +611,9 @@ def build_parser() -> argparse.ArgumentParser:
                    choices=("coordinator", "worker", "brief", "system"))
     s.add_argument("--kind", required=True)
     s.add_argument("--detail")
+    s.add_argument("--set-status",
+                   help="also set the task's status (e.g. blocked/awaiting-review/"
+                        "done) in the same transaction; requires --task")
     s.set_defaults(func=cmd_log_event)
 
     s = sub.add_parser("set-session")
