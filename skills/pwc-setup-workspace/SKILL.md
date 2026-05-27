@@ -63,14 +63,30 @@ depends on the exact contents, so it's safe to re-run anytime to adjust.
    Store each source's choice as `"id_convention"` on that source, and the fallback
    as a top-level `"id_fallback"`.
 
-5. **Write the config** by piping the assembled JSON to `sources.py set --json -`.
+5. **Configure skill hints** — which existing skills map to which kinds of task, so
+   `/pwc-start-work` can *suggest* the right skill in a worker's seed (instead of the
+   user imposing it later). **Scan the available skills first** — list the skill
+   directories (e.g. the team-skills repo, or `~/.claude/skills/`) and read each
+   `SKILL.md`'s `description` — then propose a `task-type → skill(s)` map and let the
+   user confirm/adjust. Map by what the task *is*, e.g.:
+   - a PR-review task → `code-review` (+ `request-review` to announce)
+   - starting a Jira ticket (build work) → `start-ticket`; needing a new ticket → `create-ticket`
+   - a task whose output is a Slack message → `slack-message`
+   - investigation / data lookup → `db-query`, `service-cli`
+   - and any one-off domain skills present (release, delete-customer, trigger-job, …)
+   Store as a top-level `"skill_hints"` object: `{"<task-type-or-signal>": ["<skill>", …]}`.
+   Keep it to skills that actually exist in the scan. This is optional — skip if the
+   user has no skills set up.
+
+6. **Write the config** by piping the assembled JSON to `sources.py set --json -`.
    The shape is
-   `{"sources": {"<name>": {"enabled": <bool>, "id_convention": "...", ...params}}, "id_fallback": "task-slug"}`.
+   `{"sources": {"<name>": {"enabled": <bool>, "id_convention": "...", ...params}}, "id_fallback": "task-slug", "skill_hints": {...}}`.
    Heed any validation warnings it prints (e.g. an enabled source missing a required
    field) and fix them with the user before finishing.
 
-6. **Confirm** what was written and tell the user they can now run `/pwc-find-work` to
-   scan these sources, and re-run `/pwc-setup-workspace` anytime to change them.
+7. **Confirm** what was written and tell the user they can now run `/pwc-find-work` to
+   scan these sources, and re-run `/pwc-setup-workspace` anytime to change them (incl.
+   the skill hints, as new skills get added).
 
 ## Notes
 

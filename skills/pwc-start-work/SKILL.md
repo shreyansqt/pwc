@@ -39,6 +39,8 @@ of the way.
   session_id (logs a neutral note, not a dispatch; status untouched). Use to back out
   a session recorded by mistake, or to detach a finished/abandoned one so the task
   reads as not-dispatched.
+- `python3 $SCRIPTS/sources.py skill-hints [--type <type>]` — the configured
+  task-type → skill(s) map; use it to suggest the right skill in a worker's seed.
 - `python3 $SCRIPTS/taskdb.py update-task` / `log-event` — for inline outcomes.
 
 ## Steps
@@ -90,6 +92,16 @@ of the way.
      than cold.
    - **What "done" looks like** — the goal, so when the user starts driving the
      worker already understands the objective.
+   - **Relevant skills, suggested (not commanded).** Look up skills for this task via
+     `python3 $SCRIPTS/sources.py skill-hints --type <task-type>` (and, if the type
+     has no hint, eyeball the full `skill-hints` map for a matching signal — e.g. a
+     PR-review task → `code-review`, a task that needs a new ticket → `create-ticket`,
+     a task whose output is a Slack message → `slack-message`). Name the matching
+     skill(s) in the seed as *available* for the work: e.g. *"For the review, the
+     `/code-review` skill is available; to announce it when ready, `/request-review`."*
+     Phrase it as available, never "run it now" (a fresh worker won't, by design) —
+     the point is the worker knows the right tool exists from the start, instead of
+     the user imposing it later. If `skill-hints` is empty, skip this.
    - **A closing-report instruction** — ask the worker, *once it has finished the
      work or hit a blocker it can't clear*, to record where it landed by running
      `/pwc-report-status` for this task id (the right `--kind` — `done`/`blocked`/

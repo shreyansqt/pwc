@@ -20,8 +20,20 @@ Config shape (JSON):
                  "id_convention": "slack-slug"},
       "email":  {"enabled": false, "id_convention": "email-slug"}
     },
-    "id_fallback": "task-slug"
+    "id_fallback": "task-slug",
+    "skill_hints": {
+      "pr-review": ["code-review", "request-review"],
+      "jira":      ["start-ticket"],
+      "slack":     ["slack-message"],
+      "investigation": ["db-query", "service-cli"]
+    }
   }
+
+"skill_hints" maps a task TYPE (or a free-form signal label) to the skill(s) that
+help with it. /start-work looks up the task's type here and SUGGESTS the matching
+skill in the worker's seed (as available, never commanded). Configured once at
+/setup-workspace by scanning the available skills; reused on every spawn so the right
+skill is offered without the user imposing it later. Unknown/extra keys are allowed.
 
 Task ids are meaningful and derived per-source at creation. "id_convention" tells
 /find-work how to build a new task's id from a given source:
@@ -35,6 +47,7 @@ Usage:
   sources.py show                 # print the config as JSON (init-empty if absent)
   sources.py set --json -         # replace the whole config from JSON on stdin
   sources.py enabled              # print only the enabled sources (what /find-work scans)
+  sources.py skill-hints [--type T]  # the task-type -> skill(s) map (or one type's list)
 
 All output is JSON on stdout; diagnostics on stderr; exit 1 on error.
 """
@@ -105,6 +118,20 @@ def cmd_enabled(args):
     emit({"sources": enabled})
 
 
+def cmd_skill_hints(args):
+    """The task-type -> skill(s) map (empty object if none configured).
+
+    /start-work reads this to suggest the relevant skill in a worker's seed. If
+    `--type` is given, return just that type's hints (a list, possibly empty).
+    """
+    data = _load(args.workspace)
+    hints = data.get("skill_hints", {}) or {}
+    if args.type:
+        emit(hints.get(args.type, []))
+    else:
+        emit(hints)
+
+
 def cmd_set(args):
     """Replace the whole config from a JSON body on stdin (--json -)."""
     if args.json != "-":
@@ -130,6 +157,9 @@ def main(argv=None):
     s = sub.add_parser("set")
     s.add_argument("--json", metavar="-", required=True)
     s.set_defaults(func=cmd_set)
+    s = sub.add_parser("skill-hints")
+    s.add_argument("--type", help="return only this task type's hints (a list)")
+    s.set_defaults(func=cmd_skill_hints)
     args = p.parse_args(argv)
     try:
         args.func(args)
