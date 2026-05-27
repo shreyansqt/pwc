@@ -27,6 +27,11 @@ of the way.
 
 - `python3 $SCRIPTS/taskdb.py detail --task <id>` — the task's fields, refs, and
   event timeline; the basis for the cwd, the resume decision, and the seed prompt.
+  Read it for *routing* — workdir, whether there's a session to resume, and the refs
+  to name in the seed. Do **not** use it as license to go read the linked thread/PR/
+  Jira yourself; pulling that underlying content into the coordinator's context is the
+  worker's job, not yours. The seed names the refs and the task id; the worker derives
+  the substance.
 - `python3 $SCRIPTS/worker_status.py --session-ids <uuid>` — whether the task's existing
   session (if any) is currently running.
 - `python3 $SCRIPTS/spawn.py --task <id> --cwd <dir> --session-id <uuid> [--resume] [--prompt -] [--name "<id> · <gist>"]`
@@ -40,7 +45,8 @@ of the way.
   a session recorded by mistake, or to detach a finished/abandoned one so the task
   reads as not-dispatched.
 - `python3 $SCRIPTS/sources.py skill-hints [--type <type>]` — the configured
-  task-type → skill(s) map; use it to suggest the right skill in a worker's seed.
+  task-type → skill(s) map. Optional now that the minimal seed leans on
+  `/pwc-show-task`; consult only if you want to name an obvious tool in the seed.
 - `python3 $SCRIPTS/taskdb.py update-task` / `log-event` — for inline outcomes.
 
 ## Steps
@@ -67,64 +73,53 @@ of the way.
      user at its tab. Stop.
    - **Dead/gone, and its transcript still exists** → resume: call `spawn.py` with
      that same `--session-id` and `--resume`. The worker comes back with its full
-     prior conversation.
+     prior conversation. **On a resume, `spawn.py` intentionally does not type a seed**
+     (the worker already carries its context), so the result returns `"seed":
+     "skipped"` — this is correct, not a failure. Any `--prompt` you pipe on a resume
+     is dropped. So tell the user the worker resumed with its history (and to just
+     continue in the tab) — **don't** promise an in-box briefing to review the way you
+     would for a fresh spawn. If you want to nudge the resumed worker in a specific
+     direction, say so to the user as text to paste, since the seed won't be typed.
    - **No session, or transcript gone** → fresh.
 
-4. **For a fresh session, build a seed prompt that is *pure task context* — it
-   requests no action at all.** The worker is a normal Claude Code session the user
-   drives. Live testing showed that a fresh session will (correctly) refuse to *run
-   any command* a seed message tells it to — even a "harmless" reporting command —
-   because it can't verify an opaque script from an unrelated directory is safe just
-   from a description. That refusal is good behavior, not a bug to defeat. So the
-   seed must not instruct the worker to run *anything*. It only briefs:
+4. **For a fresh session, build a *minimal* seed: the task id, a skill to load its
+   own context, and the closing-report step. Don't inline the task's content.** The
+   seed is delivered as un-submitted text in the worker's input box (see step 5) —
+   *the user* reads it and presses Enter, so the worker's first action is whatever the
+   seed says, submitted by the user, not a command the worker runs unprompted. That
+   distinction matters: a fresh worker rightly won't *auto-run an opaque shell script*
+   it was merely told about (e.g. a raw `python3 $SCRIPTS/taskdb.py …` line — it can't
+   verify an unfamiliar script is safe). But a **named, installed skill** like
+   `/pwc-show-task`, submitted by the user as the first instruction, is a normal,
+   trusted invocation. So the seed leans on the skill to self-load context rather than
+   carrying that context inline. The seed has just three parts:
 
-   - **Its PWC task id, stated first as the handle.** Open with e.g. *"Your PWC task
-     id is `SMT-921`."* This is the durable key back to the task's row: the worker (or
-     the user driving it) can re-fetch the full, current context — fields, refs,
-     event history — anytime with `python3 $SCRIPTS/taskdb.py detail --task SMT-921`
-     (spell out the actual `$SCRIPTS` path and id). Mention this once as *available*
-     if context is lost or the latest refs/notes are wanted — don't tell the worker
-     to run it now (a fresh worker won't run an opaque script on command, by design;
-     see below). The point is that the id and the how-to are recorded in the seed, so
-     the path exists when needed.
-   - **What the task is** — title, type, relevant refs (Jira key, PR, branch), and a
-     short summary of the prior events/timeline so the worker starts oriented rather
-     than cold.
-   - **What "done" looks like** — the goal, so when the user starts driving the
-     worker already understands the objective.
-   - **Relevant skills, suggested (not commanded).** Look up skills for this task via
-     `python3 $SCRIPTS/sources.py skill-hints --type <task-type>` (and, if the type
-     has no hint, eyeball the full `skill-hints` map for a matching signal — e.g. a
-     PR-review task → `code-review`, a task that needs a new ticket → `create-ticket`,
-     a task whose output is a Slack message → `slack-message`). Name the matching
-     skill(s) in the seed as *available* for the work: e.g. *"For the review, the
-     `/code-review` skill is available; to announce it when ready, `/request-review`."*
-     Phrase it as available, never "run it now" (a fresh worker won't, by design) —
-     the point is the worker knows the right tool exists from the start, instead of
-     the user imposing it later. If `skill-hints` is empty, skip this.
-   - **A closing-report instruction** — ask the worker, *once it has finished the
-     work or hit a blocker it can't clear*, to record where it landed by running
-     `/pwc-report-status` for this task id (the right `--kind` — `done`/`blocked`/
-     `awaiting-review` — with `--set-status` to match, and `--workspace <root>` since
-     a worker runs inside a repo). This is a *closing* step, explicitly scoped to
-     "when you're done," so the coordinator's board reflects the outcome without the
-     user hand-reconciling. See the timing rule below.
+   - **The PWC task id, stated first as the handle** — e.g. *"Your PWC task is
+     `SMT-921`."* This is the durable key to everything else.
+   - **An instruction to load its own context via `/pwc-show-task <id>`** — e.g. *"Run
+     `/pwc-show-task SMT-921` to pull your full context (fields, refs, event timeline)
+     from the task DB, then start on it."* Pass the id with the skill so resolution is
+     trivial (the skill's session-inference fallback is for when the id is lost — don't
+     rely on it). The worker pulls the *current* fields/refs/timeline itself — no stale
+     snapshot baked into the seed, and nothing for the coordinator to transcribe. This
+     replaces the old inlined title/refs/event-dump entirely.
+   - **The closing-report step** — *"When you've finished or hit a blocker you can't
+     clear, run `/pwc-report-status` for this task."* (`/pwc-show-task` and
+     `/pwc-report-status` together also surface the relevant skills for the work, so a
+     separate `skill-hints` lookup for the seed is no longer needed; if you want to
+     name an obvious tool, one line is fine, e.g. *"output is a Slack message →
+     `/slack-message`"*.)
 
-   That's it on context. End with something like *"Ready when you are — what would
-   you like to start with?"* so the session settles into a normal interactive state
-   for the user to take over. For a resumed session, little or no seed is needed.
+   Keep it to a few lines. End with something like *"Ready when you are."* so the
+   session settles into a normal interactive state. For a resumed session, no seed is
+   typed at all (step 3).
 
-   **Reporting: at completion, not on startup.** PWC's skills are installed globally
-   (`~/.claude/skills/`), so a worker can resolve `/pwc-report-status` — and because
-   it's a real, named skill (not an opaque shell line), a warmed-up worker can invoke
-   it deliberately. The one hard rule: **don't ask the worker to report *on spawn* or
-   mid-flight** — a fresh worker shouldn't run anything before it's done real work,
-   and `/pwc-show-work` already notices a vanished session on its own. So the seed's
-   reporting ask is strictly the *closing* step ("when you're done or blocked, run
-   `/pwc-report-status`"), never "report now" and never "report at every step." The
-   user can also run `/pwc-report-status` from the coordinator at any time; and if the
-   worker ends without reporting, `/pwc-show-work`'s worker-status check still flags
-   it (and preserves any status it did report), so nothing is lost.
+   **Reporting: at completion, not on startup.** The `/pwc-report-status` ask is
+   strictly the *closing* step ("when you're done or blocked") — never "report now" or
+   "report at every step." `/pwc-show-work`'s worker-status check already notices a
+   vanished session and preserves any status the worker did report, so nothing is lost
+   if the worker ends without reporting. The user can also run `/pwc-report-status`
+   from the coordinator at any time.
 
 5. **Pre-allocate and spawn.** Generate a UUID, pass it as `--session-id` to
    `spawn.py` (so the id is known before the process exists). Pipe the seed prompt

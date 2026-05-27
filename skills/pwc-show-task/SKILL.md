@@ -6,7 +6,7 @@ description: Show one PWC task's full context — its fields, references (PRs, S
 # /pwc-show-task
 
 Pull the full context of a single task from the task database — structured fields,
-its references, and its event history. Where `/pwc-show-work` is the all-tasks index,
+its refs, and its event history. Where `/pwc-show-work` is the all-tasks index,
 `/pwc-show-task` is the one-task drill-down.
 
 Two audiences, one skill:
@@ -28,8 +28,10 @@ Two audiences, one skill:
 
 ## Tools
 
-- `python3 $SCRIPTS/taskdb.py detail --task <id>` — the full per-task detail: fields,
-  refs, event timeline, aliases. The primary call.
+- `python3 $SCRIPTS/taskdb.py detail --task <id>` — the full per-task detail. The
+  primary call. The JSON has exactly these top-level keys: `task` (the fields),
+  `refs` (the references — note the key is `refs`, not `references`), `events` (the
+  timeline), `aliases`. Read `refs` for PRs/Slack threads/Jira keys.
 - `python3 $SCRIPTS/taskdb.py find-session --session-id <uuid>` — map a worker's
   `claude` session id back to its task (returns the summary row, or `null`). Used only
   when no task id was given.
@@ -53,7 +55,7 @@ Two audiences, one skill:
 
 3. **Render it readably** — don't dump raw JSON. Present:
    - the task line: id, type, title, status, priority, parked + reason if parked;
-   - **references** grouped by kind — identity refs (Jira keys, the canonical Slack
+   - the **refs** grouped by kind — identity refs (Jira keys, the canonical Slack
      thread) and working refs (PRs, related threads, epics), with their labels/links;
    - the **event timeline**, newest-relevant first, so the reader sees the narrative
      (what's been done, what it's blocked on, who's waiting).

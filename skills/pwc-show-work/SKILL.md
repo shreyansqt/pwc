@@ -35,7 +35,8 @@ threads) is `/pwc-find-work`.
 - `python3 $SCRIPTS/taskdb.py summary` — the always-loaded index: one status line
   per active task, archived tasks excluded. Returns a JSON array.
 - `python3 $SCRIPTS/taskdb.py detail --task <id>` — full per-task detail: the
-  structured fields, its references, and its event timeline. Use only when
+  structured fields, its `refs`, and its event timeline (JSON keys: `task`, `refs`,
+  `events`, `aliases` — the references key is `refs`, not `references`). Use only when
   drilling into a specific task, not for the overview.
 - `python3 $SCRIPTS/worker_status.py --json -` — reads a JSON list of
   `{task, session_id}` on stdin, returns each with `alive: true|false`. Tests
@@ -135,6 +136,10 @@ threads) is `/pwc-find-work`.
   Never invent tasks or statuses that aren't in the `summary` output.
 - **Stay light.** `/pwc-show-work` should not pull full `detail` for every task — that
   defeats the two-tier design. Load `detail` only for a task the user is focusing on.
+  Even then, read it to *route and summarize* (status, refs, where it stands) — not to
+  brief yourself on the underlying thread/PR/Jira content. That content is the worker's
+  to re-derive (via `/pwc-show-task` and the live sources); the coordinator pulling it
+  into its own context is exactly the pollution the two-tier design avoids.
 - **No external reads.** `show-work` never scans Jira/GitHub/Slack — that's
   `/pwc-find-work`'s sole job (it's also where task priorities get set and Slack
   threads get linked). If the briefing looks out of date with reality, the fix is to
