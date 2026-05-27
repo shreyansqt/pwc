@@ -111,9 +111,13 @@ threads) is `/pwc-find-work`.
      waiting on something external and aren't asking for action right now. Note
      their `parked_reason`.
 
-   For each task show: the internal id, type, title, status, and — if it has one —
-   a hint that a worker session is attached (`session_id` is non-null). Keep each
-   task to roughly one line; this is an index, not a report.
+   **Number every task** (1, 2, 3, …) running top-to-bottom across the whole list,
+   so the user can act on one by number ("start 3") instead of typing its id. The
+   numbering spans all groups in order; keep the priority grouping/ordering above.
+
+   For each task show: its number, the internal id, type, title, status, and — if it
+   has one — a hint that a worker session is attached (`session_id` is non-null). Keep
+   each task to roughly one line; this is an index, not a report.
 
 6. **Summarize the shape of your work** in a sentence or two: how many active,
    how many parked, anything flagged for attention (gone workers, stale tasks). This
