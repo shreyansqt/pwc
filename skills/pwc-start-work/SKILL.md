@@ -35,6 +35,10 @@ of the way.
   `in-box` / `skipped` / `not-typed`.
 - `python3 $SCRIPTS/taskdb.py set-session --task <id> --session-id <uuid> --workdir <dir>`
   — record the pre-allocated session id at spawn (atomic with a `dispatched` event).
+- `python3 $SCRIPTS/taskdb.py clear-session --task <id>` — the inverse: NULL the
+  session_id (logs a neutral note, not a dispatch; status untouched). Use to back out
+  a session recorded by mistake, or to detach a finished/abandoned one so the task
+  reads as not-dispatched.
 - `python3 $SCRIPTS/taskdb.py update-task` / `log-event` — for inline outcomes.
 
 ## Steps

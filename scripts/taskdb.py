@@ -329,6 +329,27 @@ def cmd_set_session(args):
     emit(pwc_db.row_to_dict(row))
 
 
+def cmd_clear_session(args):
+    """Detach a task's worker session: set session_id back to NULL.
+
+    The inverse of `set-session`. Use when a worker's session is done/gone, or was
+    recorded by mistake, and the task should read as not-dispatched. Logs a neutral
+    note (NOT a `dispatched` event — clearing is not a dispatch) and leaves status
+    untouched; change status separately with `update-task` if needed.
+    """
+    conn = pwc_db.connect(args.workspace)
+    with conn:
+        tid = _require_task(conn, args.task)["id"]
+        conn.execute(
+            "UPDATE tasks SET session_id = NULL, updated_at = ? WHERE id = ?",
+            (now_iso(), tid),
+        )
+        _insert_event(conn, task_id=tid, source="coordinator", kind="note",
+                      detail="session cleared (detached worker session)")
+        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (tid,)).fetchone()
+    emit(pwc_db.row_to_dict(row))
+
+
 def cmd_archive(args):
     conn = pwc_db.connect(args.workspace)
     with conn:
@@ -621,6 +642,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--session-id", required=True)
     s.add_argument("--workdir")
     s.set_defaults(func=cmd_set_session)
+
+    s = sub.add_parser("clear-session")
+    s.add_argument("--task", required=True)
+    s.set_defaults(func=cmd_clear_session)
 
     s = sub.add_parser("archive")
     s.add_argument("--task", required=True)
