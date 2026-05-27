@@ -45,6 +45,19 @@ tracking): find brings new work in; show tells you where existing work stands.
    configured Slack channels, etc. (Let the user narrow further if they ask — e.g.
    "just Slack.") Only scan sources that are enabled in the config.
 
+   **Slack must be scanned two ways, not one** — they catch different things:
+   - **New mentions/DMs** — search for fresh `<@me>` mentions and direct messages
+     since the last scan. This catches brand-new pings.
+   - **Activity on threads you already track** — for every Slack thread linked to a
+     task (active *and recently-archived* tasks; pull the `working`/`identity` slack
+     refs via `taskdb.py detail`), `slack_read_thread` for replies since the task was
+     last touched. A teammate often replies **without re-@-mentioning you** ("done!",
+     "ok let's make a follow-up ticket", "looks good"), and a reply can land on a
+     thread whose task you just archived — a mention-only search misses both. This
+     thread sweep is how you catch follow-ups, agreements, and new asks on work
+     already in flight. Filter out the Jira/bot reply that usually trails each human
+     message.
+
 3. **Drop anything already tracked.** For each candidate, run `find-refs` on its
    identity reference (Jira key, PR, Slack channel+ts). If a task already carries
    that ref, it's not new — skip it (it'll be handled by `/pwc-show-work`'s
