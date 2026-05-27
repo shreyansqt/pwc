@@ -29,7 +29,7 @@ of the way.
   event timeline; the basis for the cwd, the resume decision, and the seed prompt.
 - `python3 $SCRIPTS/worker_status.py --session-ids <uuid>` — whether the task's existing
   session (if any) is currently running.
-- `python3 $SCRIPTS/spawn.py --task <id> --cwd <dir> --session-id <uuid> [--resume] [--prompt -]`
+- `python3 $SCRIPTS/spawn.py --task <id> --cwd <dir> --session-id <uuid> [--resume] [--prompt -] [--name "<id> · <gist>"]`
   — open the worker tab and type the seed into its input box (without submitting).
   Prints `{session_id, cwd, mode, transcript_expected, seed}` where `seed` is
   `in-box` / `skipped` / `not-typed`.
@@ -129,6 +129,13 @@ of the way.
 5. **Pre-allocate and spawn.** Generate a UUID, pass it as `--session-id` to
    `spawn.py` (so the id is known before the process exists). Pipe the seed prompt
    via `--prompt -`.
+
+   **Give the tab a scannable title via `--name`.** Without it the tab is just the
+   bare task id, which is hard to tell apart across many tabs. Pass
+   `--name "<id> · <short gist>"` — the id plus a 3–5 word gist distilled from the
+   task title (e.g. `SMT-677 · BO auth review`, `SMT-921 · SevDesk sync fix`,
+   `slack-ocr · OCR income prefill`). Keep it short (a tab is narrow); shorten a long
+   id to a recognizable stub if needed. The full id still lives in the seed and DB.
 
    **The seed is placed in the worker's input box, NOT auto-submitted.** `spawn.py`
    types the briefing into the new session's prompt box and stops — it does not press
