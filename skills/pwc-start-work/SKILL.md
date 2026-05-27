@@ -72,13 +72,22 @@ of the way.
    from a description. That refusal is good behavior, not a bug to defeat. So the
    seed must not instruct the worker to run *anything*. It only briefs:
 
+   - **Its PWC task id, stated first as the handle.** Open with e.g. *"Your PWC task
+     id is `SMT-921`."* This is the durable key back to the task's row: the worker (or
+     the user driving it) can re-fetch the full, current context — fields, refs,
+     event history — anytime with `python3 $SCRIPTS/taskdb.py detail --task SMT-921`
+     (spell out the actual `$SCRIPTS` path and id). Mention this once as *available*
+     if context is lost or the latest refs/notes are wanted — don't tell the worker
+     to run it now (a fresh worker won't run an opaque script on command, by design;
+     see below). The point is that the id and the how-to are recorded in the seed, so
+     the path exists when needed.
    - **What the task is** — title, type, relevant refs (Jira key, PR, branch), and a
      short summary of the prior events/timeline so the worker starts oriented rather
      than cold.
    - **What "done" looks like** — the goal, so when the user starts driving the
      worker already understands the objective.
 
-   That's it. No "run this command," no reporting instruction, no "stay open and
+   That's it. No "run this command now," no reporting instruction, no "stay open and
    wait." End with something like *"Ready when you are — what would you like to
    start with?"* so the session settles into a normal interactive state for the user
    to take over. For a resumed session, little or no seed is needed.
