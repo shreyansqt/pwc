@@ -62,9 +62,20 @@ tracking): find brings new work in; show tells you where existing work stands.
    - multi-source or unclear → use the config's top-level `id_fallback`.
    `taskdb.py` dedups the id automatically if it's taken, so don't worry about
    collisions. Then:
-   `add-task --task <derived-id> --type <jira|pr-review|slack|email|...> --title "..." [--workdir <repo>]`,
+   `add-task --task <derived-id> --type <jira|pr-review|slack|email|...> --title "..." [--workdir <repo>] --priority <N>`,
    then `add-ref --kind identity --ref-type <t> --value <raw-id>` to attach its
    identity reference, then `log-event --kind new-task`. Report back what was queued.
+
+   **Set `--priority` to encode urgency, where the dominant signal is "is someone
+   waiting on me?"** (lower number = higher priority; `pick-work` sorts ascending,
+   null last):
+   - **`1` — blocks others:** a teammate is waiting on your review/input/answer, or
+     a customer/deadline is at stake. The thing whose absence stalls someone else.
+   - **`2` — active work** that's yours to drive but blocks no one right now.
+   - **`3` — solo / research** with no one waiting.
+   You usually can't tell which band a task is in until you've looked at its Slack
+   thread (step 6), so it's fine to add it at `2` and raise it to `1` once the
+   cross-link reveals someone waiting.
 
 6. **Cross-link related Slack threads onto each Jira task.** A Jira ticket and its
    Slack discussion are one piece of work — track them together, don't spin up a
@@ -79,6 +90,14 @@ tracking): find brings new work in; show tells you where existing work stands.
    `add-ref --task <id> --kind working --ref-type slack --value <thread-permalink> --label "<channel> thread"`.
    (Build the permalink from the thread's `thread_ts`.) Only create a *standalone*
    slack task when a thread has no matching ticket. Report which threads were linked.
+
+   **While reading each thread, judge whether someone is waiting on the user** — a
+   teammate asking for a review/answer, an approach review blocking someone from
+   starting, a PR of theirs needing approval, a customer/deadline at risk. If so,
+   raise that task to `--priority 1` (`update-task --task <id> --priority 1`) and note
+   who/why in a line: `log-event --task <id> --kind note --detail "blocks <who>: <why>"`.
+   This is the durable "unblock others first" signal `pick-work` ranks on. find-work
+   is the *only* place that reads the sources to set this — `show-work` never re-scans.
 
 ## Notes
 
