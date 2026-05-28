@@ -4,9 +4,13 @@
 Builds a `claude` invocation (fresh `--session-id <uuid>` + seed prompt, or
 `--resume <uuid>`) and runs it in a new tab of the current iTerm2 window, titled
 after the task. Each worker gets its own full-width tab (Cmd-1/2/... to switch);
-the coordinator's tab is untouched. Prints session id, mode, and placement as
-JSON. Does NOT touch the task DB — the dispatch skill calls `taskdb.py set-session`
-so all DB writes funnel through one path.
+the coordinator's tab is untouched. The new tab opens **in the background** —
+iTerm2 always switches focus to a newly-created tab (its API has no
+background-create flag), so we remember the active tab beforehand and re-activate
+it immediately after the new tab is created. Brief flicker; user stays where they
+were. Prints session id, mode, and placement as JSON. Does NOT touch the task DB
+— the dispatch skill calls `taskdb.py set-session` so all DB writes funnel through
+one path.
 
 Requires iTerm2 running with the Python API enabled
 (Preferences -> General -> Magic -> Enable Python API) and `pip install iterm2`.
@@ -61,13 +65,19 @@ def spawn(*, cwd, command, seed_prompt=None, title=None):
     """Open the worker in a new iTerm2 tab in the current window. Returns placement.
 
     Each worker gets its own full-width tab (switchable with Cmd-1/2/...), leaving
-    the coordinator's tab untouched. `command` launches claude interactively; if a
-    `seed_prompt` is given, it's typed into the session's input box after claude
-    boots — but deliberately *not* submitted. The seed sits in the box for the user
-    to read and send with Enter. This is intentional: auto-submitting was racy (the
-    keystrokes raced claude's startup and were silently lost) and gave the user no
-    chance to glance at the briefing first. Leaving it in the box is both reliable
-    and reviewable.
+    the coordinator's tab untouched. The new tab opens **in the background** — the
+    user's previously-active tab is restored as the focused tab right after the new
+    tab is created, so spawning workers doesn't yank the user out of whatever they
+    were doing. `async_send_text` targets the worker's session object directly (not
+    "the active session"), so the launch command and seed are still delivered to the
+    backgrounded worker correctly.
+
+    `command` launches claude interactively; if a `seed_prompt` is given, it's typed
+    into the session's input box after claude boots — but deliberately *not*
+    submitted. The seed sits in the box for the user to read and send with Enter.
+    This is intentional: auto-submitting was racy (the keystrokes raced claude's
+    startup and were silently lost) and gave the user no chance to glance at the
+    briefing first. Leaving it in the box is both reliable and reviewable.
 
     Readiness is detected by polling the rendered screen for claude's input box
     rather than a fixed sleep, so we type only after the box can accept input.
@@ -122,6 +132,13 @@ def spawn(*, cwd, command, seed_prompt=None, title=None):
         if window is None:
             fail("no active iTerm2 window to open a tab in")
 
+        # Remember the user's currently-active tab BEFORE creating the new one so we
+        # can restore focus to it after — `async_create_tab` always switches focus to
+        # the new tab (the API has no background-create flag, confirmed), and that's
+        # jarring when the user is mid-flow in another tab. The flicker is brief, the
+        # net effect is the worker tab opens unfocused in the tab bar.
+        original_tab = window.current_tab
+
         # Open a normal interactive shell tab (NOT command=...). Interactive claude
         # needs a real TTY; launching it as the tab's program via command= gives it
         # no interactive terminal and it exits instantly (closing the tab). Instead
@@ -139,6 +156,18 @@ def spawn(*, cwd, command, seed_prompt=None, title=None):
                 pass
         if session is None:
             return
+
+        # Restore focus to whatever tab the user was on. Safe to do BEFORE typing the
+        # launch command + seed below: `async_send_text` targets the session object
+        # directly, not "the active session," so the worker tab can sit in the
+        # background and still receive its launch command and seed text correctly.
+        # `order_window_front=False` keeps the window itself from being raised either.
+        if original_tab is not None and original_tab is not tab:
+            try:
+                await original_tab.async_activate(order_window_front=False)
+                placement["focus_restored"] = True
+            except Exception:  # noqa: BLE001 — focus restore is best-effort, never fatal
+                placement["focus_restored"] = False
 
         # Launch claude in the new shell.
         await session.async_send_text(command + "\r")
