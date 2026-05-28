@@ -3,6 +3,146 @@
 Running log as I build and dogfood PWC. What I tried, what surprised me, what
 I'd do differently. Newest entries at the top.
 
+## 2026-05-28 — idea: a PWC-native terminal (parked, not started)
+
+Captured in mid-coordinator session, not built yet. The motivating need: the
+coordinator currently lives "in a Claude Code tab I happened to open" — there's
+nothing in the OS that knows that *tab* is the coordinator, or that the other
+tabs are *workers*, or which task each one belongs to. The mapping lives only
+in `taskdb.db.session_id`, invisible to the terminal. `spawn.py` already crosses
+that membrane (it uses iTerm2's Python API to type a seed into a newly-opened
+tab), but it's one-way and ad hoc.
+
+### What the vision actually is
+
+A terminal app where:
+
+- The **coordinator is always open** — not a tab, a *home screen*. It's the
+  first thing you see when the app launches. Closing the app is the only way
+  to close it; closing a worker tab doesn't kill the coordinator.
+- **Tabs are PWC tasks**, not arbitrary shells. The tab strip shows task ids,
+  priorities, and statuses (running / blocked / awaiting-review / done). Status
+  badges live in the tab itself, not in a separate briefing.
+- **Backend choice (Claude Code / Codex / Gemini / future) is per-tab.** Each
+  worker tab can run a different agent. The backend is a config setting that
+  picks the right CLI launch command for that pty.
+- **Spawn / resume / kill / report-status are first-class** in the UI — buttons,
+  context menus, keyboard shortcuts — not Python scripts you remember to run.
+
+In short: PWC stops being a thing you *do in* a terminal and becomes the thing
+the terminal *is for*.
+
+### What I learned about how this is even possible (the mechanics)
+
+Spent a chunk of the conversation pinning down how agentic CLIs actually drive
+terminals, because it changes the architecture entirely. The honest answer:
+
+**Claude Code, Codex, etc. do NOT drive a terminal.** When they "run a command,"
+the CLI process spawns a subprocess directly (`subprocess.Popen` / Node's
+`child_process.spawn`), captures stdout/stderr from pipes, and returns it to
+the model as a tool result. The terminal you see them in is just a viewport for
+the CLI's own log of what it did — it has no role in execution. They'd work
+identically piped to a file or run headless. The "shell prompt" between turns
+is the CLI's TUI, not bash.
+
+What PWC's `spawn.py` does is rarer and weirder: it uses iTerm2's Python API
+(`async_send_text`) to type a seed prompt into the *input box of a newly opened
+Claude Code session in a fresh tab*. That's typing **into another agent**, not
+running a command. Most agent tooling never touches a real terminal emulator's
+API. PWC already operates at the unusual frontier where "an agent in a tab" is
+a first-class manipulable object.
+
+The four ways code can drive a terminal, in order:
+
+1. **Subprocess with pipes** — not a terminal at all. What agent `Bash` tools
+   use. Fast, reliable, no escape sequences.
+2. **PTY** (`os.openpty`, `pty.spawn`, ptyprocess) — the kernel-level mechanism
+   that makes a process think it's on a terminal. Required for interactive
+   programs (vim, top, *claude itself*), color, line buffering. Tools like
+   `expect`, `pexpect`, `tmux` are built on this. **This is what a real
+   PWC-native terminal would be built on.**
+3. **Terminal-emulator scripting APIs** — iTerm2's Python API, AppleScript for
+   Terminal.app, Warp's evolving APIs. Specific to one emulator. What
+   `spawn.py` uses today.
+4. **Synthetic keystrokes** (accessibility / `System Events`) — brittle, racy,
+   last resort.
+
+### Architecture if we build it
+
+The hard part is *not* the agent integration — that's trivial: spawn the right
+CLI in a pty per tab. Backend choice = which CLI command to exec. The hard
+part is **the terminal emulator itself**. Building a real terminal from
+scratch is enormous (escape-sequence handling, GPU/canvas rendering, font
+shaping, selection, search, pty management, copy/paste, configurability).
+iTerm2 has 20 years of work in it; Warp is a funded company. Even a "thin"
+terminal is a real OS project.
+
+The path that minimizes terminal-engineering work and gets to a real product:
+
+- **`xterm.js`** for the terminal renderer (the same one VS Code, Hyper,
+  Tabby, and most modern terminals use). Mature, fast, handles escape
+  sequences correctly. Don't write a terminal from scratch.
+- **Tauri** for the native shell (native window, dock icon, installable .app,
+  much lighter than Electron). Rust backend.
+- **`portable-pty` (Rust)** in the Tauri backend to own the ptys per tab.
+- **The PWC layer lives in the Tauri Rust side** — it shells out to the
+  existing `taskdb.py` / `spawn.py` / etc. as subprocesses, exposes commands
+  the UI calls. The Python scripts stay the source of truth for DB writes;
+  the terminal app is a new *surface*, not a replacement.
+- **Per-tab backend = a launch command map**: `claude --session-id X` vs
+  `codex ...` vs `gemini ...`. PWC's seed-injection logic moves from "type
+  into iTerm2 via Python API" to "write() to the pty's stdin," which is much
+  cleaner.
+
+### The alternative: PWC overlay on iTerm2/Warp (not the same thing, but cheaper)
+
+Worth being honest about: most of the *value* of the vision is achievable
+without building a terminal. A "PWC overlay" — a macOS menu-bar/sidebar app
+that drives iTerm2 (via the Python API it already uses) — could:
+
+- Own the coordinator tab (spawn it, watch it, respawn if killed).
+- Tag and group worker tabs by task id.
+- Show status badges in the menu bar.
+- Offer quick actions (start work, report status) without leaving the menu bar.
+
+You'd keep iTerm2's 20 years of polish, ship in weeks instead of months, and
+the architecture is straightforward (Swift menu-bar app + Python glue, both
+calling the existing PWC scripts). The thing you *don't* get is per-tab
+backend choice baked into the UI, or the "coordinator is the home screen, not
+a tab" feel. Those are real but maybe not worth the project a real terminal
+would become.
+
+### Open design questions to resolve before building anything
+
+1. **"Coordinator is always open" — what does that mean mechanically?**
+   - Option A: the coordinator is a long-lived daemon process you attach/
+     detach from (tmux-style). Survives the terminal app dying.
+   - Option B: the terminal app launches a coordinator tab on startup; closing
+     the app kills it. Simpler, but the coordinator dies with the app.
+   - Which one matches the real ergonomic need is the first question.
+2. **Multi-backend (Claude / Codex / Gemini / ...) — is this real or aspirational?**
+   Each backend has its own session-resume mechanism, seed format, and launch
+   args. Supporting more than one means building a real abstraction layer.
+   Worth it only if there's a concrete reason to switch backends per-task.
+3. **Where does worker-status live?** Today `worker_status.py` polls the
+   transcript file's mtime to tell if a session is alive. In a PWC-native
+   terminal, the *terminal* knows whether a tab's process is running — much
+   more accurate, no polling. But that means the terminal app becomes a data
+   source the Python scripts need to consult. New dependency direction.
+4. **Build vs. plugin?** Warp, Cursor's terminal mode, and Zed are all moving
+   toward "agentic terminal" territory. If PWC's task-graph model is
+   fundamentally different from what they ship, building makes sense; if it's
+   "their terminal + my coordinator," being a plugin to one of them might
+   capture most of the value.
+
+### Status
+
+**Parked.** Not started, not promised. The next time this comes up, the
+question to start with is the "coordinator is always open" mechanical one
+(daemon vs. app-launched) — it's the most consequential and the answer
+shapes everything else.
+
+
 ## 2026-05-25 (later) — first live worker spawn; the hard part isn't mechanical
 
 Set up iTerm2 (installed it, `pip install iterm2` into the MacPorts python3 that
