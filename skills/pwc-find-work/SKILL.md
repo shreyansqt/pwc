@@ -45,19 +45,35 @@ tracking): find brings new work in; show tells you where existing work stands.
    configured Slack channels, etc. (Let the user narrow further if they ask — e.g.
    "just Slack.") Only scan sources that are enabled in the config.
 
-   **Slack must be scanned two ways, not one** — they catch different things:
+   **Slack must be scanned three ways, not one** — they catch different things, and
+   missing any one of them silently drops real work:
    - **New mentions/DMs** — search for fresh `<@me>` mentions and direct messages
-     since the last scan. This catches brand-new pings.
+     since the last scan. This catches brand-new pings *addressed to you*.
    - **Activity on threads you already track** — for every Slack thread linked to a
      task on the board (active tasks *and recently-done ones still in the ~2-day
      window*; pull the `working`/`identity` slack refs via `taskdb.py detail`),
      `slack_read_thread` for replies since the task was last touched. A teammate
      often replies **without re-@-mentioning you** ("done!", "ok let's make a
      follow-up ticket", "looks good"), and a reply can land on a thread whose task
-     just finished — a mention-only search misses both. This
-     thread sweep is how you catch follow-ups, agreements, and new asks on work
-     already in flight. Filter out the Jira/bot reply that usually trails each human
-     message.
+     just finished — a mention-only search misses both. Filter out the Jira/bot
+     reply that usually trails each human message.
+   - **Every new message in the configured channels** — `slack_read_channel` on
+     each channel since the last scan, top-level posts only (replies are covered by
+     the tracked-thread sweep above). This is the catch-all that picks up
+     review/test asks, RCAs, and new-bug reports posted in the channel even when
+     they're addressed to *someone else* or carry no `@`-mention at all. Without
+     this pass, a "ready for review" post to Stella or a "we found a bug, please
+     check" to Alison is invisible to find-work, and you'd only see it by accident.
+
+   **Surface human posts; do not pre-judge whether they're "for you."** This is the
+   rule the third pass exists to enforce. The coordinator is allowed to drop **bot
+   noise** automatically — Jira/Calendar/Rotation/Slackbot posts have no human in
+   them and are never the signal. But a *human* post in a configured channel is
+   always a candidate, even when it tags someone else. The user decides whether it's
+   relevant; the coordinator's job is to put it on the list. The failure mode this
+   rule prevents is the coordinator silently filtering out posts addressed to other
+   teammates (the "Alison asked Stella for validation, so it's not for Shreyans"
+   trap) — which is exactly the kind of work the user wanted to see.
 
 3. **Drop anything already tracked.** For each candidate, run `find-refs` on its
    identity reference (Jira key, PR, Slack channel+ts). If a task already carries
@@ -129,7 +145,11 @@ tracking): find brings new work in; show tells you where existing work stands.
   via `--task`. Confirm the direction with the user (which id survives) before merging.
 - `/pwc-find-work` does not reconcile or report on existing tasks — that's `/pwc-show-work`.
   Run `/pwc-find-work` to bring new work in, `/pwc-show-work` to see where everything stands.
-- **Sorting the Slack inbox is `/pwc-triage-slack`'s job.** find-work scans Slack
-  narrowly (new mentions + replies on tracked threads) to *queue tasks*; triage
-  sweeps the whole `#your-team-channel` + DMs to *sort every message* (tasks,
-  replies, FYIs, updates). For "what's piled up in Slack," run `/pwc-triage-slack`.
+- **find-work vs. `/pwc-triage-slack`** — both read the same channels; the
+  difference is the *output*. find-work's job is to surface posts that look like
+  **task candidates** (review asks, bug reports, "please check", new tickets,
+  customer issues) and ask whether to queue each. `/pwc-triage-slack` is the
+  inbox-sorting pass: it categorizes *every* message into one of four buckets
+  (task / reply-needed / FYI / skip) and helps you walk through them. Run
+  find-work when you want "what new work is there"; run triage when you want
+  "I haven't looked at Slack in two days, sort it for me."
