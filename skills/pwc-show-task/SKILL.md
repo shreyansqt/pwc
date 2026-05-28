@@ -45,13 +45,14 @@ Two audiences, one skill:
      with `pgrep -fl 'claude --session-id'` (or read it from the transcript path under
      `~/.claude/projects/`). Then `find-session --session-id <uuid>` returns the task
      row; take its `id`. If `find-session` returns `null`, no task carries this
-     session — tell the user (the task may have been archived, or the seed never
-     recorded a session) and stop.
+     session — tell the user (the seed never recorded a session, or it was cleared)
+     and stop.
    - **Else, in the coordinator with no id**, ask which task (or point at
      `/pwc-show-work`). Don't guess.
 
 2. **Fetch the detail.** Run `taskdb.py detail --task <id>`. If it errors with
-   `no task <id>`, surface that — the id may be wrong or the task archived.
+   `no task <id>`, surface that — the id is wrong (done tasks are never removed, so a
+   valid id always resolves).
 
 3. **Render it readably** — don't dump raw JSON. Present:
    - the task line: id, type, title, status, priority, parked + reason if parked;
@@ -72,5 +73,5 @@ Two audiences, one skill:
   safe for a fresh worker to run (it does nothing but read its own task).
 - **The task id is the durable handle.** The `/pwc-start-work` seed states it for
   exactly this reason; session-resolution is the fallback for when the id was lost.
-- Archived tasks: `find-session` ignores them; `detail --task <id>` still shows one if
-  asked directly.
+- `detail --task <id>` shows any task by id regardless of how long ago it finished
+  (there is no archiving; done tasks just age off the *board*, not the database).

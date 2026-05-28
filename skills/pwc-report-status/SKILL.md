@@ -67,7 +67,8 @@ worker to.
 ## Notes
 
 - `--set-status` updates the status field in the same transaction; `note` is
-  event-only. Archiving a confirmed-done task is still `/pwc-show-work`'s job.
+  event-only. Marking a task `done` is all that's needed — there is no archive step;
+  a done task ages off the `/pwc-show-work` board on its own after ~2 days.
 - You don't need to record "still working" — silence means in progress. If a worker
   session ends without a final report, `/pwc-show-work`'s worker-status check notices
   and flags the task for triage anyway.

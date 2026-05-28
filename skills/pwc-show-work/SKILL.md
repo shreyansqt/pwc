@@ -12,7 +12,7 @@ useful briefing whether the coordinator booted ten minutes ago or just now — a
 state lives in the task database, not in this conversation.
 
 This skill is built in layers, all present below: render, worker-status sweep,
-staleness sweep, and a recap + archive. It reports purely from the local task
+staleness sweep, and a recap. It reports purely from the local task
 database — it does **not** re-scan external sources. Reading Jira/GitHub/Slack to
 discover or re-check work is `/pwc-find-work`'s job alone; keeping that in one place
 means `show-work` stays fast and side-effect-free, and there's exactly one path that
@@ -33,7 +33,10 @@ threads) is `/pwc-find-work`.
 ## Tools
 
 - `python3 $SCRIPTS/taskdb.py summary` — the always-loaded index: one status line
-  per active task, archived tasks excluded. Returns a JSON array.
+  per task on the board. The board is every not-done task plus done tasks closed in
+  the last ~2 days (a rolling "what just finished" timeline); older done tasks age
+  off on their own. There is **no archiving**. `--all` shows every task ever;
+  `--done-within-days N` adjusts the done window. Returns a JSON array.
 - `python3 $SCRIPTS/taskdb.py detail --task <id>` — full per-task detail: the
   structured fields, its `refs`, and its event timeline (JSON keys: `task`, `refs`,
   `events`, `aliases` — the references key is `refs`, not `references`). Use only when
@@ -51,8 +54,6 @@ threads) is `/pwc-find-work`.
   the source for the recap.
 - `python3 $SCRIPTS/taskdb.py log-event --kind recap --detail "..."`
   — record the recap.
-- `python3 $SCRIPTS/taskdb.py archive --task <id>` — archive a done task so it
-  leaves the active summary.
 
 `show-work` uses no external-source tools — it reads only the local task database.
 
@@ -64,7 +65,7 @@ threads) is `/pwc-find-work`.
 
 2. **Worker-status sweep.** Collect every task in the summary that has a non-null
    `session_id` and a status that implies it should still be running (e.g.
-   `active`, `blocked`, `awaiting-review` — not already `gone`, `done`, archived).
+   `active`, `blocked`, `awaiting-review` — not already `gone` or `done`).
    Pass them as a JSON list of `{task, session_id}` to
    `python3 $SCRIPTS/worker_status.py --json -`. For each result with `alive: false`,
    run `taskdb.py set-status-gone --task <id>`.
@@ -90,13 +91,13 @@ threads) is `/pwc-find-work`.
    the user, per task, to keep or drop. Surface aged parked tasks as a softer
    nudge ("waiting N days — ping them?"). Take no action without the user's call.
 
-4. **Recap + archive.** Summarize what changed since the last brief: read
+4. **Recap.** Summarize what changed since the last brief: read
    `events --since <last-brief-time>` (a task-DB-level `recap` event marks each
    brief, so "last brief" = the most recent `recap`). Write a concise one-line
    `log-event --kind recap` (task_id omitted = task-DB-level, not tied to one task)
-   capturing the
-   session's net activity. Then archive any task the user has confirmed done:
-   `archive --task <id>` (drops it from the active summary).
+   capturing the session's net activity. There is **no archive step** — a done task
+   stays on the board for ~2 days as a "just finished" line, then ages off the
+   summary on its own. Nothing to file by hand.
 
 5. **Render a prioritized briefing** from the summary JSON. Do not dump raw JSON —
    present a scannable view. Group and order so the user can triage at a glance:
@@ -111,6 +112,11 @@ threads) is `/pwc-find-work`.
    - Show parked tasks (`parked = 1`) in a separate, quieter group — they're
      waiting on something external and aren't asking for action right now. Note
      their `parked_reason`.
+   - Show `done` tasks last, in a quiet "recently finished" group — these are the
+     done-within-the-window tasks the board carries as a short timeline. They need
+     no action and will age off on their own; present them as a recap of what
+     closed, not as a to-do. (Don't call them "ready to archive" — there is no
+     archiving.)
 
    **Number every task** (1, 2, 3, …) running top-to-bottom across the whole list,
    so the user can act on one by number ("start 3") instead of typing its id. The
@@ -145,5 +151,7 @@ threads) is `/pwc-find-work`.
   threads get linked). If the briefing looks out of date with reality, the fix is to
   run `/pwc-find-work`, not to make `show-work` re-scan. This keeps one path to the
   outside world and `show-work` fast and side-effect-free.
-- Archived (done-and-rolled-up) tasks are intentionally absent from `summary`. If
-  the user asks about completed work, add `--include-archived`.
+- **No archiving.** Done tasks stay on the board for ~2 days (a "just finished"
+  timeline) then age off `summary` automatically — there's no archive step and
+  nothing to file by hand. For older completed work, `summary --all` shows every
+  task ever; `--done-within-days N` widens or narrows the window.

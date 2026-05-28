@@ -49,11 +49,12 @@ tracking): find brings new work in; show tells you where existing work stands.
    - **New mentions/DMs** — search for fresh `<@me>` mentions and direct messages
      since the last scan. This catches brand-new pings.
    - **Activity on threads you already track** — for every Slack thread linked to a
-     task (active *and recently-archived* tasks; pull the `working`/`identity` slack
-     refs via `taskdb.py detail`), `slack_read_thread` for replies since the task was
-     last touched. A teammate often replies **without re-@-mentioning you** ("done!",
-     "ok let's make a follow-up ticket", "looks good"), and a reply can land on a
-     thread whose task you just archived — a mention-only search misses both. This
+     task on the board (active tasks *and recently-done ones still in the ~2-day
+     window*; pull the `working`/`identity` slack refs via `taskdb.py detail`),
+     `slack_read_thread` for replies since the task was last touched. A teammate
+     often replies **without re-@-mentioning you** ("done!", "ok let's make a
+     follow-up ticket", "looks good"), and a reply can land on a thread whose task
+     just finished — a mention-only search misses both. This
      thread sweep is how you catch follow-ups, agreements, and new asks on work
      already in flight. Filter out the Jira/bot reply that usually trails each human
      message.

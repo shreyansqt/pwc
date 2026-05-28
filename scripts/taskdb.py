@@ -94,11 +94,23 @@ def cmd_init(args):
 
 
 def cmd_summary(args):
+    """The board. By default: every not-done task, plus done tasks closed within
+    the recent window (`--done-within-days`, default 2) so the board doubles as a
+    short 'what just finished' timeline. Older done tasks age off the board on their
+    own — there is no archiving. `--all` shows every task ever, regardless of age."""
     conn = pwc_db.connect(args.workspace)
-    where = "" if args.include_archived else "WHERE archived_at IS NULL"
+    params = []
+    if args.all:
+        where = ""
+    else:
+        # not-done tasks always show; done tasks only while still in the window.
+        cutoff = days_ago_iso(args.done_within_days)
+        where = "WHERE status != 'done' OR COALESCE(updated_at, created_at) >= ?"
+        params.append(cutoff)
     rows = conn.execute(
         f"SELECT {_SUMMARY_COLS} FROM tasks {where} "
-        "ORDER BY (priority IS NULL), priority, last_event_at DESC"
+        "ORDER BY (priority IS NULL), priority, last_event_at DESC",
+        params,
     ).fetchall()
     emit(pwc_db.rows_to_dicts(rows))
 
@@ -135,7 +147,7 @@ def cmd_stale(args):
     cutoff = days_ago_iso(args.threshold_days)
     rows = conn.execute(
         f"SELECT {_SUMMARY_COLS} FROM tasks "
-        "WHERE archived_at IS NULL AND parked = 0 "
+        "WHERE status != 'done' AND parked = 0 "
         "  AND COALESCE(last_event_at, created_at) < ? "
         "ORDER BY COALESCE(last_event_at, created_at)",
         (cutoff,),
@@ -149,7 +161,7 @@ def cmd_parked_aging(args):
     cutoff = days_ago_iso(args.threshold_days)
     rows = conn.execute(
         f"SELECT {_SUMMARY_COLS} FROM tasks "
-        "WHERE archived_at IS NULL AND parked = 1 "
+        "WHERE status != 'done' AND parked = 1 "
         "  AND COALESCE(last_event_at, created_at) < ? "
         "ORDER BY COALESCE(last_event_at, created_at)",
         (cutoff,),
@@ -176,7 +188,7 @@ def cmd_events(args):
 
 
 def cmd_find_session(args):
-    """The non-archived task currently holding this worker session id (or null).
+    """The task currently holding this worker session id (or null).
 
     Reverse of `set-session`: maps a `claude --session-id <uuid>` back to its task,
     so a worker that knows only its own session id can find its task. Returns the
@@ -185,7 +197,7 @@ def cmd_find_session(args):
     conn = pwc_db.connect(args.workspace)
     row = conn.execute(
         f"SELECT {_SUMMARY_COLS} FROM tasks "
-        "WHERE session_id = ? AND archived_at IS NULL "
+        "WHERE session_id = ? "
         "ORDER BY updated_at DESC LIMIT 1",
         (args.session_id,),
     ).fetchone()
@@ -203,7 +215,7 @@ def cmd_find_refs(args):
         clauses.append("kind = ?")
         params.append(args.kind)
     rows = conn.execute(
-        "SELECT DISTINCT t.id, t.type, t.title, t.status, t.archived_at "
+        "SELECT DISTINCT t.id, t.type, t.title, t.status "
         "FROM task_refs r JOIN tasks t ON t.id = r.task_id "
         f"WHERE {' AND '.join(clauses)} ORDER BY t.id",
         params,
@@ -346,21 +358,6 @@ def cmd_clear_session(args):
         )
         _insert_event(conn, task_id=tid, source="coordinator", kind="note",
                       detail="session cleared (detached worker session)")
-        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (tid,)).fetchone()
-    emit(pwc_db.row_to_dict(row))
-
-
-def cmd_archive(args):
-    conn = pwc_db.connect(args.workspace)
-    with conn:
-        tid = _require_task(conn, args.task)["id"]
-        ts = now_iso()
-        conn.execute(
-            "UPDATE tasks SET archived_at = ?, updated_at = ? WHERE id = ?",
-            (ts, ts, tid),
-        )
-        _insert_event(conn, task_id=tid, source="coordinator",
-                      kind="archived", detail="archived", at=ts)
         row = conn.execute("SELECT * FROM tasks WHERE id = ?", (tid,)).fetchone()
     emit(pwc_db.row_to_dict(row))
 
@@ -562,7 +559,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("init").set_defaults(func=cmd_init)
 
     s = sub.add_parser("summary")
-    s.add_argument("--include-archived", action="store_true")
+    s.add_argument("--all", action="store_true",
+                   help="show every task ever, including done ones older than the window")
+    s.add_argument("--done-within-days", type=float, default=2.0,
+                   help="how long a done task stays on the board before aging off (default 2)")
     s.set_defaults(func=cmd_summary)
 
     s = sub.add_parser("detail")
@@ -646,10 +646,6 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("clear-session")
     s.add_argument("--task", required=True)
     s.set_defaults(func=cmd_clear_session)
-
-    s = sub.add_parser("archive")
-    s.add_argument("--task", required=True)
-    s.set_defaults(func=cmd_archive)
 
     s = sub.add_parser("set-status-gone")
     s.add_argument("--task", required=True)

@@ -21,12 +21,14 @@ CREATE TABLE IF NOT EXISTS tasks (
   workdir       TEXT,                          -- resolved cwd for dispatch/resume
   inline        INTEGER NOT NULL DEFAULT 0,    -- 1 = handled inline (informational)
   created_at    TEXT NOT NULL,                 -- ISO8601 UTC
-  updated_at    TEXT NOT NULL,                 -- touched on any structured-field change
-  last_event_at TEXT,                          -- cache of latest events.at for this task (staleness)
-  archived_at   TEXT                           -- non-NULL = archived; excluded from summary
+  updated_at    TEXT NOT NULL,                 -- touched on any structured-field change; for a
+                                               -- done task, doubles as its "done at" (board window)
+  last_event_at TEXT                           -- cache of latest events.at for this task (staleness)
 );
+-- No archiving: the board (summary) shows all not-done tasks plus done tasks closed
+-- within a recent window; older done tasks age off on their own. See cmd_summary.
 
-CREATE INDEX IF NOT EXISTS idx_tasks_active ON tasks(archived_at);
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id);
 
 -- Old ids a task has been known by. When a task gains a Jira key it is *promoted*:
@@ -65,7 +67,7 @@ CREATE TABLE IF NOT EXISTS events (
   source  TEXT NOT NULL,                       -- coordinator|worker|brief|system
   kind    TEXT NOT NULL,                       -- created|dispatched|status|blocked|
                                                -- awaiting-review|done|reconcile|new-task|
-                                               -- stale-flag|recap|archived|gone|note
+                                               -- stale-flag|recap|gone|note
   detail  TEXT                                 -- freeform message; the per-task narrative line
 );
 
