@@ -63,6 +63,10 @@ Two audiences, one skill:
    For a worker re-orienting, lead with what it most needs: the goal and the latest
    events. For the coordinator, a compact summary is fine.
 
+   **Render times in the user's local timezone.** DB timestamps are UTC (trailing
+   `Z`); convert them to the user's wall-clock TZ (e.g. Europe/Berlin → CEST/CET)
+   before showing. The raw UTC string is misleading when used as-is in a briefing.
+
 4. **Stop there.** This is read-only — it shows context, it does not act on the task
    or mutate anything. To record progress use `/pwc-report-status`; to start/resume
    work use `/pwc-start-work`.

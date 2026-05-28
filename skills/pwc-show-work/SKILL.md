@@ -155,3 +155,10 @@ threads) is `/pwc-find-work`.
   timeline) then age off `summary` automatically — there's no archive step and
   nothing to file by hand. For older completed work, `summary --all` shows every
   task ever; `--done-within-days N` widens or narrows the window.
+- **Render times in the user's local timezone.** All DB timestamps are stored in
+  UTC (the trailing `Z` is literal — `taskdb.py` uses `now_iso()` from `_common.py`
+  for everything). When showing a time in the briefing, **convert it to the user's
+  local timezone** (e.g. Europe/Berlin → CEST in summer, CET in winter) and tag it
+  if there's any room for ambiguity. Showing the raw UTC time and calling it
+  "finished 08:57" when their wall clock said 10:57 is a real bug, not a cosmetic
+  one — it makes the briefing actively wrong.
