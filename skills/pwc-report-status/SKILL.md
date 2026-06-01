@@ -23,21 +23,26 @@ worker to.
 
 - **Scripts directory**: `~/work/pwc/scripts` (`$SCRIPTS`).
 - **Workspace**: where the task database lives (`<workspace>/.pwc/taskdb.db`).
-  - From the **coordinator** (running at the workspace root), it's auto-discovered —
-    no flag needed.
-  - From a **worker**, you are inside a *repo under* the workspace (e.g.
-    `…/acme/service-banking`), so auto-discovery walking *up* never finds the
-    workspace's `.pwc/`. **You MUST pass `--workspace <workspace-root>` explicitly**
-    (e.g. `--workspace ~/work/acme`). Without it the command reads the
-    wrong/empty db and your report silently goes nowhere.
+  **Auto-discovered from anywhere inside the workspace — you do NOT need
+  `--workspace`, from the coordinator or from a worker.** Discovery walks up from the
+  current directory and prefers the workspace's `.pwc/` over any nearer `.claude/`, so
+  a worker inside a repo subdir (e.g. `…/acme/service-backend`, which has its own
+  `.claude/`) still resolves the right db. (This was historically broken — workers had
+  to pass `--workspace` — but is fixed; ignore older instructions that say you must.)
+  - **Only** if discovery genuinely fails (you're somewhere with no `.pwc` above you)
+    pass `--workspace <root>` — and note it's a **global flag: it goes BEFORE the
+    subcommand**, e.g. `taskdb.py --workspace <root> log-event …`, never
+    `taskdb.py log-event … --workspace <root>` (that errors with "unrecognized
+    arguments"). Normally you won't need it at all.
 - **Task id**: the task you're recording against (e.g. `SMT-921`) — stated in the
   `/pwc-start-work` seed. If unsure, `/pwc-show-task` resolves it.
 
 ## Tools
 
-- `python3 $SCRIPTS/taskdb.py log-event --task <id> --source <src> --kind <kind> --detail "<what>" [--set-status <status>] [--workspace <root>]`
+- `python3 $SCRIPTS/taskdb.py log-event --task <id> --source <src> --kind <kind> --detail "<what>" [--set-status <status>]`
   — the single write path. With `--set-status`, the SAME call also moves the task's
-  status field (so `/pwc-show-work` reflects it), not just an event.
+  status field (so `/pwc-show-work` reflects it), not just an event. No `--workspace`
+  needed — the db is auto-discovered (see Configuration).
 
 ## Steps
 
@@ -52,12 +57,12 @@ worker to.
      `--set-status`** — a note doesn't change status.
 
 2. **Record it.** Use `--source worker` for a worker's own state, `--source
-   coordinator` for an inline outcome you handled. **From a worker, include
-   `--workspace <root>`** (see Configuration):
+   coordinator` for an inline outcome you handled. No `--workspace` flag — the db is
+   auto-discovered from wherever you are (see Configuration):
    ```
    python3 $SCRIPTS/taskdb.py log-event --task <id> --source <worker|coordinator> \
      --kind <blocked|awaiting-review|done|note> --detail "<concise description>" \
-     [--set-status <blocked|awaiting-review|done>] [--workspace <workspace-root>]
+     [--set-status <blocked|awaiting-review|done>]
    ```
    The command is `log-event` and the task flag is `--task` (not `list`, not `--ref`).
 
