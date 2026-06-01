@@ -201,13 +201,16 @@ Shreyans confirmed the **Option A/C** direction and resolved the open questions:
   the mode.
 - **Docs** — README gains a *Modes* section and mode-scoped prerequisites.
 
+### Install on Stella's setup (confirmed OK)
+
+Stella can **install Python** and has **shell access via the Claude Code Desktop
+code section**. So `install.sh` runs as-is on her machine: it lays down the skill
+symlinks (`~/.claude/skills`, which her code section reads) and the per-workspace DB
+with the shell + `python3` it assumes. No separate delivery story needed. (`pgrep`
+absence is fine — it's only used in `iterm2` mode, which she won't run.)
+
 ### Not done / follow-ups
 
-- **`install.sh`** still hard-codes the `~/.claude/skills` symlink + `python3` +
-  `pgrep` assumptions and doesn't itself ask for a mode (the *skill* path does). For a
-  Desktop-only user the install step still assumes a shell and `python3` once, to lay
-  down the DB and skills. If Stella truly has **no shell/python at all**, the initial
-  install needs a separate delivery story — flagged, not solved here.
 - **Not yet dogfooded on a real Desktop machine.** `handoff.py`'s clipboard path is
   tested locally (pbcopy round-trips), but the end-to-end "open a session in the
   Desktop code section and paste" flow should be confirmed with Stella.
