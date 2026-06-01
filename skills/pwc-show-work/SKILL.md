@@ -85,6 +85,30 @@ threads) is `/pwc-find-work`.
    clobber a worker's just-reported status. (Use `--force` only to deliberately mark
    a reported task `gone`.) If the sweep changed anything, re-run `summary`.
 
+   **Verify before acting on a worker's reported outcome.** A worker's reported
+   status (and the note that comes with it) is *secondhand* — it is what the worker
+   believed when its session ended, and it can be stale, partial, or simply wrong.
+   Preserving it in the DB is fine (above). But the moment you'd take an
+   **irreversible or hard-to-undo action on the strength of that report** — closing a
+   task as `done`, re-pointing it at a different ticket, merging it into another,
+   dropping it — first **re-read the underlying source the worker cited** (the Slack
+   thread, the PR, the Jira ticket) and confirm the outcome is what the worker claimed.
+   Do not close or re-scope a task on the worker's note alone, and do not close on the
+   *user's* recollection alone either (e.g. "Stella already replied / graded a
+   ticket") — read the actual reply/ticket and reconcile. The user pointing you at it
+   is the trigger to verify, not a substitute for verifying. This is the one place
+   `show-work` is *allowed* to read an external source (normally find-work's job): a
+   targeted re-read to confirm a specific outcome before a destructive write, not a
+   re-scan for new work.
+
+   **Update the task's context before the status change, not after.** When you do act,
+   capture *what actually happened* first — `log-event --kind note` with the verified
+   facts (what the source said, the decision, the new ticket/owner), and fix
+   `title` / `workdir` / refs so they match reality — **then** change the status. A
+   task closed (or re-pointed) with only a one-line "closed: done" note loses the
+   context that the next person (or the future you) needs. The note that justifies the
+   change must land with the change.
+
 3. **Staleness sweep.** Run `taskdb.py stale --threshold-days 7` and
    `taskdb.py parked-aging --threshold-days 14`. Staleness is a **signal, not a
    verdict** — never auto-archive on age. Surface stale (non-parked) tasks and ask

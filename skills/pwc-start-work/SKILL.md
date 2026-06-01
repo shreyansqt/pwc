@@ -157,6 +157,19 @@ of the way.
    record the outcome with `taskdb.py log-event --task <id> --kind note --detail
    "..."` (and `update-task --status done` if it's finished). Do not spawn a tab.
 
+   **Before closing or re-pointing a task inline, verify against the source — then
+   write the context, then change the status.** If the inline action is destructive or
+   hard to undo (closing as `done`, re-pointing at a different ticket, merging,
+   dropping), don't do it on a worker's reported note or on the user's recollection
+   alone ("Stella already replied / created a ticket"). **Re-read the actual cited
+   source** (the Slack thread, the PR, the Jira ticket) and confirm the outcome first —
+   the user pointing you at it is the trigger to verify, not a substitute for
+   verifying. Then **log the verified context before the status flip**: a `note` with
+   what the source actually said and the decision, plus any `title` / `workdir` / ref
+   fixes so the task matches reality — *then* `update-task --status`. A task closed or
+   re-scoped with only a one-line "done" loses the context the next person (or future
+   you) needs; the justifying note must land with the change, not after it.
+
 8. **Promote if it grows.** If an inline task turns out bigger than expected, stop
    inlining and switch to the worker path (steps 2–6), seeding the new worker with
    what you've gathered so far. Don't keep absorbing growing work into the

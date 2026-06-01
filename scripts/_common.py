@@ -23,12 +23,18 @@ _ROOT_MARKERS = (".pwc", ".claude")
 def find_workspace_root(start: str | os.PathLike[str] | None = None) -> Path:
     """Walk up from `start` (default cwd) to the nearest workspace root.
 
-    Falls back to `start` itself if no marker is found, so `init` can create
-    .pwc/ in the current directory on a fresh workspace.
+    `.pwc` (an initialized PWC root) takes priority over `.claude` across the
+    *whole* ancestry, not just per-level: a worker running in a repo subdir that
+    has its own `.claude/` (e.g. team-skills/, service-webapp/) must still resolve
+    up to the real workspace root that holds `.pwc`, instead of stopping at the
+    nearer `.claude`. Only when no `.pwc` exists anywhere up the tree do we fall
+    back to the nearest `.claude` (a fresh workspace, so `init` can create `.pwc`
+    there). Falls back to `start` itself if no marker is found at all.
     """
     here = Path(start or os.getcwd()).resolve()
-    for d in (here, *here.parents):
-        for marker in _ROOT_MARKERS:
+    chain = (here, *here.parents)
+    for marker in _ROOT_MARKERS:
+        for d in chain:
             if (d / marker).exists():
                 return d
     return here
