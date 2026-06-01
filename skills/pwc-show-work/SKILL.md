@@ -41,9 +41,13 @@ threads) is `/pwc-find-work`.
   structured fields, its `refs`, and its event timeline (JSON keys: `task`, `refs`,
   `events`, `aliases` — the references key is `refs`, not `references`). Use only when
   drilling into a specific task, not for the overview.
+- `python3 $SCRIPTS/sources.py mode` — the workspace's launch mode
+  (`{"mode": "iterm2"|"desktop"}`, default `iterm2`). Read it before the
+  worker-status sweep: the sweep is **iterm2-only** (see step 2).
 - `python3 $SCRIPTS/worker_status.py --json -` — reads a JSON list of
   `{task, session_id}` on stdin, returns each with `alive: true|false`. Tests
-  whether each worker session is actually still running.
+  whether each worker session is actually still running. **iterm2 mode only** — a
+  Desktop worker is not a local `claude` process, so `pgrep` can't see it.
 - `python3 $SCRIPTS/taskdb.py set-status-gone --task <id>` — mark a task whose
   worker has vanished as `gone` (needs triage), logging a `gone` event.
 - `python3 $SCRIPTS/taskdb.py stale --threshold-days <N>` — active, **not parked**
@@ -63,7 +67,16 @@ threads) is `/pwc-find-work`.
    with "no task database" the workspace isn't initialized — tell the user to run the PWC
    install/init for this workspace and stop.
 
-2. **Worker-status sweep.** Collect every task in the summary that has a non-null
+2. **Worker-status sweep (iterm2 mode only).** First read
+   `python3 $SCRIPTS/sources.py mode`. **In `desktop` mode, skip this entire step** —
+   a Desktop worker is a session the user opened, not a local `claude` process, so
+   `pgrep` can't observe it and a "not alive" result would be meaningless (every such
+   worker would be wrongly marked `gone`). In desktop mode, lean on reported status
+   instead: a task's status is whatever the worker/user last recorded via
+   `/pwc-report-status`, and if the user wants to know whether something is still in
+   flight, **ask them** rather than inferring. Proceed to step 3.
+
+   **In `iterm2` mode**, collect every task in the summary that has a non-null
    `session_id` and a status that implies it should still be running (e.g.
    `active`, `blocked`, `awaiting-review` — not already `gone` or `done`).
    Pass them as a JSON list of `{task, session_id}` to

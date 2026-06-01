@@ -59,6 +59,8 @@ Usage:
   sources.py skill-hints [--type T]  # the task-type -> skill(s) map (or one type's list)
   sources.py triage               # the triage config (channels + last_triaged watermark)
   sources.py set-triaged --at T   # advance the triage watermark after a triage pass
+  sources.py mode                 # worker-launch mode: iterm2 (default) or desktop
+  sources.py set-mode --mode M    # set the worker-launch mode (iterm2 | desktop)
 
 All output is JSON on stdout; diagnostics on stderr; exit 1 on error.
 """
@@ -143,6 +145,40 @@ def cmd_skill_hints(args):
         emit(hints)
 
 
+_MODES = ("iterm2", "desktop")
+_DEFAULT_MODE = "iterm2"
+
+
+def cmd_mode(args):
+    """Print the workspace's worker-launch mode (default 'iterm2' if unset).
+
+    'iterm2' — the original model: /start-work spawns a worker tab via spawn.py and
+    /show-work checks worker liveness via pgrep. 'desktop' — for a Claude Desktop
+    user with no terminal: /start-work hands over a seed (dir + clipboard) for a
+    session the user opens manually, and /show-work skips the pgrep liveness sweep.
+    Absent → 'iterm2' so existing workspaces are unaffected.
+    """
+    data = _load(args.workspace)
+    mode = data.get("mode") or _DEFAULT_MODE
+    if mode not in _MODES:
+        print(f"pwc: warning: unknown mode {mode!r}, treating as {_DEFAULT_MODE!r}",
+              file=sys.stderr)
+        mode = _DEFAULT_MODE
+    emit({"mode": mode})
+
+
+def cmd_set_mode(args):
+    """Set the worker-launch mode, preserving the rest of the config."""
+    if args.mode not in _MODES:
+        fail(f"set-mode: mode must be one of {_MODES}, got {args.mode!r}")
+    data = _load(args.workspace)
+    data["mode"] = args.mode
+    p = config_path(args.workspace)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(data, indent=2) + "\n")
+    emit({"written": str(p), "mode": args.mode})
+
+
 def cmd_triage(args):
     """The triage config (channels + last_triaged watermark), or {} if unset.
 
@@ -196,6 +232,11 @@ def main(argv=None):
     s = sub.add_parser("skill-hints")
     s.add_argument("--type", help="return only this task type's hints (a list)")
     s.set_defaults(func=cmd_skill_hints)
+    sub.add_parser("mode").set_defaults(func=cmd_mode)
+    s = sub.add_parser("set-mode")
+    s.add_argument("--mode", required=True, choices=_MODES,
+                   help="worker-launch mode: iterm2 (default) or desktop")
+    s.set_defaults(func=cmd_set_mode)
     sub.add_parser("triage").set_defaults(func=cmd_triage)
     s = sub.add_parser("set-triaged")
     s.add_argument("--at", required=True, help="ISO8601 watermark to store as last_triaged")

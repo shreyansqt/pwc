@@ -1,7 +1,8 @@
 # Adapting PWC for Claude Desktop (no iTerm2 / no terminal)
 
-**Status:** findings + options, pre-implementation. Several open questions need
-Stella's input before any code is written.
+**Status:** ✅ **Implemented.** The investigation (sections 1–4) led to the design in
+§6 below, which Shreyans confirmed and which is now built. Sections 1–4 are kept as
+the record of *why*; §6 is what shipped.
 
 **Context:** Stella likes PWC and wants to use it, but her setup has **no iTerm2
 and no terminal** — she drives Claude from the **Claude Desktop app**. PWC's
@@ -160,3 +161,53 @@ first confirming a Desktop hook actually exists.
 **Do not write code until Q1–Q3 are answered** — the answers decide whether we
 build a mode flag (A/C) or chase a spawn mechanism (B), and Q3 may change how the
 whole thing is even delivered to her.
+
+---
+
+## 6. What shipped (Shreyans' decision)
+
+Shreyans confirmed the **Option A/C** direction and resolved the open questions:
+
+- **Q1/Q2 — workers, but handed off, not spawned.** Keep the worker concept. In
+  Desktop mode, `/pwc-start-work` does **not** open anything. It builds the same seed
+  and **copies it to the clipboard**, and tells the user the **directory** to open a
+  new session in; the user opens the session manually and pastes. No spawn API, no
+  Desktop automation hook needed (Option B dropped).
+- **Q3 — skills resolve fine.** The Claude Desktop app has a **code section** the
+  user works in, and it **has access to the global skills** (`~/.claude/skills/`). So
+  the seed can keep leaning on `/pwc-show-task` exactly as the terminal path does — no
+  extra context inlined.
+- **Liveness — skipped, not faked.** `/pwc-show-work` **skips the `pgrep` sweep** in
+  Desktop mode (a handed-off session is not a local process) and **asks the user** for
+  status when it matters; status otherwise comes from `/pwc-report-status`.
+- **Mode chosen at onboarding.** `/pwc-setup-workspace` (and the README install flow)
+  asks **iTerm2 vs Claude Desktop** and stores it as `"mode"` in `.pwc/sources.json`.
+
+### Implementation
+
+- **`scripts/sources.py`** — new `mode` / `set-mode --mode <iterm2|desktop>`
+  subcommands. Mode lives top-level in `.pwc/sources.json`; **absent ⇒ `iterm2`**, so
+  every existing workspace is unaffected.
+- **`scripts/handoff.py`** (new) — the Desktop dispatch tool. Accepts/pre-allocates
+  the `--session-id`, copies the seed to the clipboard via `pbcopy` (best-effort:
+  reports `copied`/`failed`/`skipped` so the skill can fall back to showing the seed),
+  and prints `{session_id, cwd, seed, clipboard}`. Does **not** touch the task DB — the
+  skill still owns the `set-session` write, as with `spawn.py`.
+- **`spawn.py` / `worker_status.py`** — unchanged; they're simply not called in
+  Desktop mode.
+- **Skills** — `pwc-start-work` reads `sources.py mode` and branches dispatch
+  (`spawn.py` vs `handoff.py`) and the resume/closing instructions; `pwc-show-work`
+  gates its worker-status sweep on mode; `pwc-setup-workspace` asks for and persists
+  the mode.
+- **Docs** — README gains a *Modes* section and mode-scoped prerequisites.
+
+### Not done / follow-ups
+
+- **`install.sh`** still hard-codes the `~/.claude/skills` symlink + `python3` +
+  `pgrep` assumptions and doesn't itself ask for a mode (the *skill* path does). For a
+  Desktop-only user the install step still assumes a shell and `python3` once, to lay
+  down the DB and skills. If Stella truly has **no shell/python at all**, the initial
+  install needs a separate delivery story — flagged, not solved here.
+- **Not yet dogfooded on a real Desktop machine.** `handoff.py`'s clipboard path is
+  tested locally (pbcopy round-trips), but the end-to-end "open a session in the
+  Desktop code section and paste" flow should be confirmed with Stella.

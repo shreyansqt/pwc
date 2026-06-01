@@ -1,15 +1,19 @@
 ---
 name: pwc-start-work
-description: Act on a PWC task — either spawn a worker (a Claude Code session in its own iTerm2 tab) for substantial work, or handle it inline for trivial work. Also covers resuming a task whose worker has stopped. The default is to spawn a worker.
+description: Act on a PWC task — either dispatch a worker (a Claude Code session, spawned in its own iTerm2 tab or, in Claude Desktop mode, handed to the user to open) for substantial work, or handle it inline for trivial work. Also covers resuming a task whose worker has stopped. The default is to dispatch a worker.
 ---
 
 # /pwc-start-work
 
 Turn a tracked task into action. `/pwc-start-work` decides whether the task warrants
-its own **worker** (a Claude Code session in a new iTerm2 tab) or can be handled
-**inline** by the coordinator, then does it. It also covers **resumption** — there
-is no separate resume command; picking a stopped task back up is just starting
-it again, reopening its prior session when one survives.
+its own **worker** (a Claude Code session) or can be handled **inline** by the
+coordinator, then does it. How a worker is launched depends on the workspace's
+**mode**: in **`iterm2`** mode it's spawned in a new tab; in **`desktop`** mode (a
+Claude Desktop user with no terminal) the seed is handed to the user to open the
+session themselves. It also covers **resumption** — there is no separate resume
+command; picking a stopped task back up is just starting it again, reopening its
+prior session when one survives (iterm2 mode only — a desktop handoff has no live
+process to reopen).
 
 A worker is a normal Claude Code session that *you* drive — `/pwc-start-work` opens it
 in the right repo with the task's context pre-loaded so you can begin immediately.
@@ -21,7 +25,12 @@ of the way.
 - **Scripts directory**: `~/work/pwc/scripts` (`$SCRIPTS`).
 - **Workspace root**: the current directory (e.g. `~/work/acme`).
   A task's `workdir` is relative to this (a repo like `service-backend`, or the
-  root itself). Requires **iTerm2 running with the Python API enabled** for spawning.
+  root itself).
+- **Launch mode**: read `python3 $SCRIPTS/sources.py mode` first — it returns
+  `{"mode": "iterm2"|"desktop"}` (default `iterm2`). **`iterm2`** spawns a worker tab
+  (requires iTerm2 with the Python API enabled). **`desktop`** is for a Claude
+  Desktop user with no terminal: instead of spawning, you **hand the user the seed**
+  to open a session themselves. The worker path below branches on this at step 5.
 
 ## Tools
 
@@ -34,10 +43,18 @@ of the way.
   the substance.
 - `python3 $SCRIPTS/worker_status.py --session-ids <uuid>` — whether the task's existing
   session (if any) is currently running.
-- `python3 $SCRIPTS/spawn.py --task <id> --cwd <dir> --session-id <uuid> [--resume] [--prompt -] [--name "<id> · <gist>"]`
+- `python3 $SCRIPTS/sources.py mode` — the launch mode (`iterm2` | `desktop`). Read
+  it first; it decides which dispatch tool below you use.
+- **(iterm2 mode)** `python3 $SCRIPTS/spawn.py --task <id> --cwd <dir> --session-id <uuid> [--resume] [--prompt -] [--name "<id> · <gist>"]`
   — open the worker tab and type the seed into its input box (without submitting).
   Prints `{session_id, cwd, mode, transcript_expected, seed}` where `seed` is
   `in-box` / `skipped` / `not-typed`.
+- **(desktop mode)** `python3 $SCRIPTS/handoff.py --task <id> --cwd <dir> --session-id <uuid> [--prompt -] [--name "<id> · <gist>"]`
+  — copies the seed to the clipboard (`pbcopy`) and prints
+  `{session_id, cwd, seed, clipboard}` where `clipboard` is `copied` / `failed` /
+  `skipped`. Does NOT spawn anything — the user opens the session themselves. There is
+  no resume concept here (no live process to reopen); a "resume" is just a fresh
+  handoff with the same `--session-id`.
 - `python3 $SCRIPTS/taskdb.py set-session --task <id> --session-id <uuid> --workdir <dir>`
   — record the pre-allocated session id at spawn (atomic with a `dispatched` event).
 - `python3 $SCRIPTS/taskdb.py clear-session --task <id>` — the inverse: NULL the
@@ -67,8 +84,11 @@ of the way.
    ask the user. This exact cwd must be reused verbatim on any later resume — the
    session transcript is keyed by it.
 
-3. **Decide fresh vs. resume.** If the task has a `session_id`, check it with
-   `worker_status.py`:
+3. **Decide fresh vs. resume.** **(desktop mode: skip the liveness check — a Desktop
+   worker is not a local process, so `worker_status.py`/`pgrep` can't see it. Treat
+   it as fresh and re-hand-off the seed with the task's existing `session_id` if it
+   has one. There's no live tab to point the user back to.)** In **iterm2 mode**, if
+   the task has a `session_id`, check it with `worker_status.py`:
    - **Alive** → the worker already exists. Don't spawn a duplicate; just point the
      user at its tab. Stop.
    - **Dead/gone, and its transcript still exists** → resume: call `spawn.py` with
@@ -121,35 +141,44 @@ of the way.
    if the worker ends without reporting. The user can also run `/pwc-report-status`
    from the coordinator at any time.
 
-5. **Pre-allocate and spawn.** Generate a UUID, pass it as `--session-id` to
-   `spawn.py` (so the id is known before the process exists). Pipe the seed prompt
-   via `--prompt -`.
+5. **Pre-allocate and dispatch.** Generate a UUID and pass it as `--session-id` (so
+   the id is known before any process exists). Pipe the seed via `--prompt -`. Pass a
+   scannable `--name "<id> · <short gist>"` — the id plus a 3–5 word gist from the
+   title (e.g. `SMT-677 · BO auth review`, `slack-ocr · OCR income prefill`). The tool
+   you call depends on the mode read in the Configuration:
 
-   **Give the tab a scannable title via `--name`.** Without it the tab is just the
-   bare task id, which is hard to tell apart across many tabs. Pass
-   `--name "<id> · <short gist>"` — the id plus a 3–5 word gist distilled from the
-   task title (e.g. `SMT-677 · BO auth review`, `SMT-921 · SevDesk sync fix`,
-   `slack-ocr · OCR income prefill`). Keep it short (a tab is narrow); shorten a long
-   id to a recognizable stub if needed. The full id still lives in the seed and DB.
+   **iterm2 mode → `spawn.py`.** Opens the worker tab and types the seed into its
+   input box, **NOT auto-submitted** — it stops before Enter. (Auto-submitting raced
+   claude's startup and the keystrokes were lost, and it gave the user no chance to
+   read the briefing first.) The `--name` titles the tab. The result reports `seed`:
+   `"in-box"` (typed and waiting), `"skipped"` (no seed), or `"not-typed"` (the TUI
+   never drew within the timeout, so the seed was NOT typed — tell the user to paste
+   it manually).
 
-   **The seed is placed in the worker's input box, NOT auto-submitted.** `spawn.py`
-   types the briefing into the new session's prompt box and stops — it does not press
-   Enter. This is deliberate: auto-submitting raced claude's startup and the
-   keystrokes were silently lost, and it gave the user no chance to read the briefing
-   first. The spawn result reports the outcome in `seed`: `"in-box"` (typed and
-   waiting), `"skipped"` (no seed), or `"not-typed"` (the TUI never drew within the
-   timeout, so the seed was NOT typed — tell the user to paste it manually).
+   **desktop mode → `handoff.py`.** There is no terminal to spawn into, so this
+   **does not open anything** — it copies the seed to the clipboard (`pbcopy`) and
+   returns `clipboard`: `"copied"` / `"failed"` / `"skipped"`. The user opens a new
+   session themselves. Nothing is auto-submitted because there's nothing to submit
+   into yet.
 
-6. **Record it, then tell the user to press Enter.** Right after spawn, run
-   `taskdb.py set-session --task <id> --session-id <uuid> --workdir <dir>` (writes the
-   session id and a `dispatched` event, so the task is tracked from the instant the
-   worker starts — even one that dies on startup is recorded; the worker-status check
-   will later mark it `gone`). Then, in your reply to the user, **explicitly tell them
-   the seed briefing is sitting in the new tab's input box and they just need to
-   review it and press Enter to start the worker.** Do not claim the worker is already
-   running — it isn't until the user submits. If `seed` came back `"not-typed"`, tell
-   them the briefing was not entered and to paste it themselves (the exact text is
-   what you piped in).
+6. **Record it, then tell the user how to start the worker.** Right after dispatch,
+   run `taskdb.py set-session --task <id> --session-id <uuid> --workdir <dir>` (writes
+   the session id and a `dispatched` event, so the task is tracked from the instant
+   the worker starts). Then, in your reply:
+
+   - **iterm2 mode:** **explicitly tell the user the seed briefing is sitting in the
+     new tab's input box and they just need to review it and press Enter.** Do not
+     claim the worker is already running — it isn't until they submit. If `seed` came
+     back `"not-typed"`, tell them it was not entered and to paste it themselves.
+
+   - **desktop mode:** tell the user to **open a new Claude Code session in the Desktop
+     app's code section, in directory `<the resolved cwd>`, and paste** (the seed is on
+     their clipboard if `clipboard` is `"copied"`). Give them the **exact directory**
+     and, if `clipboard` is `"failed"`/`"skipped"`, **include the full seed text** in
+     your reply for them to copy by hand. Don't claim the worker is running — it isn't
+     until they open the session and submit. (No tab, no `pgrep`-able process, so
+     `/pwc-show-work` won't auto-detect it; the user reports status via
+     `/pwc-report-status` when there's something to record.)
 
 ### Inline path
 
@@ -178,7 +207,8 @@ of the way.
 ## Notes
 
 - **Never resume a session that's still alive** — that's what the worker-status check in
-  step 3 guards against.
+  step 3 guards against (iterm2 mode; in desktop mode there's no live process to
+  check, so always re-hand-off rather than resume).
 - /start does not auto-pick tasks; it acts on a task the user chose (often via
   `/next`). It assumes the user has confirmed.
 - spawn.py does not touch the task database; this skill owns the `set-session` write, so
