@@ -57,6 +57,16 @@ tracking): find brings new work in; show tells you where existing work stands.
      follow-up ticket", "looks good"), and a reply can land on a thread whose task
      just finished — a mention-only search misses both. Filter out the Jira/bot
      reply that usually trails each human message.
+
+     **If `slack_read_thread` returns `thread_not_found` (or no parent), do NOT treat
+     the task as quiet — recover.** A not-found almost always means the stored ref has
+     a bad/fabricated `ts` (the `...000000` tell), not that the thread is silent.
+     Fall back to a content search — `slack_search` by the task's ticket key and/or
+     title keywords + the known participants — to locate the real thread, read it, and
+     then **repair the ref** with the real `thread_ts` (`add-ref` the corrected
+     permalink; log a note that the old one was defunct). Surface "couldn't resolve
+     thread ref for <task>" in the report rather than letting it pass silently — a
+     swallowed not-found is exactly how a teammate's review/answer goes unseen.
    - **Every new message in the configured channels** — `slack_read_channel` on
      each channel since the last scan, top-level posts only (replies are covered by
      the tracked-thread sweep above). This is the catch-all that picks up
@@ -118,8 +128,20 @@ tracking): find brings new work in; show tells you where existing work stands.
    discussion and `@`-mentions. For each genuine match, attach the thread's permalink
    as a working ref:
    `add-ref --task <id> --kind working --ref-type slack --value <thread-permalink> --label "<channel> thread"`.
-   (Build the permalink from the thread's `thread_ts`.) Only create a *standalone*
-   slack task when a thread has no matching ticket. Report which threads were linked.
+   Only create a *standalone* slack task when a thread has no matching ticket. Report
+   which threads were linked.
+
+   **NEVER fabricate the timestamp in a Slack ref.** The permalink's trailing
+   `p<digits>` IS the message's real `ts` with the dot removed (ts `1780153851.977769`
+   → `p1780153851977769`). You MUST take that `ts` from the **actual message object**
+   returned by `slack_search_*` / `slack_read_*` (the `Message_ts` / `thread_ts`
+   field) — never synthesize it from a wall-clock time by padding unix-seconds with
+   zeros. A ref ending in `...000000` is the tell that the ts was made up: it resolves
+   to no message, so `slack_read_thread` returns `thread_not_found`, and the
+   tracked-thread sweep (step 2) then silently reports the task as "quiet" while real
+   replies pile up unseen. If all you have is a human time, do a `slack_search` first
+   to fetch the real message and read its `ts` — do not guess. Use the `thread_ts` of
+   the *parent* message (not a reply's ts) so the ref anchors the whole thread.
 
    **While reading each thread, judge whether someone is waiting on the user** — a
    teammate asking for a review/answer, an approach review blocking someone from
