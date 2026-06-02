@@ -69,6 +69,25 @@ worker to.
 3. **Keep `--detail` concise and factual** — one line the next brief can read at a
    glance.
 
+4. **Attach every Slack thread the work touched as a working ref.** Whenever you (a
+   worker) post to — or meaningfully read — a Slack thread about your task (a status
+   post, an ask, a discussion, a decision you're waiting on), attach that thread to the
+   task so the find-work tracked-thread sweep can see replies to it later. This is how
+   a teammate's answer gets noticed: if the thread isn't on the task, the sweep is
+   blind to it and the reply is silently missed (e.g. an approval that lands hours
+   later). Do it as part of reporting:
+   ```
+   python3 $SCRIPTS/taskdb.py add-ref --task <id> --kind working --ref-type slack \
+     --value "<thread-permalink>" --label "<channel>: <what this thread is>"
+   ```
+   **Use the real `thread_ts`** from the message object (`Message_ts` / `thread_ts`
+   from `slack_search_*`/`slack_read_*` / the send response) — the permalink's trailing
+   `p<digits>` IS that ts with the dot removed (ts `1780312106.321179` →
+   `p1780312106321179`). **Never fabricate it** by padding a wall-clock time with zeros;
+   a `...000000` suffix resolves to no message and breaks the sweep. Anchor on the
+   **parent** message's ts (not a reply's), so the ref covers the whole thread. If a
+   thread for this task is already attached, you don't need to re-add it.
+
 ## Notes
 
 - `--set-status` updates the status field in the same transaction; `note` is

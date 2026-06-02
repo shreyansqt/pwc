@@ -129,6 +129,12 @@ of the way.
      separate `skill-hints` lookup for the seed is no longer needed; if you want to
      name an obvious tool, one line is fine, e.g. *"output is a Slack message →
      `/slack-message`"*.)
+   - **The attach-threads step** — *"If you post to or read any Slack thread about
+     this task, attach it to the task as a working ref (via `/pwc-report-status` /
+     `add-ref`, using the message's real `thread_ts`) so replies get noticed later."*
+     This is what keeps a teammate's later answer from being silently missed: the
+     find-work sweep can only check threads that are attached to the task. Cheap to
+     say in the seed, and it closes the loop on the most common blind spot.
 
    Keep it to a few lines. End with something like *"Ready when you are."* so the
    session settles into a normal interactive state. For a resumed session, no seed is
