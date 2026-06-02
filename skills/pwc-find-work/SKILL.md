@@ -151,6 +151,17 @@ tracking): find brings new work in; show tells you where existing work stands.
    This is the durable "unblock others first" signal `pick-work` ranks on. find-work
    is the *only* place that reads the sources to set this — `show-work` never re-scans.
 
+7. **Render the full board at the end.** After queuing (and after reporting what was
+   found / linked), always finish by rendering the same prioritized briefing that
+   `/pwc-show-work` produces — run `taskdb.py summary` and present it in
+   `/pwc-show-work`'s format (the uniform grid: `# | ID | Status | Desc | ●`, all
+   sections same columns, a short identifying Desc per task). The point is that a
+   find-work pass changes the board (new tasks, raised priorities, linked threads), so
+   the user should see where everything now stands without having to run
+   `/pwc-show-work` separately. This is a *render only* — do not re-run find-work's
+   scans or show-work's worker-status/staleness sweeps here; just read `summary` and
+   display it so the user ends with the current picture.
+
 ## Notes
 
 - **Surface, never auto-promote** — this is a hard rule (a PWC non-goal is adding
