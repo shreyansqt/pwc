@@ -159,9 +159,31 @@ threads) is `/pwc-find-work`.
    so the user can act on one by number ("start 3") instead of typing its id. The
    numbering spans all groups in order; keep the priority grouping/ordering above.
 
-   For each task show: its number, the internal id, type, title, status, and — if it
-   has one — a hint that a worker session is attached (`session_id` is non-null). Keep
-   each task to roughly one line; this is an index, not a report.
+   **Render every section as a table with the SAME columns, in the same order.** Do
+   not vary the columns section to section — the "needs attention", priority, parked,
+   and done groups must all use one identical column layout so the board reads as one
+   consistent grid. The required columns, in this order:
+
+   | # | ID | Status | Desc | (●) |
+
+   - **#** — the running number (spans all sections, top to bottom).
+   - **ID** — the task id (e.g. `SMT-944`, `slack-...`).
+   - **Status** — `active` / `blocked` / `parked` / `gone` / `awaiting-review` /
+     `done`.
+   - **Desc** — a **short description (≤ ~8 words) that identifies the task**, not a
+     restatement of the id. Distil it from the title + the latest event so the user can
+     recognize the work at a glance (e.g. "mobile OCR fails since 20.05", "review BO
+     auth PR #415", "set BO assignees from Alex's CSV"). **Every task gets one — never
+     leave it blank.** For a blocked/parked task, make the desc say what it's waiting on
+     ("waiting on Maesn", "paused, resume later"). This column is the whole point of the
+     briefing: it's what lets the user pick by recognition instead of decoding ids.
+   - **●** — a session marker: show ● when `session_id` is non-null (a worker tab is
+     attached), blank otherwise. Keep the column present in every section even if empty,
+     so the grid stays aligned.
+
+   Keep each row to one line — this is an index, not a report. Group/order exactly as
+   above (attention → priority → parked → done); the columns stay identical across
+   every group.
 
 6. **Summarize the shape of your work** in a sentence or two: how many active,
    how many parked, anything flagged for attention (gone workers, stale tasks). This
