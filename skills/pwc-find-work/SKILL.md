@@ -152,15 +152,17 @@ tracking): find brings new work in; show tells you where existing work stands.
    is the *only* place that reads the sources to set this — `show-work` never re-scans.
 
 7. **Render the full board at the end.** After queuing (and after reporting what was
-   found / linked), always finish by rendering the same prioritized briefing that
-   `/pwc-show-work` produces — run `taskdb.py summary` and present it in
-   `/pwc-show-work`'s format (the uniform grid: `# | ID | Status | Desc | ●`, all
-   sections same columns, a short identifying Desc per task). The point is that a
-   find-work pass changes the board (new tasks, raised priorities, linked threads), so
-   the user should see where everything now stands without having to run
-   `/pwc-show-work` separately. This is a *render only* — do not re-run find-work's
-   scans or show-work's worker-status/staleness sweeps here; just read `summary` and
-   display it so the user ends with the current picture.
+   found / linked), always finish by rendering the board exactly as `/pwc-show-work`
+   does — run `taskdb.py summary` and present it in that format: a **main table**
+   (columns `# | Status | Pri | ID | Desc`) holding only `pending` / `in-progress` /
+   `blocked` rows, sorted by status-band then priority, with the emoji status (⚪
+   pending / 🟢 in-progress / ⛔ blocked) and a short identifying Desc per task; then a
+   **separate small "✅ Recently finished" table** for the ~2-day `done` set
+   (`# | ID | Desc`). The point is that a find-work pass changes the board (new tasks,
+   raised priorities, linked threads), so the user should see where everything now
+   stands without running `/pwc-show-work` separately. This is a *render only* — do not
+   re-run find-work's scans or show-work's worker-status/staleness sweeps; just read
+   `summary` and display it.
 
 ## Notes
 

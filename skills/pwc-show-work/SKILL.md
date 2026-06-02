@@ -136,9 +136,16 @@ threads) is `/pwc-find-work`.
    stays on the board for ~2 days as a "just finished" line, then ages off the
    summary on its own. Nothing to file by hand.
 
-5. **Render the briefing as ONE single table** from the summary JSON. Do not dump raw
-   JSON, and do not split the board into per-section tables. Columns, in this exact
-   order:
+5. **Render the briefing as a main table PLUS a small separate "Done" table.** Do not
+   dump raw JSON.
+   - The **main table** holds only the **active work**: `pending`, `in-progress`, and
+     `blocked` rows. **`done` rows are NOT in the main table.**
+   - Below it, render a **separate, smaller "✅ Recently finished" table** for the
+     `done` tasks in the ~2-day window (columns `# | ID | Desc`). Keep it visually
+     distinct and after the main board — it's a recap of what just closed, not a to-do.
+     If there are no recent done tasks, omit the Done table entirely.
+
+   Main table columns, in this exact order:
 
    | # | Status | Pri | ID | Desc |
 
@@ -169,15 +176,17 @@ threads) is `/pwc-find-work`.
      "waiting on Alison's review"). This column is the point of the briefing — it lets
      the user pick by recognition instead of decoding ids.
 
-   **Sort the table by status-band in this order**, then by `Pri` (ascending, null
-   last) within each band:
+   **Sort the main table by status-band in this order**, then by `Pri` (ascending,
+   null last) within each band:
    1. 🟢 **in-progress** — work actively in flight (incl. a task whose worker died and
       is resumable).
    2. ⚪ **pending** — ready to start, ordered by priority — the user's "what to pick up".
    3. ⛔ **blocked** — waiting on a person / dependency / review / paused; Desc says
       which.
-   4. ✅ **done** — recently-finished window; a recap of what closed (no action; don't
-      call it "ready to archive" — there is no archiving).
+
+   `done` is **not** a band in the main table — it goes in the separate Recently-finished
+   table described above (no action; don't call it "ready to archive" — there is no
+   archiving).
 
    Keep each row to one line — this is an index, not a report.
 
