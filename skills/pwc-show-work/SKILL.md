@@ -136,54 +136,42 @@ threads) is `/pwc-find-work`.
    stays on the board for ~2 days as a "just finished" line, then ages off the
    summary on its own. Nothing to file by hand.
 
-5. **Render a prioritized briefing** from the summary JSON. Do not dump raw JSON —
-   present a scannable view. Group and order so the user can triage at a glance:
+5. **Render the briefing as ONE single table** from the summary JSON. Do not dump raw
+   JSON, and do not split the board into multiple per-section tables — it is one table
+   with a **Group** column, sorted by group. Columns, in this exact order:
 
-   - Lead with anything needing attention: tasks whose `status` is `gone`
-     (a worker vanished — needs triage) or `blocked`.
-   - Then active work, ordered by `priority` (lower number = higher priority;
-     `null` priority sorts last). Priority encodes "is someone waiting on me?" —
-     `1` = blocks others, `2` = active, `3` = solo/research — so a `1` at the top is
-     the most pressing. The `summary` call already returns rows in this order —
-     preserve it.
-   - Show parked tasks (`parked = 1`) in a separate, quieter group — they're
-     waiting on something external and aren't asking for action right now. Note
-     their `parked_reason`.
-   - Show `done` tasks last, in a quiet "recently finished" group — these are the
-     done-within-the-window tasks the board carries as a short timeline. They need
-     no action and will age off on their own; present them as a recap of what
-     closed, not as a to-do. (Don't call them "ready to archive" — there is no
-     archiving.)
+   | # | Group | ID | Status | Desc |
 
-   **Number every task** (1, 2, 3, …) running top-to-bottom across the whole list,
-   so the user can act on one by number ("start 3") instead of typing its id. The
-   numbering spans all groups in order; keep the priority grouping/ordering above.
-
-   **Render every section as a table with the SAME columns, in the same order.** Do
-   not vary the columns section to section — the "needs attention", priority, parked,
-   and done groups must all use one identical column layout so the board reads as one
-   consistent grid. The required columns, in this order:
-
-   | # | ID | Status | Desc | (●) |
-
-   - **#** — the running number (spans all sections, top to bottom).
+   - **#** — running number, top to bottom across the whole table, so the user can act
+     by number ("start 3").
+   - **Group** — which band the row is in (see ordering below). This replaces the old
+     separate section headers: the grouping is now a column, and rows are sorted by it.
    - **ID** — the task id (e.g. `SMT-944`, `slack-...`).
-   - **Status** — `active` / `blocked` / `parked` / `gone` / `awaiting-review` /
-     `done`.
+   - **Status** — `active` / `blocked` / `parked` / `gone` / `awaiting-review` / `done`.
    - **Desc** — a **short description (≤ ~8 words) that identifies the task**, not a
-     restatement of the id. Distil it from the title + the latest event so the user can
+     restatement of the id. Distil it from the title + latest event so the user can
      recognize the work at a glance (e.g. "mobile OCR fails since 20.05", "review BO
-     auth PR #415", "set BO assignees from Alex's CSV"). **Every task gets one — never
-     leave it blank.** For a blocked/parked task, make the desc say what it's waiting on
-     ("waiting on Maesn", "paused, resume later"). This column is the whole point of the
-     briefing: it's what lets the user pick by recognition instead of decoding ids.
-   - **●** — a session marker: show ● when `session_id` is non-null (a worker tab is
-     attached), blank otherwise. Keep the column present in every section even if empty,
-     so the grid stays aligned.
+     auth PR #415"). **Every task gets one — never blank.** For a blocked/parked task,
+     make the desc say what it's waiting on ("waiting on Maesn", "paused, resume
+     later"). This column is the point of the briefing — it lets the user pick by
+     recognition instead of decoding ids.
 
-   Keep each row to one line — this is an index, not a report. Group/order exactly as
-   above (attention → priority → parked → done); the columns stay identical across
-   every group.
+   **Group order (sort the single table by this), and what goes in each:**
+   1. **Needs triage** — `status = gone` ONLY (a worker vanished, nothing reported —
+      genuinely needs a decision: resume / mark done / drop). **`blocked` does NOT go
+      here** — a blocked task is correctly waiting on someone else and is not asking for
+      your attention; putting it under "needs attention" is wrong.
+   2. **Active** — non-blocked, non-parked, non-done work, ordered by `priority`
+      (lower = higher; null last). Priority encodes "is someone waiting on me?": `1`
+      blocks others, `2` active, `3` solo/research.
+   3. **Blocked** — `status = blocked` (waiting on a person/dependency/decision). Its
+      own quiet group; the Desc says what each is waiting on.
+   4. **Parked** — `parked = 1` (waiting on something external / deliberately paused).
+      Desc notes the `parked_reason`.
+   5. **Done** — `status = done`, the recently-finished window. No action; a recap of
+      what closed (don't call it "ready to archive" — there is no archiving).
+
+   Keep each row to one line — this is an index, not a report.
 
 6. **Summarize the shape of your work** in a sentence or two: how many active,
    how many parked, anything flagged for attention (gone workers, stale tasks). This
