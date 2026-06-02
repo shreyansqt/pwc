@@ -137,17 +137,28 @@ threads) is `/pwc-find-work`.
    summary on its own. Nothing to file by hand.
 
 5. **Render the briefing as ONE single table** from the summary JSON. Do not dump raw
-   JSON, and do not split the board into multiple per-section tables — it is one table
-   with a **Group** column, sorted by group. Columns, in this exact order:
+   JSON, and do not split the board into per-section tables. Columns, in this exact
+   order:
 
-   | # | Group | ID | Status | Desc |
+   | # | Status | Pri | ID | Desc |
 
    - **#** — running number, top to bottom across the whole table, so the user can act
      by number ("start 3").
-   - **Group** — which band the row is in (see ordering below). This replaces the old
-     separate section headers: the grouping is now a column, and rows are sorted by it.
+   - **Status** — an **emoji + the status word**, which also carries the grouping (rows
+     are sorted by status-band, so there's no separate Group column). Use exactly:
+     - 🚨 `gone` — worker vanished, needs triage
+     - 🟢 `active`
+     - 🔵 `awaiting-review`
+     - ⛔ `blocked`
+     - 💤 `parked`
+     - ✅ `done`
+
+     Precedence when both apply: a `parked = 1` task renders as 💤 `parked` even if its
+     underlying status is `blocked`/`active` (parked is the user-facing state).
+   - **Pri** — the numeric priority (`1`/`2`/`3`, blank if null). Lower = higher;
+     priority encodes "is someone waiting on me?" (`1` blocks others, `2` active,
+     `3` solo/research).
    - **ID** — the task id (e.g. `SMT-944`, `slack-...`).
-   - **Status** — `active` / `blocked` / `parked` / `gone` / `awaiting-review` / `done`.
    - **Desc** — a **short description (≤ ~8 words) that identifies the task**, not a
      restatement of the id. Distil it from the title + latest event so the user can
      recognize the work at a glance (e.g. "mobile OCR fails since 20.05", "review BO
@@ -156,20 +167,16 @@ threads) is `/pwc-find-work`.
      later"). This column is the point of the briefing — it lets the user pick by
      recognition instead of decoding ids.
 
-   **Group order (sort the single table by this), and what goes in each:**
-   1. **Needs triage** — `status = gone` ONLY (a worker vanished, nothing reported —
-      genuinely needs a decision: resume / mark done / drop). **`blocked` does NOT go
-      here** — a blocked task is correctly waiting on someone else and is not asking for
-      your attention; putting it under "needs attention" is wrong.
-   2. **Active** — non-blocked, non-parked, non-done work, ordered by `priority`
-      (lower = higher; null last). Priority encodes "is someone waiting on me?": `1`
-      blocks others, `2` active, `3` solo/research.
-   3. **Blocked** — `status = blocked` (waiting on a person/dependency/decision). Its
-      own quiet group; the Desc says what each is waiting on.
-   4. **Parked** — `parked = 1` (waiting on something external / deliberately paused).
-      Desc notes the `parked_reason`.
-   5. **Done** — `status = done`, the recently-finished window. No action; a recap of
-      what closed (don't call it "ready to archive" — there is no archiving).
+   **Sort the table by status-band in this order**, then by `Pri` (ascending, null
+   last) within each band:
+   1. 🚨 **gone** — needs triage (resume / mark done / drop). Note: `blocked` is NOT
+      triage — it's a separate band below; don't lump blocked in with gone.
+   2. 🟢 **active** / 🔵 **awaiting-review** — work in flight, ordered by priority.
+   3. ⛔ **blocked** — waiting on a person/dependency/decision; Desc says on what.
+   4. 💤 **parked** — waiting on something external / deliberately paused; Desc notes
+      the `parked_reason`.
+   5. ✅ **done** — recently-finished window; a recap of what closed (no action; don't
+      call it "ready to archive" — there is no archiving).
 
    Keep each row to one line — this is an index, not a report.
 
