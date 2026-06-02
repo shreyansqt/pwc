@@ -148,7 +148,7 @@ threads) is `/pwc-find-work`.
      are sorted by status-band, so there's no separate Group column). There are exactly
      **four** statuses — use these and only these:
      - ⚪ `pending` — queued, ready to start, nobody on it yet
-     - 🟡 `in-progress` — actively being worked (a worker is dispatched/live), or a
+     - 🟢 `in-progress` — actively being worked (a worker is dispatched/live), or a
        worker was on it and the session died (still in-progress, resumable)
      - ⛔ `blocked` — waiting on something external; this **absorbs review-waiting**
        ("waiting on Alison's review") **and paused/parked** ("paused, resume later") —
@@ -171,7 +171,7 @@ threads) is `/pwc-find-work`.
 
    **Sort the table by status-band in this order**, then by `Pri` (ascending, null
    last) within each band:
-   1. 🟡 **in-progress** — work actively in flight (incl. a task whose worker died and
+   1. 🟢 **in-progress** — work actively in flight (incl. a task whose worker died and
       is resumable).
    2. ⚪ **pending** — ready to start, ordered by priority — the user's "what to pick up".
    3. ⛔ **blocked** — waiting on a person / dependency / review / paused; Desc says
