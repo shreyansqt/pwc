@@ -27,8 +27,9 @@ from "holds my state" into "drives me" — so `/next` proposes, and the user dec
 1. **Load all tasks** with `taskdb.py summary`.
 
 2. **Rank candidates.** Favor, roughly in this order:
-   - Tasks flagged for attention — `gone` (a worker needs triage) or `blocked`
-     whose blocker may now be clear.
+   - Tasks flagged for attention — an `in-progress` task whose worker died (resumable,
+     pick it back up) or a `blocked` task whose blocker may now be clear. Then
+     `pending` work ready to start.
    - **Tasks that unblock other people, first.** This is the dominant signal, and
      it's encoded in `priority` (lower = higher; null sorts last): `1` = a teammate /
      customer / deadline is waiting on the user, `2` = active work blocking no one,

@@ -6,9 +6,9 @@ worker process's command line. `pgrep -f <uuid>` is therefore an exact "is this
 session still running?" test — no PID storage, no polling, terminal-agnostic.
 ("Worker status" = alive/dead here, distinct from a task's status field.)
 
-Used by /show-work: for each task with a session_id and a (task) status implying it
-should be running, check worker status here; mark the dead ones "gone — needs
-triage" via `taskdb.py set-status-gone`. This detects death, not outcome — a gone
+Used by /show-work: for each `in-progress` task with a session_id, check worker
+status here; for the dead ones, detach the session (`taskdb.py clear-session`) and
+leave the task `in-progress` (resumable). This detects death, not outcome — a dead
 worker may have left finished-but-unpushed work, so never infer done/failed.
 
 Usage:

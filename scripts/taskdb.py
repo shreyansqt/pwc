@@ -598,7 +598,7 @@ def build_parser() -> argparse.ArgumentParser:
                                   "deduped if taken. Defaults to a slug of the title.")
     s.add_argument("--type", required=True)
     s.add_argument("--title", required=True)
-    s.add_argument("--status", default="active")
+    s.add_argument("--status", default="pending")
     s.add_argument("--priority", type=int)
     s.add_argument("--notes")
     s.add_argument("--workdir")

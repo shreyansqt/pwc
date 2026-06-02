@@ -170,7 +170,10 @@ of the way.
 6. **Record it, then tell the user how to start the worker.** Right after dispatch,
    run `taskdb.py set-session --task <id> --session-id <uuid> --workdir <dir>` (writes
    the session id and a `dispatched` event, so the task is tracked from the instant
-   the worker starts). Then, in your reply:
+   the worker starts), and **move the task to `in-progress`**
+   (`taskdb.py update-task --task <id> --status in-progress`) — dispatching a worker is
+   what flips a task from `pending` to `in-progress`. (On a resume of an already-started
+   task it's already in-progress; setting it again is harmless.) Then, in your reply:
 
    - **iterm2 mode:** **explicitly tell the user the seed briefing is sitting in the
      new tab's input box and they just need to review it and press Enter.** Do not

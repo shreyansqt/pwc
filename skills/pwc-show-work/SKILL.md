@@ -48,8 +48,11 @@ threads) is `/pwc-find-work`.
   `{task, session_id}` on stdin, returns each with `alive: true|false`. Tests
   whether each worker session is actually still running. **iterm2 mode only** — a
   Desktop worker is not a local `claude` process, so `pgrep` can't see it.
-- `python3 $SCRIPTS/taskdb.py set-status-gone --task <id>` — mark a task whose
-  worker has vanished as `gone` (needs triage), logging a `gone` event.
+- `python3 $SCRIPTS/taskdb.py clear-session --task <id>` — detach a finished/dead
+  worker session from a task (the task's status is left as-is). Use this in the
+  worker-status sweep when a session is `alive: false`. (The old `set-status-gone` is
+  retired along with the `gone` status — a vanished worker just stays `in-progress`
+  with its session detached.)
 - `python3 $SCRIPTS/taskdb.py stale --threshold-days <N>` — active, **not parked**
   tasks untouched for longer than N days. The staleness-sweep candidates.
 - `python3 $SCRIPTS/taskdb.py parked-aging --threshold-days <N>` — parked tasks
@@ -77,26 +80,23 @@ threads) is `/pwc-find-work`.
    flight, **ask them** rather than inferring. Proceed to step 3.
 
    **In `iterm2` mode**, collect every task in the summary that has a non-null
-   `session_id` and a status that implies it should still be running (e.g.
-   `active`, `blocked`, `awaiting-review` — not already `gone` or `done`).
-   Pass them as a JSON list of `{task, session_id}` to
-   `python3 $SCRIPTS/worker_status.py --json -`. For each result with `alive: false`,
-   run `taskdb.py set-status-gone --task <id>`.
+   `session_id` and is `in-progress` (the only status that implies a worker should be
+   running — `pending`/`blocked`/`done` shouldn't have a live worker). Pass them as a
+   JSON list of `{task, session_id}` to `python3 $SCRIPTS/worker_status.py --json -`.
 
-   A dead session is **death, not outcome** — but it is *not* automatically `gone`.
-   `set-status-gone` distinguishes two endings:
-   - **Ended after reporting** — the worker logged a status change or a
-     `/pwc-report-status` note after it was dispatched, then the session closed
-     (the normal flow: do the work, report, close the tab). Here the task's status
-     is *real and recent*, so the command **preserves it** and just detaches the
-     finished `session_id`. Do not treat this as needing triage.
-   - **Vanished** — the session died with nothing said since dispatch. Only this
-     becomes `gone — needs triage` (resume, mark done, or drop); it may have left
-     finished-but-unpushed work, so never infer done or failed.
+   A dead session is **death, not outcome.** For each `alive: false` result:
+   - **Ended after reporting** — the worker logged a status change / note after
+     dispatch, then closed (the normal flow: work, report, close the tab). The task's
+     status is real and recent — leave it; just detach the finished `session_id`
+     (`taskdb.py clear-session --task <id>`).
+   - **Vanished** — the session died with nothing said since dispatch. The task
+     **stays `in-progress`** (it was mid-flight and is resumable) — do not invent a new
+     status, do not infer done/failed (it may have unpushed work). Detach the session
+     and note "worker died, resumable" so the user can resume or re-decide. Surface
+     these in the briefing as the in-progress rows whose worker is no longer live.
 
-   So you can run `set-status-gone` on every dead session uniformly — it won't
-   clobber a worker's just-reported status. (Use `--force` only to deliberately mark
-   a reported task `gone`.) If the sweep changed anything, re-run `summary`.
+   If the sweep changed anything, re-run `summary`. (There is no `gone` status anymore;
+   a vanished worker is just an in-progress task with a dead session.)
 
    **Verify before acting on a worker's reported outcome.** A worker's reported
    status (and the note that comes with it) is *secondhand* — it is what the worker
@@ -145,16 +145,18 @@ threads) is `/pwc-find-work`.
    - **#** — running number, top to bottom across the whole table, so the user can act
      by number ("start 3").
    - **Status** — an **emoji + the status word**, which also carries the grouping (rows
-     are sorted by status-band, so there's no separate Group column). Use exactly:
-     - 🚨 `gone` — worker vanished, needs triage
-     - 🟢 `active`
-     - 🔵 `awaiting-review`
-     - ⛔ `blocked`
-     - 💤 `parked`
-     - ✅ `done`
+     are sorted by status-band, so there's no separate Group column). There are exactly
+     **four** statuses — use these and only these:
+     - ⚪ `pending` — queued, ready to start, nobody on it yet
+     - 🟡 `in-progress` — actively being worked (a worker is dispatched/live), or a
+       worker was on it and the session died (still in-progress, resumable)
+     - ⛔ `blocked` — waiting on something external; this **absorbs review-waiting**
+       ("waiting on Alison's review") **and paused/parked** ("paused, resume later") —
+       the Desc carries which kind it is
+     - ✅ `done` — complete
 
-     Precedence when both apply: a `parked = 1` task renders as 💤 `parked` even if its
-     underlying status is `blocked`/`active` (parked is the user-facing state).
+     (Legacy values may still appear in old data — map on display: `active`→`pending`,
+     `awaiting-review`→`blocked`, `parked`/`parked=1`→`blocked`, `gone`→`in-progress`.)
    - **Pri** — the numeric priority (`1`/`2`/`3`, blank if null). Lower = higher;
      priority encodes "is someone waiting on me?" (`1` blocks others, `2` active,
      `3` solo/research).
@@ -162,32 +164,32 @@ threads) is `/pwc-find-work`.
    - **Desc** — a **short description (≤ ~8 words) that identifies the task**, not a
      restatement of the id. Distil it from the title + latest event so the user can
      recognize the work at a glance (e.g. "mobile OCR fails since 20.05", "review BO
-     auth PR #415"). **Every task gets one — never blank.** For a blocked/parked task,
-     make the desc say what it's waiting on ("waiting on Maesn", "paused, resume
-     later"). This column is the point of the briefing — it lets the user pick by
-     recognition instead of decoding ids.
+     auth PR #415"). **Every task gets one — never blank.** For a blocked task, make the
+     desc say what it's waiting on ("waiting on Maesn", "paused, resume later",
+     "waiting on Alison's review"). This column is the point of the briefing — it lets
+     the user pick by recognition instead of decoding ids.
 
    **Sort the table by status-band in this order**, then by `Pri` (ascending, null
    last) within each band:
-   1. 🚨 **gone** — needs triage (resume / mark done / drop). Note: `blocked` is NOT
-      triage — it's a separate band below; don't lump blocked in with gone.
-   2. 🟢 **active** / 🔵 **awaiting-review** — work in flight, ordered by priority.
-   3. ⛔ **blocked** — waiting on a person/dependency/decision; Desc says on what.
-   4. 💤 **parked** — waiting on something external / deliberately paused; Desc notes
-      the `parked_reason`.
-   5. ✅ **done** — recently-finished window; a recap of what closed (no action; don't
+   1. 🟡 **in-progress** — work actively in flight (incl. a task whose worker died and
+      is resumable).
+   2. ⚪ **pending** — ready to start, ordered by priority — the user's "what to pick up".
+   3. ⛔ **blocked** — waiting on a person / dependency / review / paused; Desc says
+      which.
+   4. ✅ **done** — recently-finished window; a recap of what closed (no action; don't
       call it "ready to archive" — there is no archiving).
 
    Keep each row to one line — this is an index, not a report.
 
-6. **Summarize the shape of your work** in a sentence or two: how many active,
-   how many parked, anything flagged for attention (gone workers, stale tasks). This
-   is the orientation the user is actually after.
+6. **Summarize the shape of your work** in a sentence or two: how many in-progress,
+   how many pending, how many blocked, and anything flagged for attention (an
+   in-progress task whose worker died and is resumable, stale tasks). This is the
+   orientation the user is actually after.
 
 7. **Offer next moves, don't take them.** End by pointing at what the user might do
    (e.g. "drill into a task, or run `/pwc-pick-work` for a suggestion"). Beyond the worker-status
-   and staleness sweeps above (which only flag and, for dead workers, mark `gone`),
-   do not dispatch work or otherwise mutate tasks unless the user asks.
+   and staleness sweeps above (which only detach dead sessions, leaving the task
+   in-progress), do not dispatch work or otherwise mutate tasks unless the user asks.
 
 ## Notes
 

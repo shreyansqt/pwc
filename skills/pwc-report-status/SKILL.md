@@ -47,22 +47,28 @@ worker to.
 ## Steps
 
 1. **Pick the kind** — for the status-bearing ones, *also* pass `--set-status` with
-   the same value so the task's status field moves (not just the event log):
-   - `blocked` — can't proceed (waiting on a person, dependency, decision). Put what
-     it's blocked on in `--detail`. → `--set-status blocked`
-   - `awaiting-review` — work is up for review (PR opened / sent for feedback).
-     → `--set-status awaiting-review`
+   the same value so the task's status field moves (not just the event log). There are
+   exactly **four** statuses: `pending` / `in-progress` / `blocked` / `done`.
+   - `in-progress` — you've started and are actively working it.
+     → `--set-status in-progress`
+   - `blocked` — can't proceed: waiting on a person, dependency, or **review** (PR
+     opened / sent for feedback), or you're **pausing** it to resume later. Put *what*
+     it's waiting on (or "paused, resume later") in `--detail`. → `--set-status blocked`
+     (There is no separate `awaiting-review` or `parked` status — both are `blocked`;
+     the detail line says which.)
    - `done` — the task's work is complete. → `--set-status done`
    - `note` — anything else worth recording (a finding, a direction change). **No
      `--set-status`** — a note doesn't change status.
+   (`pending` is the not-started state set at creation; you normally won't set it from
+   here — moving *to* pending only makes sense if you're handing a started task back.)
 
 2. **Record it.** Use `--source worker` for a worker's own state, `--source
    coordinator` for an inline outcome you handled. No `--workspace` flag — the db is
    auto-discovered from wherever you are (see Configuration):
    ```
    python3 $SCRIPTS/taskdb.py log-event --task <id> --source <worker|coordinator> \
-     --kind <blocked|awaiting-review|done|note> --detail "<concise description>" \
-     [--set-status <blocked|awaiting-review|done>]
+     --kind <in-progress|blocked|done|note> --detail "<concise description>" \
+     [--set-status <in-progress|blocked|done>]
    ```
    The command is `log-event` and the task flag is `--task` (not `list`, not `--ref`).
 
