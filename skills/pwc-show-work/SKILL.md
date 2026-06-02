@@ -190,6 +190,13 @@ threads) is `/pwc-find-work`.
 
    Keep each row to one line — this is an index, not a report.
 
+   **Render EVERY row, every time — never truncate or abbreviate.** Show all tasks
+   `summary` returns: every active row in the main table AND every `done` row in the
+   ~2-day window in the Recently-finished table. Do not shorten the list with "…", a
+   "+N more", or a sample — the user asked to see the current tasks, so show all of
+   them. If the done list feels long, that's a window-size question (`--done-within-days`),
+   not a reason to cut rows from the render.
+
 6. **Summarize the shape of your work** in a sentence or two: how many in-progress,
    how many pending, how many blocked, and anything flagged for attention (an
    in-progress task whose worker died and is resumable, stale tasks). This is the
