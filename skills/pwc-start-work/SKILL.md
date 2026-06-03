@@ -104,7 +104,24 @@ of the way.
      continue in the tab) — **don't** promise an in-box briefing to review the way you
      would for a fresh spawn. If you want to nudge the resumed worker in a specific
      direction, say so to the user as text to paste, since the seed won't be typed.
-   - **No session, or transcript gone** → fresh.
+   - **No live `session_id` on the task → do NOT jump to fresh yet. Look back through
+     the event log for a prior session to resume first.** A task's `session_id` is
+     *detached* (cleared) every time a worker reports `done`/`blocked`/`note` and its
+     tab closes — so a task that was worked, then **blocked, then later unblocked**
+     reads as "no session" even though a fully-resumable session with all the prior
+     investigation is sitting in its history. This is the common shape for an unblocked
+     task (e.g. "tested the endpoint, filed a support ticket, blocked on their reply" →
+     reply arrives → resume the worker that did the testing, don't start one that has
+     to rediscover it). So before spawning fresh: run `taskdb.py detail --task <id>`,
+     scan the `events` for the most recent `dispatched` event's `session_id`, and check
+     whether its transcript still exists (`worker_status.py` for liveness; the
+     transcript path is `~/.claude/projects/<cwd-slug>/<session-id>.jsonl`). If a prior
+     session's transcript survives, **resume that** (`spawn.py --session-id <that-id>
+     --resume`) and nudge it toward the new development (the unblock) as paste text —
+     its context is worth far more than a clean slate. Only when there is genuinely no
+     prior session, or every prior transcript is gone, do you spawn **fresh**. Spawning
+     fresh on an unblocked task whose original session is still resumable is a real
+     defect — it throws away the exact context the task needs.
 
 4. **For a fresh session, build a *minimal* seed: the task id, a skill to load its
    own context, and the closing-report step. Don't inline the task's content.** The
