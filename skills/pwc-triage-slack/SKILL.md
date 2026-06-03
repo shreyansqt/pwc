@@ -16,7 +16,7 @@ the user's confirmation.
 
 ## Configuration
 
-- **Scripts directory**: `~/work/pwc/scripts` (`$SCRIPTS`).
+- **Scripts directory**: `~/work/side-projects/pwc/scripts` (`$SCRIPTS`).
 - **Workspace**: current directory; task DB + config auto-discovered.
 - **Triage config**: `python3 $SCRIPTS/sources.py triage` returns the channels, the
   `scan_dms` flag, and the `last_triaged` watermark. If it's empty, tell the user to

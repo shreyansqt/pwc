@@ -21,7 +21,7 @@ worker to.
 
 ## Configuration
 
-- **Scripts directory**: `~/work/pwc/scripts` (`$SCRIPTS`).
+- **Scripts directory**: `~/work/side-projects/pwc/scripts` (`$SCRIPTS`).
 - **Workspace**: where the task database lives (`<workspace>/.pwc/taskdb.db`).
   **Auto-discovered from anywhere inside the workspace — you do NOT need
   `--workspace`, from the coordinator or from a worker.** Discovery walks up from the

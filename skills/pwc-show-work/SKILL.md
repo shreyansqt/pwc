@@ -23,7 +23,7 @@ threads) is `/pwc-find-work`.
 ## Configuration
 
 - **Scripts directory** (the shared PWC mechanism):
-  `~/work/pwc/scripts`
+  `~/work/side-projects/pwc/scripts`
   Referred to below as `$SCRIPTS`. All task database access goes through these scripts —
   never read or write the database directly.
 - **Workspace**: the directory the coordinator is running in. The task database lives at

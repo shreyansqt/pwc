@@ -18,7 +18,7 @@ Two audiences, one skill:
 
 ## Configuration
 
-- **Scripts directory**: `~/work/pwc/scripts` (`$SCRIPTS`).
+- **Scripts directory**: `~/work/side-projects/pwc/scripts` (`$SCRIPTS`).
 - **Workspace**: the current directory; task database auto-discovered at
   `<workspace>/.pwc/taskdb.db`. (A worker runs inside a repo under the workspace, so
   discovery still resolves the same db; pass `--workspace` if it doesn't.)

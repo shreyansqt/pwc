@@ -13,7 +13,7 @@ from "holds my state" into "drives me" — so `/next` proposes, and the user dec
 
 ## Configuration
 
-- **Scripts directory**: `~/work/pwc/scripts` (`$SCRIPTS`).
+- **Scripts directory**: `~/work/side-projects/pwc/scripts` (`$SCRIPTS`).
 - **Workspace**: the current directory; task database auto-discovered at `<workspace>/.pwc/taskdb.db`.
 
 ## Tools

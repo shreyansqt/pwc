@@ -16,7 +16,7 @@ depends on the exact contents, so it's safe to re-run anytime to adjust.
 
 ## Configuration
 
-- **Scripts directory**: `~/work/pwc/scripts` (`$SCRIPTS`).
+- **Scripts directory**: `~/work/side-projects/pwc/scripts` (`$SCRIPTS`).
 - **Workspace**: the current directory; config written to `<workspace>/.pwc/sources.json`.
 
 ## Tools

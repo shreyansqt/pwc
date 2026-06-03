@@ -22,7 +22,7 @@ of the way.
 
 ## Configuration
 
-- **Scripts directory**: `~/work/pwc/scripts` (`$SCRIPTS`).
+- **Scripts directory**: `~/work/side-projects/pwc/scripts` (`$SCRIPTS`).
 - **Workspace root**: the current directory (e.g. `~/work/acme`).
   A task's `workdir` is relative to this (a repo like `service-backend`, or the
   root itself).
@@ -62,8 +62,12 @@ of the way.
   a session recorded by mistake, or to detach a finished/abandoned one so the task
   reads as not-dispatched.
 - `python3 $SCRIPTS/sources.py skill-hints [--type <type>]` — the configured
-  task-type → skill(s) map. Optional now that the minimal seed leans on
-  `/pwc-show-task`; consult only if you want to name an obvious tool in the seed.
+  task-type → skill(s) map. **Run it with `--type <task-type>` while building every
+  fresh seed** (step 4): if it returns skills for the type, the seed must strongly
+  recommend them. This is the workspace's deliberate routing — e.g. `pr-review` →
+  `code-review` — so a PR-review worker always starts from `/code-review`, not from
+  whatever tool the coordinator happens to think of. The map is the source of truth
+  for "which skill runs this kind of work," not the coordinator's judgement.
 - `python3 $SCRIPTS/taskdb.py update-task` / `log-event` — for inline outcomes.
 
 ## Steps
@@ -123,12 +127,16 @@ of the way.
      rely on it). The worker pulls the *current* fields/refs/timeline itself — no stale
      snapshot baked into the seed, and nothing for the coordinator to transcribe. This
      replaces the old inlined title/refs/event-dump entirely.
+   - **The recommended-skill step** — run `skill-hints --type <task-type>` and, if it
+     returns any skills, **strongly recommend them in the seed as the way to do the
+     work**, not as an optional aside. Phrase it as a directive: *"Review this with
+     `/code-review`"* / *"Draft the reply with `/slack-message`"* — not *"you could
+     use…"*. This is the workspace's configured routing (e.g. `pr-review` →
+     `code-review`), so it should land the same way every time regardless of which
+     coordinator instance builds the seed. The worker can still deviate if the skill
+     genuinely doesn't fit, but the default the seed points at is the configured one.
    - **The closing-report step** — *"When you've finished or hit a blocker you can't
-     clear, run `/pwc-report-status` for this task."* (`/pwc-show-task` and
-     `/pwc-report-status` together also surface the relevant skills for the work, so a
-     separate `skill-hints` lookup for the seed is no longer needed; if you want to
-     name an obvious tool, one line is fine, e.g. *"output is a Slack message →
-     `/slack-message`"*.)
+     clear, run `/pwc-report-status` for this task."*
    - **The attach-threads step** — *"If you post to or read any Slack thread about
      this task, attach it to the task as a working ref (via `/pwc-report-status` /
      `add-ref`, using the message's real `thread_ts`) so replies get noticed later."*

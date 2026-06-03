@@ -13,7 +13,7 @@ tracking): find brings new work in; show tells you where existing work stands.
 
 ## Configuration
 
-- **Scripts directory**: `~/work/pwc/scripts` (`$SCRIPTS`).
+- **Scripts directory**: `~/work/side-projects/pwc/scripts` (`$SCRIPTS`).
 - **Workspace**: the current directory; task database auto-discovered at
   `<workspace>/.pwc/taskdb.db`.
 
