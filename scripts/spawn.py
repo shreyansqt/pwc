@@ -104,11 +104,15 @@ def spawn(*, cwd, command, seed_prompt=None, title=None):
         either way, since we never auto-submit).
         """
         import asyncio
-        # Markers claude's interactive TUI draws once it can accept input. Cover the
-        # current prompt glyph ("❯"), the boxed ">" some builds use, and the footer
-        # hints ("for shortcuts", "auto mode on", "esc to interrupt", "Bypassing").
-        markers = ("❯", "│ >", "for shortcuts", "auto mode on",
-                   "esc to interrupt", "Bypassing")
+        # Markers claude's interactive TUI draws once it can accept input. These must
+        # be SPECIFIC to claude's TUI — NOT shared with the shell prompt or boot text.
+        # Earlier this list included "❯", "│ >", and "Bypassing"; "❯" in particular is
+        # a common shell prompt glyph (starship/oh-my-zsh success_symbol), so it
+        # matched the *shell* prompt the instant the tab opened — before claude had
+        # started — and the seed was typed into the bare shell instead of claude's
+        # box. Key only on claude's footer hint text, which the shell never prints.
+        markers = ("for shortcuts", "auto mode on", "esc to interrupt",
+                   "? for shortcuts", "/ for commands")
         waited = 0.0
         while waited < timeout:
             try:
@@ -120,7 +124,10 @@ def spawn(*, cwd, command, seed_prompt=None, title=None):
             except Exception:  # noqa: BLE001 — screen read is best-effort
                 text = ""
             if any(m in text for m in markers):
-                await asyncio.sleep(0.3)
+                # Settle: the footer hint can appear a frame or two before the input
+                # box is fully ready to receive text. Wait for the redraw to finish so
+                # the seed lands in the box intact rather than mid-render.
+                await asyncio.sleep(0.8)
                 return True
             await asyncio.sleep(interval)
             waited += interval
