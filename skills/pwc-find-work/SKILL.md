@@ -134,6 +134,17 @@ tracking): find brings new work in; show tells you where existing work stands.
    surfaced *as that* ("couldn't read the thread for SMT-877 — unverified"), not as a
    confident claim.
 
+   **When the user's part is done, the status is `done` — not `blocked`.** If the
+   reconciliation shows the user has finished their step (review approved/changes
+   requested, question answered, PR handed off) and the only thing left is a
+   teammate's action (their merge, their reply, their deploy), set/leave the task
+   `done`, not `blocked`. `blocked` is reserved for "can't proceed *and the user still
+   owns the next step.*" The board is "what needs me," so don't park a task there that
+   the user can't act on. Closing it is safe: find-work resurfaces it on the next scan
+   if the teammate comes back, and a done task stays visible ~2 days regardless. In
+   particular, **a PR-review task is `done` the moment the user submits their review** —
+   waiting on the author to merge is not a user-blocked state.
+
 5. **Queue the confirmed ones.** For each the user approves, first **derive its id
    from the source's `id_convention`** (from the sources config):
    - `jira-key` → use the Jira key verbatim as `--task` (e.g. `SMT-874`).

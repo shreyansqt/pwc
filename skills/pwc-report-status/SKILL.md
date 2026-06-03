@@ -51,12 +51,25 @@ worker to.
    exactly **four** statuses: `pending` / `in-progress` / `blocked` / `done`.
    - `in-progress` — you've started and are actively working it.
      → `--set-status in-progress`
-   - `blocked` — can't proceed: waiting on a person, dependency, or **review** (PR
-     opened / sent for feedback), or you're **pausing** it to resume later. Put *what*
-     it's waiting on (or "paused, resume later") in `--detail`. → `--set-status blocked`
+   - `blocked` — can't proceed *and you still own the next step once unblocked*:
+     waiting on a dependency you'll act on, or you've **paused** it to resume later.
+     Put *what* it's waiting on (or "paused, resume later") in `--detail`.
+     → `--set-status blocked`
      (There is no separate `awaiting-review` or `parked` status — both are `blocked`;
      the detail line says which.)
-   - `done` — the task's work is complete. → `--set-status done`
+   - `done` — **the work is complete from the user's end**, even if a teammate still
+     has a downstream step. This is the key call: once the user has done their part —
+     a **review approved/changes-requested**, a question answered, a PR sent off, a
+     handoff made — the task is `done`, *not* `blocked`. `blocked` is only for when the
+     user is still on the hook for the next action; if the remaining step is someone
+     else's (their merge, their reply, their deploy), close it `done`. The board is
+     "what needs me," so a task the user can't act on shouldn't sit there as `blocked`.
+     A `done` task isn't gone — find-work resurfaces it if the teammate comes back
+     (and a done task stays on the board ~2 days as a "just finished" line regardless).
+     → `--set-status done`
+     **Specifically: a PR-review task is `done` the moment the user submits their
+     review** (approve or request-changes) — waiting on the author to address comments
+     or merge is the author's step, not a `blocked`-on-the-user state.
    - `note` — anything else worth recording (a finding, a direction change). **No
      `--set-status`** — a note doesn't change status.
    (`pending` is the not-started state set at creation; you normally won't set it from
