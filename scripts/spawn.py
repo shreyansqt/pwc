@@ -43,12 +43,26 @@ def transcript_path(cwd: str, session_id: str) -> Path:
             / session_slug(cwd) / f"{session_id}.jsonl")
 
 
-def build_claude_command(*, session_id, resume, cwd):
-    """Return (mode, launch_command). The launch command starts `claude`
-    *interactively* (no prompt argument) so the session stays open for the user to
-    drive — a positional prompt would make claude one-shot and exit. The seed
-    prompt is delivered separately (typed into the session), which also avoids the
-    shell-quoting fragility of passing a long multiline prompt as an argument.
+def build_claude_command(*, session_id, resume, cwd, seed_prompt=None):
+    """Return (mode, launch_command). On a FRESH spawn the seed is passed as
+    `claude`'s positional prompt argument, so claude ingests it as the first user
+    message and starts working immediately — reliably, with no TUI timing race.
+
+    This replaces the old approach of launching claude bare and then typing the
+    seed into its input box once the TUI drew. That screen-scrape-then-type path
+    was fragile: it polled the rendered screen for claude's footer markers within a
+    timeout, and on a slow (cold) start the timeout fired and the seed was simply
+    NOT typed (`seed: "not-typed"`), forcing the user to copy-paste it by hand. A
+    positional prompt has none of that — claude's own startup consumes it, so there
+    is nothing to time. (Interactive `claude [prompt]` stays interactive; only
+    `-p/--print` makes it one-shot, which we never pass.) The long multiline seed
+    is shell-quoted via `shlex.quote`, so quoting is not a concern.
+
+    Trade-off: a positional prompt AUTO-SUBMITS — the worker starts on the seed
+    rather than letting the user review it un-submitted first. That's the chosen
+    behavior (the seed is the same load-context-then-start-ticket boilerplate every
+    time, and reliable delivery matters more than the review gate). On RESUME no
+    prompt is passed (the worker already carries its context).
     """
     args = ["claude"]
     mode = "fresh"
@@ -57,11 +71,13 @@ def build_claude_command(*, session_id, resume, cwd):
         mode = "resume"
     else:
         args += ["--session-id", session_id]  # fresh / resume-fallback
+        if seed_prompt:
+            args.append(seed_prompt)  # positional prompt -> claude auto-submits it
     inner = f"cd {shlex.quote(cwd)} && {shlex.join(args)}"
     return mode, inner
 
 
-def spawn(*, cwd, command, seed_prompt=None, title=None):
+def spawn(*, cwd, command, seed_in_command=False, title=None):
     """Open the worker in a new iTerm2 tab in the current window. Returns placement.
 
     Each worker gets its own full-width tab (switchable with Cmd-1/2/...), leaving
@@ -69,22 +85,19 @@ def spawn(*, cwd, command, seed_prompt=None, title=None):
     user's previously-active tab is restored as the focused tab right after the new
     tab is created, so spawning workers doesn't yank the user out of whatever they
     were doing. `async_send_text` targets the worker's session object directly (not
-    "the active session"), so the launch command and seed are still delivered to the
+    "the active session"), so the launch command is still delivered to the
     backgrounded worker correctly.
 
-    `command` launches claude interactively; if a `seed_prompt` is given, it's typed
-    into the session's input box after claude boots — but deliberately *not*
-    submitted. The seed sits in the box for the user to read and send with Enter.
-    This is intentional: auto-submitting was racy (the keystrokes raced claude's
-    startup and were silently lost) and gave the user no chance to glance at the
-    briefing first. Leaving it in the box is both reliable and reviewable.
+    The seed is no longer typed into the input box. It rides in `command` as
+    claude's positional prompt (see `build_claude_command`), so claude auto-submits
+    it on startup — reliable, with no TUI timing race. All this function does is run
+    `command` in the tab's shell. The old screen-scrape-then-type path (poll for
+    claude's footer markers, type the seed un-submitted, and on a slow start give up
+    with `seed: "not-typed"` forcing a manual paste) is gone.
 
-    Readiness is detected by polling the rendered screen for claude's input box
-    rather than a fixed sleep, so we type only after the box can accept input.
-    `placement["seed"]` reports what happened: "in-box" (typed into the box, awaiting
-    the user's Enter), "skipped" (no seed), or "not-typed" (the TUI never drew within
-    the timeout, so the seed was NOT typed — surfaced so the caller tells the user to
-    paste it manually).
+    `placement["seed"]` reports "submitted" (seed baked into the launch command and
+    auto-submitted) or "skipped" (no seed — e.g. a resume). `seed_in_command` tells
+    which.
     """
     try:
         import iterm2  # lazy: non-spawn use of this module shouldn't need it
@@ -92,47 +105,6 @@ def spawn(*, cwd, command, seed_prompt=None, title=None):
         fail("iterm2 module not installed — run `pip install iterm2`")
 
     placement = {}
-
-    async def _await_ready(session, timeout=45.0, interval=0.5):
-        """Wait until claude's TUI has drawn its input box and can accept text.
-
-        A fresh interactive session writes no transcript until the first message is
-        submitted, so the transcript file is NOT a usable readiness signal here.
-        Instead poll the rendered screen for claude's input prompt (the ">" box and
-        its hint line), which appears once the TUI is up. Falls back to returning
-        True at timeout so we still type the seed into the box (it just sits there
-        either way, since we never auto-submit).
-        """
-        import asyncio
-        # Markers claude's interactive TUI draws once it can accept input. These must
-        # be SPECIFIC to claude's TUI — NOT shared with the shell prompt or boot text.
-        # Earlier this list included "❯", "│ >", and "Bypassing"; "❯" in particular is
-        # a common shell prompt glyph (starship/oh-my-zsh success_symbol), so it
-        # matched the *shell* prompt the instant the tab opened — before claude had
-        # started — and the seed was typed into the bare shell instead of claude's
-        # box. Key only on claude's footer hint text, which the shell never prints.
-        markers = ("for shortcuts", "auto mode on", "esc to interrupt",
-                   "? for shortcuts", "/ for commands", "for agents",
-                   "shift+tab to cycle", "Claude Code v")
-        waited = 0.0
-        while waited < timeout:
-            try:
-                contents = await session.async_get_screen_contents()
-                text = "\n".join(
-                    contents.line(i).string
-                    for i in range(contents.number_of_lines)
-                )
-            except Exception:  # noqa: BLE001 — screen read is best-effort
-                text = ""
-            if any(m in text for m in markers):
-                # Settle: the footer hint can appear a frame or two before the input
-                # box is fully ready to receive text. Wait for the redraw to finish so
-                # the seed lands in the box intact rather than mid-render.
-                await asyncio.sleep(0.8)
-                return True
-            await asyncio.sleep(interval)
-            waited += interval
-        return False
 
     async def _main(connection):
         app = await iterm2.async_get_app(connection)
@@ -166,9 +138,9 @@ def spawn(*, cwd, command, seed_prompt=None, title=None):
             return
 
         # Restore focus to whatever tab the user was on. Safe to do BEFORE typing the
-        # launch command + seed below: `async_send_text` targets the session object
+        # launch command below: `async_send_text` targets the session object
         # directly, not "the active session," so the worker tab can sit in the
-        # background and still receive its launch command and seed text correctly.
+        # background and still receive its launch command correctly.
         # `order_window_front=False` keeps the window itself from being raised either.
         if original_tab is not None and original_tab is not tab:
             try:
@@ -177,25 +149,11 @@ def spawn(*, cwd, command, seed_prompt=None, title=None):
             except Exception:  # noqa: BLE001 — focus restore is best-effort, never fatal
                 placement["focus_restored"] = False
 
-        # Launch claude in the new shell.
+        # Launch claude in the new shell. The seed (if any) is already part of
+        # `command` as claude's positional prompt, so claude auto-submits it on
+        # startup — nothing more to type.
         await session.async_send_text(command + "\r")
-
-        if not seed_prompt:
-            placement["seed"] = "skipped"
-            return
-
-        # Type the briefing into the input box ONLY once the TUI is confirmed ready —
-        # and WITHOUT a trailing "\r" so it sits there for the user to review and
-        # submit with Enter. If readiness can't be confirmed within the timeout, do
-        # NOT type: dumping a multi-line block into a shell/boot screen risks it being
-        # consumed or partially submitted. Report "not-typed" so the caller tells the
-        # user to paste it manually.
-        ready = await _await_ready(session)
-        if ready:
-            await session.async_send_text(seed_prompt)
-            placement["seed"] = "in-box"
-        else:
-            placement["seed"] = "not-typed"
+        placement["seed"] = "submitted" if seed_in_command else "skipped"
 
     try:
         iterm2.run_until_complete(_main)
@@ -237,10 +195,13 @@ def main(argv=None):
 
     mode, command = build_claude_command(
         session_id=session_id, resume=args.resume, cwd=cwd,
+        seed_prompt=seed_prompt,
     )
-    # A resumed session carries its own context; don't re-inject a seed.
-    if mode == "resume":
-        seed_prompt = None
+    # The seed rides in the launch command as claude's positional prompt
+    # (auto-submitted), but only on a fresh spawn — a resume carries its own context
+    # and gets no prompt. `seed_in_command` tracks whether `command` actually
+    # contains it, so spawn() can report the right seed status.
+    seed_in_command = bool(seed_prompt) and mode != "resume"
 
     result = {
         "session_id": session_id,
@@ -255,7 +216,7 @@ def main(argv=None):
         emit(result)
         return
 
-    placement = spawn(cwd=cwd, command=command, seed_prompt=seed_prompt,
+    placement = spawn(cwd=cwd, command=command, seed_in_command=seed_in_command,
                       title=args.name or args.task)
     result.update(placement)
     emit(result)

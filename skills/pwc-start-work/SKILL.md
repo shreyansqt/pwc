@@ -46,9 +46,13 @@ of the way.
 - `python3 $SCRIPTS/sources.py mode` — the launch mode (`iterm2` | `desktop`). Read
   it first; it decides which dispatch tool below you use.
 - **(iterm2 mode)** `python3 $SCRIPTS/spawn.py --task <id> --cwd <dir> --session-id <uuid> [--resume] [--prompt -] [--name "<id> · <gist>"]`
-  — open the worker tab and type the seed into its input box (without submitting).
-  Prints `{session_id, cwd, mode, transcript_expected, seed}` where `seed` is
-  `in-box` / `skipped` / `not-typed`.
+  — open the worker tab and launch claude with the seed as its positional prompt, so
+  claude **auto-submits the seed on startup** (the worker starts working immediately;
+  there is no review-then-Enter step). Prints
+  `{session_id, cwd, mode, transcript_expected, seed}` where `seed` is `submitted`
+  (baked into the launch command and auto-submitted) or `skipped` (no seed — e.g. a
+  resume). The seed is no longer typed into the input box, so there is no `not-typed`
+  failure mode and nothing for the user to paste by hand.
 - **(desktop mode)** `python3 $SCRIPTS/handoff.py --task <id> --cwd <dir> --session-id <uuid> [--prompt -] [--name "<id> · <gist>"]`
   — copies the seed to the clipboard (`pbcopy`) and prints
   `{session_id, cwd, seed, clipboard}` where `clipboard` is `copied` / `failed` /
@@ -101,9 +105,9 @@ of the way.
      (the worker already carries its context), so the result returns `"seed":
      "skipped"` — this is correct, not a failure. Any `--prompt` you pipe on a resume
      is dropped. So tell the user the worker resumed with its history (and to just
-     continue in the tab) — **don't** promise an in-box briefing to review the way you
-     would for a fresh spawn. If you want to nudge the resumed worker in a specific
-     direction, say so to the user as text to paste, since the seed won't be typed.
+     continue in the tab) — **don't** describe it as auto-starting on a fresh seed the
+     way a fresh spawn does. If you want to nudge the resumed worker in a specific
+     direction, say so to the user as text to paste, since no seed is submitted.
    - **No live `session_id` on the task → do NOT jump to fresh yet. Look back through
      the event log for a prior session to resume first.** A task's `session_id` is
      *detached* (cleared) every time a worker reports `done`/`blocked`/`note` and its
@@ -125,15 +129,14 @@ of the way.
 
 4. **For a fresh session, build a *minimal* seed: the task id, a skill to load its
    own context, and the closing-report step. Don't inline the task's content.** The
-   seed is delivered as un-submitted text in the worker's input box (see step 5) —
-   *the user* reads it and presses Enter, so the worker's first action is whatever the
-   seed says, submitted by the user, not a command the worker runs unprompted. That
-   distinction matters: a fresh worker rightly won't *auto-run an opaque shell script*
-   it was merely told about (e.g. a raw `python3 $SCRIPTS/taskdb.py …` line — it can't
-   verify an unfamiliar script is safe). But a **named, installed skill** like
-   `/pwc-show-task`, submitted by the user as the first instruction, is a normal,
-   trusted invocation. So the seed leans on the skill to self-load context rather than
-   carrying that context inline. The seed has just three parts:
+   seed is passed as claude's positional prompt and **auto-submitted on startup** (see
+   step 5) — so the worker's first action *is* the seed, run as soon as it boots, with
+   no human gate in between. That makes it doubly important that the seed points at
+   **named, installed skills** the worker can trust and run, not opaque shell. Have it
+   load context via `/pwc-show-task <id>` (a normal, trusted skill invocation) rather
+   than telling the worker to run a raw `python3 $SCRIPTS/taskdb.py …` line it can't
+   verify and shouldn't auto-run. So the seed leans on the skill to self-load context
+   rather than carrying that context inline. The seed has just three parts:
 
    - **The PWC task id, stated first as the handle** — e.g. *"Your PWC task is
      `SMT-921`."* This is the durable key to everything else.
@@ -178,13 +181,15 @@ of the way.
    title (e.g. `SMT-677 · BO auth review`, `slack-ocr · OCR income prefill`). The tool
    you call depends on the mode read in the Configuration:
 
-   **iterm2 mode → `spawn.py`.** Opens the worker tab and types the seed into its
-   input box, **NOT auto-submitted** — it stops before Enter. (Auto-submitting raced
-   claude's startup and the keystrokes were lost, and it gave the user no chance to
-   read the briefing first.) The `--name` titles the tab. The result reports `seed`:
-   `"in-box"` (typed and waiting), `"skipped"` (no seed), or `"not-typed"` (the TUI
-   never drew within the timeout, so the seed was NOT typed — tell the user to paste
-   it manually).
+   **iterm2 mode → `spawn.py`.** Opens the worker tab and launches claude with the
+   seed as its positional prompt, so claude **auto-submits the seed on startup** — the
+   worker begins working on its own, no human Enter needed. (This replaced the old
+   type-into-the-box approach, which polled the screen for claude's TUI then typed the
+   seed un-submitted; on a slow start that detection timed out, the seed was never
+   typed, and the user had to copy-paste it by hand. Passing the seed as the launch
+   prompt removes that timing race entirely.) The `--name` titles the tab. The result
+   reports `seed`: `"submitted"` (baked into the launch command and auto-submitted) or
+   `"skipped"` (no seed — a resume).
 
    **desktop mode → `handoff.py`.** There is no terminal to spawn into, so this
    **does not open anything** — it copies the seed to the clipboard (`pbcopy`) and
@@ -200,10 +205,11 @@ of the way.
    what flips a task from `pending` to `in-progress`. (On a resume of an already-started
    task it's already in-progress; setting it again is harmless.) Then, in your reply:
 
-   - **iterm2 mode:** **explicitly tell the user the seed briefing is sitting in the
-     new tab's input box and they just need to review it and press Enter.** Do not
-     claim the worker is already running — it isn't until they submit. If `seed` came
-     back `"not-typed"`, tell them it was not entered and to paste it themselves.
+   - **iterm2 mode:** tell the user the worker tab is open and the seed was
+     **auto-submitted**, so the worker is already starting on its own — they can just
+     switch to the tab to watch/steer it. (No review-then-Enter step anymore.) If
+     `seed` came back `"skipped"` on what should have been a fresh spawn, something is
+     off — flag it rather than claiming the worker started.
 
    - **desktop mode:** tell the user to **open a new Claude Code session in the Desktop
      app's code section, in directory `<the resolved cwd>`, and paste** (the seed is on
