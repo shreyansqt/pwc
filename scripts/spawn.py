@@ -93,7 +93,7 @@ def spawn(*, cwd, command, seed_prompt=None, title=None):
 
     placement = {}
 
-    async def _await_ready(session, timeout=30.0, interval=0.5):
+    async def _await_ready(session, timeout=45.0, interval=0.5):
         """Wait until claude's TUI has drawn its input box and can accept text.
 
         A fresh interactive session writes no transcript until the first message is
@@ -112,7 +112,8 @@ def spawn(*, cwd, command, seed_prompt=None, title=None):
         # started — and the seed was typed into the bare shell instead of claude's
         # box. Key only on claude's footer hint text, which the shell never prints.
         markers = ("for shortcuts", "auto mode on", "esc to interrupt",
-                   "? for shortcuts", "/ for commands")
+                   "? for shortcuts", "/ for commands", "for agents",
+                   "shift+tab to cycle", "Claude Code v")
         waited = 0.0
         while waited < timeout:
             try:
