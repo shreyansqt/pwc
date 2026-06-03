@@ -58,6 +58,19 @@ tracking): find brings new work in; show tells you where existing work stands.
      just finished — a mention-only search misses both. Filter out the Jira/bot
      reply that usually trails each human message.
 
+     **Do not stop at the stored ref's thread — find *sibling* threads too.** A
+     teammate frequently starts a **brand-new top-level post** about an
+     already-tracked ticket rather than replying in the thread you have on file (e.g.
+     a "review ready" thread on Monday, then a separate "blocker resolved, please
+     re-approve" post on Wednesday). The stored ref only anchors the *first* thread,
+     so following it alone misses the newer conversation entirely. For every tracked
+     ticket, **also `slack_search` the configured channels by its ticket key and by
+     topic keywords**, and `slack_read_thread` on every distinct human-rooted thread
+     that comes back — not just the one whose `ts` matches the ref. Treat the *union*
+     of those threads as the ticket's current state. If a newer thread is the one now
+     carrying the live discussion, attach it as an additional `working` ref so the
+     next sweep sees it directly.
+
      **If `slack_read_thread` returns `thread_not_found` (or no parent), do NOT treat
      the task as quiet — recover.** A not-found almost always means the stored ref has
      a bad/fabricated `ts` (the `...000000` tell), not that the thread is silent.
@@ -68,12 +81,23 @@ tracking): find brings new work in; show tells you where existing work stands.
      thread ref for <task>" in the report rather than letting it pass silently — a
      swallowed not-found is exactly how a teammate's review/answer goes unseen.
    - **Every new message in the configured channels** — `slack_read_channel` on
-     each channel since the last scan, top-level posts only (replies are covered by
-     the tracked-thread sweep above). This is the catch-all that picks up
+     each channel since the last scan. This is the catch-all that picks up
      review/test asks, RCAs, and new-bug reports posted in the channel even when
      they're addressed to *someone else* or carry no `@`-mention at all. Without
      this pass, a "ready for review" post to Stella or a "we found a bug, please
      check" to Alison is invisible to find-work, and you'd only see it by accident.
+
+     **`slack_read_channel` returns the post text, NOT the thread under it — and a
+     post's text is not its current state.** A channel post is the *root* of a thread;
+     replies (including your own) live under it and routinely change what the post
+     means ("ready for review" → already approved; "found a bug" → already fixed). So
+     **for any post that looks like a work signal — a review/test ask, a "blocker
+     resolved" / "ready to merge", a bug report, a "please check", a question aimed at
+     anyone — `slack_read_thread` on that post and read to the latest reply *before*
+     you surface it.** Never describe where something stands, or propose a status
+     change, from the root text alone. This is the rule whose absence makes you tell
+     the user "Alison is waiting on your re-approval" when the thread already shows you
+     approved it.
 
    **Surface human posts; do not pre-judge whether they're "for you."** This is the
    rule the third pass exists to enforce. The coordinator is allowed to drop **bot
@@ -94,6 +118,21 @@ tracking): find brings new work in; show tells you where existing work stands.
    with enough context to decide (what it is, where it came from, why it looks
    actionable). For each, ask whether to queue it as a task. **Never auto-add** —
    the user confirms each one.
+
+   **Before surfacing any Slack-sourced item, reconcile it against the full thread —
+   including the user's own replies.** For each candidate or status-change drawn from
+   a Slack post, confirm you have read that post's thread to the latest message (step
+   2) and that your one-line framing matches the *end state* of the conversation, not
+   the root post. In particular, check whether **the user has already replied** —
+   approved, answered, pushed back, handed it off. If they have, the ball may no
+   longer be with them, and "X is waiting on you" is wrong. When the thread shows the
+   user already acted, say so ("you already approved on 06-02; nothing waiting") and
+   either drop the item or reframe it as the genuine remaining step — never present a
+   resolved ask as still-open. If the threads you found *disagree* (an old "please
+   review" and a newer "thanks, merged"), the newest human reply wins; reconcile to
+   it. A candidate you can't reconcile because a thread wouldn't resolve gets
+   surfaced *as that* ("couldn't read the thread for SMT-877 — unverified"), not as a
+   confident claim.
 
 5. **Queue the confirmed ones.** For each the user approves, first **derive its id
    from the source's `id_convention`** (from the sources config):
