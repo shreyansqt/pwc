@@ -58,6 +58,22 @@ tracking): find brings new work in; show tells you where existing work stands.
      just finished — a mention-only search misses both. Filter out the Jira/bot
      reply that usually trails each human message.
 
+     **Chase the newest reply to its actual text — never report a thread's state from
+     a stale or capped read.** `slack_read_channel` and the thread index often show a
+     thread's *latest reply timestamp* (e.g. "23 replies, latest 14:22") while
+     `slack_read_thread` returns an older page that does **not** include that newest
+     message (the API paginates / can cap below the live tail). When the latest-reply
+     timestamp is newer than the message you actually read, you have **not** read the
+     thread — page forward (follow the `cursor`, pass `oldest`/`latest`, or
+     `slack_search` for that exact `ts`) until you have the real newest human reply in
+     hand. Do **not** summarize, reconcile, or decide blocked/unblocked from the last
+     message you happened to fetch. If after paging you still cannot retrieve the
+     newest reply's text, surface it as *"new reply on <task>'s thread at <time> —
+     could not read, unverified"* and flag the task for a manual look — never silently
+     report the task as quiet or infer the outcome. (This is the maesn-14:22 failure:
+     a live reply existed, the thread read stopped short of it, and the task's state
+     was reported from a weeks-old message.)
+
      **Do not stop at the stored ref's thread — find *sibling* threads too.** A
      teammate frequently starts a **brand-new top-level post** about an
      already-tracked ticket rather than replying in the thread you have on file (e.g.
@@ -109,10 +125,25 @@ tracking): find brings new work in; show tells you where existing work stands.
    teammates (the "Alison asked Stella for validation, so it's not for Shreyans"
    trap) — which is exactly the kind of work the user wanted to see.
 
-3. **Drop anything already tracked.** For each candidate, run `find-refs` on its
-   identity reference (Jira key, PR, Slack channel+ts). If a task already carries
-   that ref, it's not new — skip it (it'll be handled by `/pwc-show-work`'s
-   reconciliation). This prevents duplicates.
+3. **Drop anything already tracked — but only on a `find-refs` *identity* match,
+   never on judgement.** For each candidate, run `find-refs` on its identity
+   reference (Jira key, PR, Slack channel+ts). A candidate counts as already-tracked
+   **only if `find-refs` returns a task whose `task_id` is non-null for that
+   identity** — i.e. some task carries it as an *identity* ref. If so, skip it (it'll
+   be handled by `/pwc-show-work`'s reconciliation). This prevents duplicates.
+
+   **Two traps that have caused real skips — both forbidden:**
+   - **"It's covered by another task."** A ticket appearing as a *working* ref on some
+     other task (e.g. listed as prep material, or mentioned in a note) is **NOT
+     tracked** — `find-refs` returns `task_id: None` for a bare working ref. Being
+     referenced by another task is not the same as being a tracked work item. If it's
+     assigned to the user and in a pickup column, it needs its **own** task. Never
+     dismiss it as "already covered" because you attached it somewhere else.
+   - **Every assigned-to-me Jira ticket the scan returned must pass through this gate
+     explicitly.** Do not eyeball the list and decide some are "obviously handled."
+     Run `find-refs` on each one. If it's not identity-tracked, it is a candidate and
+     must be surfaced in step 4 — full stop. The cost of a redundant surface (user
+     says "already on it") is trivial; the cost of a silent skip is a dropped task.
 
 4. **Surface the genuinely-new candidates and ask.** Present them as a short list
    with enough context to decide (what it is, where it came from, why it looks
@@ -201,7 +232,20 @@ tracking): find brings new work in; show tells you where existing work stands.
    This is the durable "unblock others first" signal `pick-work` ranks on. find-work
    is the *only* place that reads the sources to set this — `show-work` never re-scans.
 
-7. **Render the full board at the end.** After queuing (and after reporting what was
+7. **Show the coverage ledger — account for *every* scanned item before rendering the
+   board.** Before the board, present a short reconciliation table covering **every
+   assigned-to-me Jira ticket the scan returned** (and any Slack/PR candidate), one
+   row each, with its disposition: `tracked` (identity ref already exists — name the
+   task), `queued` (just added this run), or `skipped` (with a one-line reason, e.g.
+   "assigned to Stella, not me"). Nothing the scan surfaced may be absent from this
+   ledger. The point is that a skipped item becomes **visible and justified**, not
+   silently dropped: if a row says `skipped` for a thin reason, the user can catch it
+   on the spot. An item that is neither tracked nor queued nor explicitly
+   skipped-with-reason is a bug — do not let one fall off the list. This is the
+   backstop for the whole skill: even if an earlier step mis-judged something, the
+   ledger forces it back into view.
+
+8. **Render the full board at the end.** After queuing (and after reporting what was
    found / linked), always finish by rendering the board exactly as `/pwc-show-work`
    does — run `taskdb.py summary` and present it in that format: a **main table**
    (columns `# | Status | Pri | ID | Desc`) holding only `pending` / `in-progress` /
