@@ -166,9 +166,11 @@ threads) is `/pwc-find-work`.
 
      (Legacy values may still appear in old data — map on display: `active`→`pending`,
      `awaiting-review`→`blocked`, `parked`/`parked=1`→`blocked`, `gone`→`in-progress`.)
-   - **Pri** — the numeric priority (`1`/`2`/`3`, blank if null). Lower = higher;
-     priority encodes "is someone waiting on me?" (`1` blocks others, `2` active,
-     `3` solo/research).
+   - **Pri** — the numeric priority (`1`/`2`/`3`, blank if null). Lower = higher.
+     `1` = my committed queue (assigned + literal `To Do`) or someone blocked on me;
+     `2` = came up this week / could pick up (unassigned bugs, On Duty, non-blocking
+     reviews); `3` = backlog (Ready-for-Dev / In-Refinement pipeline + manual). Set by
+     find-work; show-work only displays it.
    - **ID** — the task id (e.g. `SMT-944`, `slack-...`).
    - **Dir** — where the task's work lives, from the task's `workdir` (in `summary`).
      It's relative to the workspace root, so render it as: a **repo/sub-directory name**

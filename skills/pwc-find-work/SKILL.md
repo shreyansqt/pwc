@@ -187,16 +187,30 @@ tracking): find brings new work in; show tells you where existing work stands.
    then `add-ref --kind identity --ref-type <t> --value <raw-id>` to attach its
    identity reference, then `log-event --kind new-task`. Report back what was queued.
 
-   **Set `--priority` to encode urgency, where the dominant signal is "is someone
-   waiting on me?"** (lower number = higher priority; `pick-work` sorts ascending,
-   null last):
-   - **`1` — blocks others:** a teammate is waiting on your review/input/answer, or
-     a customer/deadline is at stake. The thing whose absence stalls someone else.
-   - **`2` — active work** that's yours to drive but blocks no one right now.
-   - **`3` — solo / research** with no one waiting.
-   You usually can't tell which band a task is in until you've looked at its Slack
-   thread (step 6), so it's fine to add it at `2` and raise it to `1` once the
-   cross-link reveals someone waiting.
+   **Set `--priority` by the user's priority model** (lower number = higher priority;
+   `pick-work` sorts ascending, null last):
+   - **`1` — my committed queue, or someone's blocked on me.** Two ways in: (a) the
+     task is a Jira ticket **assigned to me** *and* in the **literal `To Do` column**
+     (Jira status exactly `To Do` — NOT `Ready for Development` / `In Refinement`,
+     which are backlog → `3`) — my ready-to-go committed work; OR (b) **a teammate /
+     customer is actively blocked on me** — waiting on my review / approval / answer,
+     or a customer/deadline is at stake. This blocking-others override applies
+     regardless of the ticket's status or assignment.
+   - **`2` — came up this week, I could pick it up.** Typically **unassigned** items
+     that surfaced recently and are fair game for me to take (a new bug, a support
+     ask), the standing **On Duty** rota, and **non-blocking reviews** (a review where
+     nobody's hard-blocked — e.g. an already-merged PR I'm looking at post-hoc).
+   - **`3` — backlog.** The In-Implementation / **`Ready for Development`** /
+     **`In Refinement`** pipeline (even when assigned to me — being in the dev pipeline
+     makes it backlog, not committed-queue), plus items I add manually (side-projects,
+     research).
+   Edge cases the user has fixed: **On Duty is `2`** by explicit call, even though it's
+   assigned + To Do. A ticket assigned to **someone else** is not mine to prioritize —
+   don't queue it on my board at all unless I'm reviewing it. **Check the ticket's real
+   Jira status + assignee before assigning band (a)** — "To Do column" means the literal
+   `To Do` status, and the distinction (a) vs a blocker often isn't visible until you've
+   read the Slack thread (step 6), so it's fine to add at `2` and raise to `1` once a
+   cross-link reveals someone waiting (or you confirm assigned-to-me + literal To Do).
 
 6. **Cross-link related Slack threads onto each Jira task.** A Jira ticket and its
    Slack discussion are one piece of work — track them together, don't spin up a
