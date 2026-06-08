@@ -17,6 +17,12 @@ CREATE TABLE IF NOT EXISTS tasks (
   notes         TEXT,                          -- freeform private notes (detail tier)
   parked        INTEGER NOT NULL DEFAULT 0,    -- 1 = explicitly parked; exempt from staleness sweep
   parked_reason TEXT,                          -- e.g. "awaiting review", "blocked on Priya"
+  archived_at   TEXT,                          -- ISO8601 UTC when removed from the board WITHOUT
+                                               -- completing it (not mine / dropped / someone else's
+                                               -- work). NULL = on the board. Distinct from status='done'
+                                               -- (finished): archiving hides a task while PRESERVING its
+                                               -- real status, and records WHEN it left. Surfaced only
+                                               -- via summary --archived.
   session_id    TEXT,                          -- pre-allocated worker session uuid (NULL if none)
   workdir       TEXT,                          -- resolved cwd for dispatch/resume
   inline        INTEGER NOT NULL DEFAULT 0,    -- 1 = handled inline (informational)
@@ -30,6 +36,9 @@ CREATE TABLE IF NOT EXISTS tasks (
 
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id);
+-- idx_tasks_archived (on archived_at) is created in pwc_db._migrate(), AFTER the
+-- column is ALTER-added — schema.sql runs before that ALTER on a pre-existing DB,
+-- so creating it here would reference a not-yet-existing column.
 
 -- Old ids a task has been known by. When a task gains a Jira key it is *promoted*:
 -- its canonical tasks.id becomes the key, and its prior id is recorded here so old

@@ -39,10 +39,23 @@ def init(workspace=None) -> dict:
     conn = connect(workspace, must_exist=False)
     try:
         conn.executescript(_SCHEMA.read_text())
+        _migrate(conn)
         conn.commit()
     finally:
         conn.close()
     return {"db": str(path), "created": not existed}
+
+
+def _migrate(conn) -> None:
+    """Idempotent column adds for DBs created before a column existed.
+    `CREATE TABLE IF NOT EXISTS` in schema.sql is a no-op once the table exists,
+    so new columns must be ALTERed in here. Safe to run on every init()."""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(tasks)")}
+    if "archived_at" not in cols:
+        conn.execute("ALTER TABLE tasks ADD COLUMN archived_at TEXT")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tasks_archived ON tasks(archived_at)"
+    )
 
 
 def row_to_dict(row: sqlite3.Row | None) -> dict | None:

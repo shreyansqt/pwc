@@ -24,7 +24,7 @@ from _common import days_ago_iso, emit, fail, now_iso
 # small — one status line's worth per task.
 _SUMMARY_COLS = (
     "id, type, title, status, priority, parked, parked_reason, "
-    "session_id, last_event_at"
+    "archived_at, workdir, session_id, last_event_at"
 )
 
 
@@ -94,18 +94,26 @@ def cmd_init(args):
 
 
 def cmd_summary(args):
-    """The board. By default: every not-done task, plus done tasks closed within
-    the recent window (`--done-within-days`, default 2) so the board doubles as a
-    short 'what just finished' timeline. Older done tasks age off the board on their
-    own — there is no archiving. `--all` shows every task ever, regardless of age."""
+    """The board. By default: every not-done, not-archived task, plus done tasks
+    closed within the recent window (`--done-within-days`, default 2) so the board
+    doubles as a short 'what just finished' timeline. Older done tasks age off on
+    their own. `--all` shows every NON-archived task ever, regardless of age.
+    `--archived` shows ONLY archived tasks (the off-board set) — archived tasks never
+    appear in the default or `--all` board."""
     conn = pwc_db.connect(args.workspace)
     params = []
-    if args.all:
-        where = ""
+    if args.archived:
+        # The off-board set: only archived tasks, whatever their status.
+        where = "WHERE archived_at IS NOT NULL"
+    elif args.all:
+        # Every task ever, except archived ones.
+        where = "WHERE archived_at IS NULL"
     else:
         # not-done tasks always show; done tasks only while still in the window.
+        # archived tasks are excluded regardless of status.
         cutoff = days_ago_iso(args.done_within_days)
-        where = "WHERE status != 'done' OR COALESCE(updated_at, created_at) >= ?"
+        where = ("WHERE archived_at IS NULL "
+                 "AND (status != 'done' OR COALESCE(updated_at, created_at) >= ?)")
         params.append(cutoff)
     rows = conn.execute(
         f"SELECT {_SUMMARY_COLS} FROM tasks {where} "
@@ -147,7 +155,7 @@ def cmd_stale(args):
     cutoff = days_ago_iso(args.threshold_days)
     rows = conn.execute(
         f"SELECT {_SUMMARY_COLS} FROM tasks "
-        "WHERE status != 'done' AND parked = 0 "
+        "WHERE status != 'done' AND parked = 0 AND archived_at IS NULL "
         "  AND COALESCE(last_event_at, created_at) < ? "
         "ORDER BY COALESCE(last_event_at, created_at)",
         (cutoff,),
@@ -161,7 +169,7 @@ def cmd_parked_aging(args):
     cutoff = days_ago_iso(args.threshold_days)
     rows = conn.execute(
         f"SELECT {_SUMMARY_COLS} FROM tasks "
-        "WHERE status != 'done' AND parked = 1 "
+        "WHERE status != 'done' AND parked = 1 AND archived_at IS NULL "
         "  AND COALESCE(last_event_at, created_at) < ? "
         "ORDER BY COALESCE(last_event_at, created_at)",
         (cutoff,),
@@ -358,6 +366,42 @@ def cmd_clear_session(args):
         )
         _insert_event(conn, task_id=tid, source="coordinator", kind="note",
                       detail="session cleared (detached worker session)")
+        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (tid,)).fetchone()
+    emit(pwc_db.row_to_dict(row))
+
+
+def cmd_archive(args):
+    """Remove a task from the board WITHOUT marking it done.
+
+    Archive = "off my board, but not completed" — for work that turned out not to be
+    mine, got dropped/superseded, or is someone else's ticket I was only tracking.
+    It is deliberately NOT the same as status='done': the task's real status is
+    preserved (a pending task stays pending, an in-progress one stays in-progress);
+    archive just hides it from `summary` and stamps `archived_at` with WHEN it left.
+    Archived tasks resurface only via `summary --archived`. `--reason` is required when
+    archiving so the board history records WHY it left; `--unarchive` clears
+    `archived_at` and puts it back on the board (no reason needed).
+    """
+    conn = pwc_db.connect(args.workspace)
+    with conn:
+        tid = _require_task(conn, args.task)["id"]
+        if args.unarchive:
+            conn.execute(
+                "UPDATE tasks SET archived_at = NULL, updated_at = ? WHERE id = ?",
+                (now_iso(), tid),
+            )
+            _insert_event(conn, task_id=tid, source="coordinator", kind="unarchive",
+                          detail="unarchived (back on the board)")
+        else:
+            if not args.reason:
+                fail("archive: --reason is required (why is this leaving the board?)")
+            ts = now_iso()
+            conn.execute(
+                "UPDATE tasks SET archived_at = ?, updated_at = ? WHERE id = ?",
+                (ts, ts, tid),
+            )
+            _insert_event(conn, task_id=tid, source="coordinator", kind="archive",
+                          detail=f"archived (off board, not done): {args.reason}")
         row = conn.execute("SELECT * FROM tasks WHERE id = ?", (tid,)).fetchone()
     emit(pwc_db.row_to_dict(row))
 
@@ -560,7 +604,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("summary")
     s.add_argument("--all", action="store_true",
-                   help="show every task ever, including done ones older than the window")
+                   help="show every NON-archived task ever, including done ones older than the window")
+    s.add_argument("--archived", action="store_true",
+                   help="show ONLY archived (off-board) tasks instead of the board")
     s.add_argument("--done-within-days", type=float, default=2.0,
                    help="how long a done task stays on the board before aging off (default 2)")
     s.set_defaults(func=cmd_summary)
@@ -646,6 +692,15 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("clear-session")
     s.add_argument("--task", required=True)
     s.set_defaults(func=cmd_clear_session)
+
+    s = sub.add_parser(
+        "archive",
+        help="remove a task from the board WITHOUT marking it done (preserves status)")
+    s.add_argument("--task", required=True)
+    s.add_argument("--reason", help="why it's leaving the board (required unless --unarchive)")
+    s.add_argument("--unarchive", action="store_true",
+                   help="put an archived task back on the board")
+    s.set_defaults(func=cmd_archive)
 
     s = sub.add_parser("set-status-gone")
     s.add_argument("--task", required=True)

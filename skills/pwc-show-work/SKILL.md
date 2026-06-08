@@ -33,9 +33,10 @@ threads) is `/pwc-find-work`.
 ## Tools
 
 - `python3 $SCRIPTS/taskdb.py summary` — the always-loaded index: one status line
-  per task on the board. The board is every not-done task plus done tasks closed in
-  the last ~2 days (a rolling "what just finished" timeline); older done tasks age
-  off on their own. There is **no archiving**. `--all` shows every task ever;
+  per task on the board. The board is every not-done, **not-archived** task plus done
+  tasks closed in the last ~2 days (a rolling "what just finished" timeline); older
+  done tasks age off on their own. `--all` shows every non-archived task ever;
+  `--archived` shows ONLY the archived (off-board, not-completed) set;
   `--done-within-days N` adjusts the done window. Returns a JSON array.
 - `python3 $SCRIPTS/taskdb.py detail --task <id>` — full per-task detail: the
   structured fields, its `refs`, and its event timeline (JSON keys: `task`, `refs`,
@@ -132,9 +133,10 @@ threads) is `/pwc-find-work`.
    `events --since <last-brief-time>` (a task-DB-level `recap` event marks each
    brief, so "last brief" = the most recent `recap`). Write a concise one-line
    `log-event --kind recap` (task_id omitted = task-DB-level, not tied to one task)
-   capturing the session's net activity. There is **no archive step** — a done task
-   stays on the board for ~2 days as a "just finished" line, then ages off the
-   summary on its own. Nothing to file by hand.
+   capturing the session's net activity. A done task stays on the board for ~2 days as
+   a "just finished" line, then ages off the summary on its own — nothing to file by
+   hand. (Archiving is a separate, explicit act for *not-completed* work leaving the
+   board — never an automatic step here; see the done-vs-archived note in step 5.)
 
 5. **Render the briefing as a main table PLUS a small separate "Done" table.** Do not
    dump raw JSON.
@@ -147,7 +149,7 @@ threads) is `/pwc-find-work`.
 
    Main table columns, in this exact order:
 
-   | # | Status | Pri | ID | Desc |
+   | # | Status | Pri | ID | Dir | Desc |
 
    - **#** — running number, top to bottom across the whole table, so the user can act
      by number ("start 3").
@@ -168,6 +170,13 @@ threads) is `/pwc-find-work`.
      priority encodes "is someone waiting on me?" (`1` blocks others, `2` active,
      `3` solo/research).
    - **ID** — the task id (e.g. `SMT-944`, `slack-...`).
+   - **Dir** — where the task's work lives, from the task's `workdir` (in `summary`).
+     It's relative to the workspace root, so render it as: a **repo/sub-directory name**
+     when set (e.g. `smarta-banking`, `kontax-webapp`); **`/` (root)** when `workdir` is
+     empty (`""`) — the work is the workspace root itself, not a sub-repo; and **`—`**
+     when it's null/unset (no directory recorded yet — typically a non-code task like a
+     Slack reply or a research item). Don't invent a directory the task doesn't carry;
+     show `—` rather than guessing.
    - **Desc** — a **short description (≤ ~8 words) that identifies the task**, not a
      restatement of the id. Distil it from the title + latest event so the user can
      recognize the work at a glance (e.g. "mobile OCR fails since 20.05", "review BO
@@ -185,8 +194,17 @@ threads) is `/pwc-find-work`.
       which.
 
    `done` is **not** a band in the main table — it goes in the separate Recently-finished
-   table described above (no action; don't call it "ready to archive" — there is no
-   archiving).
+   table described above. (`done` ages off the board on its own after the ~2-day window.)
+
+   **`done` vs. archived — keep them distinct.** `done` means *finished*. **Archived**
+   (`archived_at` set) means *off my board but NOT finished* — work that turned out not
+   to be mine, got dropped/superseded, or is someone else's ticket I was only tracking.
+   Archived tasks **do not appear** in `summary` at all (neither the main table nor the
+   Recently-finished table), so you won't render them here; they surface only via
+   `summary --archived`. **Never mark something `done` just to get it off the board** —
+   if it isn't actually completed, archive it (`taskdb.py archive --task <id> --reason
+   "..."`) so its real status is preserved and it doesn't pollute the "just finished"
+   recap. Use `done` only for genuinely-completed work.
 
    Keep each row to one line — this is an index, not a report.
 
@@ -223,10 +241,15 @@ threads) is `/pwc-find-work`.
   threads get linked). If the briefing looks out of date with reality, the fix is to
   run `/pwc-find-work`, not to make `show-work` re-scan. This keeps one path to the
   outside world and `show-work` fast and side-effect-free.
-- **No archiving.** Done tasks stay on the board for ~2 days (a "just finished"
-  timeline) then age off `summary` automatically — there's no archive step and
-  nothing to file by hand. For older completed work, `summary --all` shows every
-  task ever; `--done-within-days N` widens or narrows the window.
+- **Done ages off; archiving is separate.** Done tasks stay on the board for ~2 days
+  (a "just finished" timeline) then age off `summary` automatically — no step needed.
+  For older completed work, `summary --all` shows every non-archived task ever;
+  `--done-within-days N` widens or narrows the window. **Archiving** is the distinct,
+  explicit act for removing *not-completed* work from the board (not mine / dropped /
+  someone else's): `taskdb.py archive --task <id> --reason "..."` sets `archived_at`,
+  hides it from `summary`, and **preserves its real status** — so it never masquerades
+  as `done`. `summary --archived` lists the archived set; `archive --unarchive` puts a
+  task back. Never use `done` as a shortcut to clear the board.
 - **Render times in the user's local timezone.** All DB timestamps are stored in
   UTC (the trailing `Z` is literal — `taskdb.py` uses `now_iso()` from `_common.py`
   for everything). When showing a time in the briefing, **convert it to the user's

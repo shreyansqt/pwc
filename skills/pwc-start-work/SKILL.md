@@ -92,6 +92,14 @@ of the way.
    ask the user. This exact cwd must be reused verbatim on any later resume — the
    session transcript is keyed by it.
 
+   **While you have `detail` open, canonicalize the id to its Jira key if needed.**
+   If the task has a Jira key as an identity ref but its canonical `id` is still a
+   generated slug (e.g. a `slack-…` task that gained a ticket), `taskdb.py promote
+   --task <id> --new-id <KEY>` first, so the worker's seed and the board both use the
+   key. Promote keeps the old id as an alias, so the `session_id` you record and any
+   later resume still resolve. (Skip if the id already is the key, or there's no Jira
+   identity ref.)
+
 3. **Decide fresh vs. resume.** **(desktop mode: skip the liveness check — a Desktop
    worker is not a local process, so `worker_status.py`/`pgrep` can't see it. Treat
    it as fresh and re-hand-off the seed with the task's existing `session_id` if it
@@ -154,10 +162,20 @@ of the way.
    approach.** The worker may read/search/inspect anything — repo, Jira, PR diff,
    Slack threads, logs — to understand the work. But it must **not take any
    state-changing or outward action** until the user has agreed an approach: no writing
-   or editing code, no creating branches or PRs, no moving/editing Jira tickets, no
+   or editing code, no creating branches or PRs, no editing Jira ticket *content*, no
    posting to Slack, no running mutating jobs. Reaching the point where it *could* act
    is the cue to stop and ask, not to proceed. (This gate applies to **all task
    types** — jira, pr-review, slack, project alike.)
+
+   **The one exception — claiming the ticket on pickup.** Moving the linked Jira
+   ticket to *In Progress* and assigning it to the user is **bookkeeping that says "I've
+   picked this up," not work on the task**, so it is *exempt from the gate* and is the
+   worker's **first step**, done *before* any investigation — see the claim-step seed
+   part below. The gate still covers every *substantive* Jira edit (changing the
+   description, scope, acceptance criteria, status beyond the In-Progress claim, etc.) —
+   only the pickup transition + assignment are pre-cleared. **Reviews are the
+   counter-exception: a review task must NOT be claimed** (don't transition it, don't
+   reassign it) — see the claim-step part for why.
 
    Build the seed from these parts:
 
@@ -169,6 +187,26 @@ of the way.
      skill's session-inference fallback is for when the id is lost — don't rely on it).
      The worker pulls the *current* fields/refs/timeline itself — no stale snapshot
      baked into the seed, and nothing for the coordinator to transcribe.
+   - **The claim step (jira-linked own-work tasks only) — the worker's FIRST action,
+     before investigating.** When the task has a linked Jira ticket *and is the user's
+     own work to do* (a `jira`-type task — implement / fix / build), instruct the worker
+     to **claim the ticket as its very first step**: move it to *In Progress* and assign
+     it to the user (Shreyans). Make it **idempotent** — skip the transition if it's
+     already In Progress, skip the assignment if it's already assigned to the user; only
+     change what isn't already right, and don't reassign away from the user. This is the
+     pickup-bookkeeping carve-out from the gate (above), so it happens up front, *not*
+     gated behind the approve-the-approach step. Phrase it like: *"First, before
+     investigating: claim this ticket — move SMT-921 to In Progress and assign it to me
+     if it isn't already (skip whichever is already correct). Then get oriented."*
+     - **Do NOT add the claim step for review tasks.** If the task is a *review*
+       (reviewing someone else's PR/work — typically a `pr-review` task, or any task
+       whose point is to review rather than implement), the worker must **not** claim
+       the ticket: don't transition it and don't reassign it. A review ticket is
+       normally already assigned to the user *as the reviewer* (see the team's
+       "assignee = reviewer when In Review" convention), and claiming it would
+       misrepresent who did the work and could steal it from the author. For a review,
+       omit the claim part entirely; if a review ticket ever looks like it needs a
+       transition/assignment, that's a "stop and ask the user" — never auto-claim.
    - **A one-line statement of the task's goal/intent** — *what* outcome the task is
      after, drawn from the title/notes, so the worker knows the target. This is the
      *only* substantive content the seed carries, and it describes the destination, not

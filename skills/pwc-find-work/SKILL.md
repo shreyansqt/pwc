@@ -248,9 +248,11 @@ tracking): find brings new work in; show tells you where existing work stands.
 8. **Render the full board at the end.** After queuing (and after reporting what was
    found / linked), always finish by rendering the board exactly as `/pwc-show-work`
    does — run `taskdb.py summary` and present it in that format: a **main table**
-   (columns `# | Status | Pri | ID | Desc`) holding only `pending` / `in-progress` /
+   (columns `# | Status | Pri | ID | Dir | Desc`) holding only `pending` / `in-progress` /
    `blocked` rows, sorted by status-band then priority, with the emoji status (⚪
-   pending / 🟢 in-progress / ⛔ blocked) and a short identifying Desc per task; then a
+   pending / 🟢 in-progress / ⛔ blocked), the task's `Dir` (its `workdir`: a repo name,
+   `/` for the workspace root when empty, `—` when unset), and a short identifying Desc
+   per task; then a
    **separate small "✅ Recently finished" table** for the ~2-day `done` set
    (`# | ID | Desc`). The point is that a find-work pass changes the board (new tasks,
    raised priorities, linked threads), so the user should see where everything now
@@ -266,6 +268,20 @@ tracking): find brings new work in; show tells you where existing work stands.
   `find-refs` on identity references. The automatic matching logic beyond that exact
   check is deliberately left for real cases — when unsure, surface it and let the
   user say "that's the same as t_00xx."
+- **A task's canonical id should be its Jira key whenever it has one.** A Jira key
+  (`SMT-954`) is far more recognizable on the board than a generated id
+  (`slack-bo-phantom-logs`), and keying the task by it prevents duplicates (find-refs
+  matches on it). So: when you queue a task that *is* a Jira ticket, use the key as the
+  `--task` id directly (the `jira-key` id_convention already does this). And when a
+  **slack/email-typed task later gains a Jira ticket** — a bug-form post that gets a
+  ticket filed for it, a thread that becomes SMT-NNN — don't just attach the key as a
+  ref or mention it in the title: **`taskdb.py promote --task <old-id> --new-id <KEY>`**
+  to re-key the task to the Jira key. Promote keeps the old id as an alias (so
+  `start`/refs/history still resolve) and re-points everything, so the board then shows
+  the key with no special-casing. (This is `taskdb.py promote` — re-keying an id — NOT
+  the "surface, never auto-promote" rule above, which is about not auto-*adding* tasks.)
+  Attaching the Jira key as an identity ref is still required either way; promote is how
+  the *id itself* follows the key.
 - **When two tickets are really one piece of work** (e.g. a backend ticket and its
   frontend ticket that ship together), don't fake the combine with a stray extra ref
   and a notes blob. Queue them, then `taskdb.py merge --from <absorbed> --into <survivor>`:
