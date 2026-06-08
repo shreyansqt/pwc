@@ -1,6 +1,6 @@
 ---
 name: pwc-pick-work
-description: Suggest what PWC task to start or resume next, given the current task database state. Ranks by the priority tier set by find-work (P1 = my committed To-Do queue or someone blocked on me; P2 = came-up/unassigned-bugs/On-Duty/non-blocking reviews; P3 = backlog), then external readiness. Always suggests — never starts work on its own.
+description: Suggest what PWC task to start or resume next, given the current task database state. Ranks by the priority tier set by find-work (per the workspace's configured priority model, read via sources.py priority), then external readiness. Always suggests — never starts work on its own.
 ---
 
 # /pwc-pick-work
@@ -30,15 +30,17 @@ from "holds my state" into "drives me" — so `/next` proposes, and the user dec
    - Tasks flagged for attention — an `in-progress` task whose worker died (resumable,
      pick it back up) or a `blocked` task whose blocker may now be clear. Then
      `pending` work ready to start.
-   - **Priority follows the user's model** (lower = higher; null sorts last): `1` =
-     the user's **committed queue** (a ticket assigned to them in the literal `To Do`
-     column) **OR someone's actively blocked on them** (review / approval / answer /
-     deadline); `2` = **came up this week and they could pick it up** (unassigned bugs,
-     On Duty, non-blocking reviews); `3` = **backlog** (Ready-for-Dev / In-Refinement
-     pipeline + manually-added). `summary` already returns rows in this order, so a `1`
-     at the top usually *is* the answer — and within `1`, lean toward the
-     blocking-others kind first (a teammate idling on the user's review costs more than
-     the user's own committed queue depth).
+   - **Priority** (lower = higher; null sorts last) is the dominant ranking signal, and
+     it's already been set by find-work per the **workspace's configured priority model**.
+     `summary` returns rows in priority order, so the top `1` usually *is* the answer.
+     To *explain* a suggestion in the workspace's own terms (what `1`/`2`/`3` mean here),
+     read the model with `python3 $SCRIPTS/sources.py priority` and phrase the "why"
+     using its `tiers`. If it returns `{}` (no model configured), treat the generic
+     default — `1` = someone's blocked on the user, `2` = active work, `3` = solo — and
+     within `1`, lean toward the blocking-others kind first (a teammate idling on the
+     user's review costs more than the user's own queue depth). Don't re-derive or
+     override the numeric priority here — that's find-work's job; pick-work only ranks
+     and explains.
    - Within the same priority, tasks that are externally *ready* — e.g. a review came
      back, CI is green — as last surfaced by `/pwc-show-work`. Pull `detail` to read
      the recent events (a `note` like "blocks Stella: re-review #690" tells you who's

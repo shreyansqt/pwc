@@ -187,30 +187,25 @@ tracking): find brings new work in; show tells you where existing work stands.
    then `add-ref --kind identity --ref-type <t> --value <raw-id>` to attach its
    identity reference, then `log-event --kind new-task`. Report back what was queued.
 
-   **Set `--priority` by the user's priority model** (lower number = higher priority;
-   `pick-work` sorts ascending, null last):
-   - **`1` — my committed queue, or someone's blocked on me.** Two ways in: (a) the
-     task is a Jira ticket **assigned to me** *and* in the **literal `To Do` column**
-     (Jira status exactly `To Do` — NOT `Ready for Development` / `In Refinement`,
-     which are backlog → `3`) — my ready-to-go committed work; OR (b) **a teammate /
-     customer is actively blocked on me** — waiting on my review / approval / answer,
-     or a customer/deadline is at stake. This blocking-others override applies
-     regardless of the ticket's status or assignment.
-   - **`2` — came up this week, I could pick it up.** Typically **unassigned** items
-     that surfaced recently and are fair game for me to take (a new bug, a support
-     ask), the standing **On Duty** rota, and **non-blocking reviews** (a review where
-     nobody's hard-blocked — e.g. an already-merged PR I'm looking at post-hoc).
-   - **`3` — backlog.** The In-Implementation / **`Ready for Development`** /
-     **`In Refinement`** pipeline (even when assigned to me — being in the dev pipeline
-     makes it backlog, not committed-queue), plus items I add manually (side-projects,
-     research).
-   Edge cases the user has fixed: **On Duty is `2`** by explicit call, even though it's
-   assigned + To Do. A ticket assigned to **someone else** is not mine to prioritize —
-   don't queue it on my board at all unless I'm reviewing it. **Check the ticket's real
-   Jira status + assignee before assigning band (a)** — "To Do column" means the literal
-   `To Do` status, and the distinction (a) vs a blocker often isn't visible until you've
-   read the Slack thread (step 6), so it's fine to add at `2` and raise to `1` once a
-   cross-link reveals someone waiting (or you confirm assigned-to-me + literal To Do).
+   **Set `--priority` by the workspace's configured priority model** (lower number =
+   higher priority; `pick-work` sorts ascending, null last). The priority model is
+   **workspace policy, not baked into this skill** — it depends on the workspace's Jira
+   columns, team conventions, and single- vs multi-user shape. **Read it with
+   `python3 $SCRIPTS/sources.py priority`** and apply the `model` / `tiers` it returns
+   to each task you queue. (If a task's band isn't obvious until you've read its Slack
+   thread — step 6 — add it at the middle tier and adjust once the cross-link reveals
+   the truth; whatever the configured model says about checking real Jira status +
+   assignee, do that before committing a tier.)
+
+   **If `sources.py priority` returns `{}` (no model configured), fall back to this
+   generic default** and tell the user the workspace has no priority model set (suggest
+   `/pwc-setup-workspace` to add one):
+   - **`1`** — someone is actively waiting on the user (review / input / answer), or a
+     customer/deadline is at stake.
+   - **`2`** — active work that's the user's to drive but blocks no one right now.
+   - **`3`** — solo / research with no one waiting.
+   Do **not** hardcode any specific workspace's rules (literal Jira column names, On-Duty
+   handling, etc.) back into this skill — those belong in the config's `priority` block.
 
 6. **Cross-link related Slack threads onto each Jira task.** A Jira ticket and its
    Slack discussion are one piece of work — track them together, don't spin up a

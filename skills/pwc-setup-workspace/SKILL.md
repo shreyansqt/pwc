@@ -101,17 +101,33 @@ depends on the exact contents, so it's safe to re-run anytime to adjust.
    Keep it to skills that actually exist in the scan. This is optional — skip if the
    user has no skills set up.
 
-6. **Write the config** by piping the assembled JSON to `sources.py set --json -`.
+6. **Capture the priority model** — how this workspace decides P1/P2/P3. This is
+   **workspace policy** (it depends on the workspace's Jira columns, team conventions,
+   and single- vs multi-user shape), so it lives in config, NOT hardcoded in find-work /
+   pick-work. Ask the user how they want tasks prioritized, in their own terms — what
+   makes something top priority (a committed queue? someone blocked on them? a
+   deadline?), what's middle (came-up / could-pick-up / non-blocking reviews?), what's
+   backlog. Propose the generic default as a starting point and let them refine:
+   - **`1`** — someone's actively waiting on the user (review/input/answer), or a
+     customer/deadline is at stake.
+   - **`2`** — active work that's theirs to drive but blocks no one right now.
+   - **`3`** — solo / research with no one waiting.
+   Store as a top-level `"priority"` object with a free-text `"model"` (the full prose
+   rules, including any literal Jira column names this workspace uses) and an optional
+   `"tiers": {"1": "...", "2": "...", "3": "..."}` one-line summary per tier. This is
+   optional — skip it and the skills fall back to the generic default above.
+
+7. **Write the config** by piping the assembled JSON to `sources.py set --json -`.
    The shape is
-   `{"mode": "<iterm2|desktop>", "sources": {"<name>": {"enabled": <bool>, "id_convention": "...", ...params}}, "id_fallback": "task-slug", "skill_hints": {...}}`.
+   `{"mode": "<iterm2|desktop>", "sources": {"<name>": {"enabled": <bool>, "id_convention": "...", ...params}}, "id_fallback": "task-slug", "skill_hints": {...}, "priority": {"model": "...", "tiers": {...}}}`.
    Include the `mode` from step 1b (`set` replaces the whole file, so omitting it
    reverts to the default `iterm2`).
    Heed any validation warnings it prints (e.g. an enabled source missing a required
    field) and fix them with the user before finishing.
 
-7. **Confirm** what was written and tell the user they can now run `/pwc-find-work` to
+8. **Confirm** what was written and tell the user they can now run `/pwc-find-work` to
    scan these sources, and re-run `/pwc-setup-workspace` anytime to change them (incl.
-   the skill hints, as new skills get added).
+   the skill hints and priority model, as conventions evolve).
 
 ## Notes
 

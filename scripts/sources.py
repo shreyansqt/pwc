@@ -57,6 +57,7 @@ Usage:
   sources.py set --json -         # replace the whole config from JSON on stdin
   sources.py enabled              # print only the enabled sources (what /find-work scans)
   sources.py skill-hints [--type T]  # the task-type -> skill(s) map (or one type's list)
+  sources.py priority             # the workspace's priority model (P1/P2/P3 rules), or {}
   sources.py triage               # the triage config (channels + last_triaged watermark)
   sources.py set-triaged --at T   # advance the triage watermark after a triage pass
   sources.py mode                 # worker-launch mode: iterm2 (default) or desktop
@@ -143,6 +144,26 @@ def cmd_skill_hints(args):
         emit(hints.get(args.type, []))
     else:
         emit(hints)
+
+
+def cmd_priority(args):
+    """The workspace's priority model (empty object if none configured).
+
+    /pwc-find-work reads this to set `--priority` on queued tasks, and /pwc-pick-work
+    and /pwc-show-work read it to rank/label. Priority rules are workspace policy (they
+    depend on the workspace's Jira columns, team conventions, single- vs multi-user,
+    etc.), so they live here — NOT hardcoded in the generic skills. Shape:
+
+        "priority": {
+          "model": "<free-text prose: how P1/P2/P3 are decided here>",
+          "tiers": {"1": "...", "2": "...", "3": "..."}   // optional one-line summaries
+        }
+
+    Returns {} when unset — the skills then fall back to their built-in generic default
+    ("1 = someone's blocked on you, 2 = active work, 3 = solo/research").
+    """
+    data = _load(args.workspace)
+    emit(data.get("priority", {}) or {})
 
 
 _MODES = ("iterm2", "desktop")
@@ -232,6 +253,7 @@ def main(argv=None):
     s = sub.add_parser("skill-hints")
     s.add_argument("--type", help="return only this task type's hints (a list)")
     s.set_defaults(func=cmd_skill_hints)
+    sub.add_parser("priority").set_defaults(func=cmd_priority)
     sub.add_parser("mode").set_defaults(func=cmd_mode)
     s = sub.add_parser("set-mode")
     s.add_argument("--mode", required=True, choices=_MODES,
