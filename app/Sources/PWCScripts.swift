@@ -103,14 +103,21 @@ enum PWCScripts {
                               "--session-ids", ids.joined(separator: ",")])
     }
 
-    // MARK: - iterm_open.py
+    // MARK: - iterm_ctl.py (iTerm2 control)
 
     /// Open `command` in a new iTerm2 tab with a stable, locked title, via
-    /// `iterm_open.py` (iTerm2 Python API `async_set_title` — the only reliable way
-    /// to title a tab so the running program can't overwrite it). Uses the python
-    /// that has the iterm2 module, not the stdlib one.
+    /// `iterm_ctl.py open` (iTerm2 Python API `async_set_title` — the only reliable
+    /// way to title a tab so the running program can't overwrite it). Uses the
+    /// python that has the iterm2 module, not the stdlib one.
     static func openTab(command: String, title: String) -> Result<ShellResult, ShellError> {
-        Shell.run(itermPython, [script("iterm_open.py"),
+        Shell.run(itermPython, [script("iterm_ctl.py"), "open",
                                 "--command", command, "--title", title])
+    }
+
+    /// Focus the iTerm2 tab whose session has `tty`, via `iterm_ctl.py focus`. The
+    /// app resolves a worker's session uuid → tty (stdlib pgrep/ps) and passes it
+    /// here. Same Python-API path as openTab, so all iTerm2 control is unified.
+    static func focusTTY(_ tty: String) -> Result<ShellResult, ShellError> {
+        Shell.run(itermPython, [script("iterm_ctl.py"), "focus", "--tty", tty])
     }
 }

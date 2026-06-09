@@ -457,7 +457,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     // MARK: - Helpers
 
-    /// Run blocking work off the main actor (script/osascript shell-outs).
+    /// Run blocking work off the main actor (the python/script shell-outs).
     private func runOffMain(_ work: @escaping () -> Void) {
         Task.detached { work() }
     }
