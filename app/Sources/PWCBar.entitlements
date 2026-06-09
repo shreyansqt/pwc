@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- The app shells out to the PWC python CLIs and drives iTerm2 (open tabs,
+         focus a worker's tab). It opens user-chosen workspace folders. The app
+         sandbox is OFF for V1. Revisit before any distribution. -->
+    <key>com.apple.security.app-sandbox</key>
+    <false/>
+</dict>
+</plist>
