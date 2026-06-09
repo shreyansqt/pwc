@@ -288,7 +288,22 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         addItem(menu, "Add Workspace…", #selector(addWorkspace), symbol: "folder.badge.plus")
         addItem(menu, "Refresh", #selector(refresh), symbol: "arrow.clockwise")
         menu.addItem(.separator())
+        // Login item toggle. Use an image (not the system check state) so the
+        // indicator sits in the same icon gutter as the items above — the
+        // state-mark column renders misaligned when siblings carry images.
+        let loginEnabled = LaunchAtLogin.isEnabled
+        addItem(menu, "Open at Login", #selector(toggleLaunchAtLogin),
+                symbol: loginEnabled ? "checkmark.circle.fill" : "circle")
         addItem(menu, "Quit PWCBar", #selector(quit), symbol: "power", key: "q")
+    }
+
+    @objc private func toggleLaunchAtLogin() {
+        do {
+            try LaunchAtLogin.setEnabled(!LaunchAtLogin.isEnabled)
+        } catch {
+            Self.alertOnMain("Couldn’t change login item",
+                "\(error.localizedDescription)\n\nYou can manage PWCBar under System Settings → General → Login Items.")
+        }
     }
 
     // MARK: - Actions: AI hand-offs
