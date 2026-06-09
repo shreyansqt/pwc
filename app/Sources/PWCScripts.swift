@@ -18,6 +18,29 @@ enum PWCScripts {
 
     static let python = "/usr/bin/python3"
 
+    /// Python interpreter that has the `iterm2` module — required only by
+    /// `iterm_open.py`. Apple's `/usr/bin/python3` does NOT ship iterm2, so the
+    /// task scripts (stdlib-only) use `python`, but the tab opener needs a python
+    /// where `import iterm2` works. Resolve once: `$PWC_PYTHON` if set, else the
+    /// first common interpreter whose iterm2 imports.
+    static let itermPython: String = {
+        if let override = ProcessInfo.processInfo.environment["PWC_PYTHON"], !override.isEmpty {
+            return (override as NSString).expandingTildeInPath
+        }
+        let candidates = [
+            "/opt/homebrew/bin/python3",
+            "/opt/local/bin/python3",
+            "/usr/local/bin/python3",
+            "/usr/bin/python3",
+        ]
+        for path in candidates where FileManager.default.isExecutableFile(atPath: path) {
+            if case .success(let r) = Shell.run(path, ["-c", "import iterm2"]), r.ok {
+                return path
+            }
+        }
+        return "/usr/bin/python3"   // fall back; iterm_open.py will report the missing module
+    }()
+
     private static func script(_ name: String) -> String {
         scriptsDir.appendingPathComponent(name).path
     }
@@ -78,5 +101,16 @@ enum PWCScripts {
         return Shell.runJSON([WorkerStatus].self, python,
                              [script("worker_status.py"),
                               "--session-ids", ids.joined(separator: ",")])
+    }
+
+    // MARK: - iterm_open.py
+
+    /// Open `command` in a new iTerm2 tab with a stable, locked title, via
+    /// `iterm_open.py` (iTerm2 Python API `async_set_title` — the only reliable way
+    /// to title a tab so the running program can't overwrite it). Uses the python
+    /// that has the iterm2 module, not the stdlib one.
+    static func openTab(command: String, title: String) -> Result<ShellResult, ShellError> {
+        Shell.run(itermPython, [script("iterm_open.py"),
+                                "--command", command, "--title", title])
     }
 }

@@ -57,38 +57,11 @@ enum ITerm {
         }
     }
 
-    /// Open a new iTerm2 tab in the current (or a new) window and run `command`
-    /// in it. Used by the AI hand-off buttons — the command is a full `cd … &&
-    /// claude …` line. Returns false on failure (logged).
-    @discardableResult
-    static func openTab(running command: String) -> Bool {
-        // Escape for an AppleScript string literal: backslashes then quotes.
-        let escaped = command
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        let script = """
-        tell application "iTerm2"
-            activate
-            if (count of windows) = 0 then
-                set w to (create window with default profile)
-            else
-                set w to current window
-                tell w to create tab with default profile
-            end if
-            tell current session of current tab of current window
-                write text "\(escaped)"
-            end tell
-            return "ok"
-        end tell
-        """
-        switch runOSAScript(script) {
-        case .success:
-            return true
-        case .failure(let e):
-            Log.error("openTab: osascript failed: \(e.localizedDescription)")
-            return false
-        }
-    }
+    // Tab launches (the Find work / Show work / Start hand-offs) go through
+    // `iterm_open.py` (PWCScripts.openTab) — the iTerm2 Python API's
+    // async_set_title is the only reliable way to give a tab a stable title that
+    // the running program can't overwrite. AppleScript stays here only for
+    // focusing an existing worker's tab, which doesn't need a title set.
 
     // MARK: - uuid → tty
 

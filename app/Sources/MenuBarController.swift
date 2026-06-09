@@ -308,23 +308,34 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     // MARK: - Actions: AI hand-offs
 
-    @objc private func findWork() { launchClaude(slashCommand: "/pwc-find-work") }
-    @objc private func showWork() { launchClaude(slashCommand: "/pwc-show-work") }
+    // The coordinator commands run in a tab titled "PWC Coordinator"; starting a
+    // task gets a tab titled after the task id.
+    @objc private func findWork() { launchClaude(slashCommand: "/pwc-find-work", title: "PWC Coordinator") }
+    @objc private func showWork() { launchClaude(slashCommand: "/pwc-show-work", title: "PWC Coordinator") }
 
     @objc private func startTask(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String else { return }
-        launchClaude(slashCommand: "/pwc-start-work \(id)")
+        launchClaude(slashCommand: "/pwc-start-work \(id)", title: id)
     }
 
-    /// Open an iTerm2 tab in the selected workspace running `claude "<slash>"`.
+    /// Open an iTerm2 tab in the selected workspace running `claude "<slash>"`,
+    /// with a stable tab title. Goes through `iterm_open.py` (iTerm2 Python API
+    /// async_set_title) so the title sticks — AppleScript can't lock a tab title.
     /// The app composes NO seed — it just hands the slash command to a real Claude
     /// session, which then does the reasoning.
-    private func launchClaude(slashCommand: String) {
+    private func launchClaude(slashCommand: String, title: String) {
         guard let workspace = store.selected else { return }
         let command = "cd \(shellQuote(workspace.path)) && claude \(shellQuote(slashCommand))"
         runOffMain {
-            let ok = ITerm.openTab(running: command)
-            if !ok { Self.alertOnMain("Couldn’t open an iTerm2 tab.", "Is iTerm2 running?") }
+            switch PWCScripts.openTab(command: command, title: title) {
+            case .success(let r) where r.ok:
+                break
+            case .success(let r):
+                Self.alertOnMain("Couldn’t open an iTerm2 tab.",
+                    r.stderr.isEmpty ? "Exit \(r.exitCode)" : r.stderr)
+            case .failure(let e):
+                Self.alertOnMain("Couldn’t open an iTerm2 tab.", e.localizedDescription)
+            }
         }
     }
 
