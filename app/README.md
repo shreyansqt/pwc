@@ -34,6 +34,17 @@ The app shells out to the PWC python CLIs. It resolves the scripts dir from
 `$PWC_SCRIPTS` if set, else `~/work/side-projects/pwc/scripts` (this repo). The
 bundle does not carry the scripts — they live in the repo and evolve there.
 
+## Install
+
+Download `PWCBar-<version>.dmg` from the repo's
+[releases](https://github.com/shreyansqt/pwc/releases) (PWCBar releases are the
+`pwcbar-v*` tags), open it, and drag PWCBar to Applications. The app is signed
+with a Developer ID and notarized by Apple, so it launches without a Gatekeeper
+warning.
+
+Releases are cut by pushing a version tag (`git tag pwcbar-v1.0.0 && git push
+origin pwcbar-v1.0.0`); CI builds, signs, notarizes, and attaches the DMG.
+
 ## Build
 
 Requires Xcode and [XcodeGen](https://github.com/yonaskolb/XcodeGen)
