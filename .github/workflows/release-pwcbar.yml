@@ -1,0 +1,22 @@
+# Tag pwcbar-vX.Y.Z and push it to publish a signed, notarized drag-and-drop
+# DMG of the menu-bar app (app/) to GitHub Releases. The pipeline lives in
+# shreyansqt/release-macos-app; the version comes from the tag (no bump commit
+# needed). The prefix keeps the monorepo's tag namespace free for other parts.
+name: Release PWCBar
+
+on:
+  push:
+    tags: ["pwcbar-v[0-9]*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    uses: shreyansqt/release-macos-app/.github/workflows/release.yml@main
+    with:
+      app-name: PWCBar
+      app-dir: app
+      tag-prefix: pwcbar-v
+      team-id: KVT6M7Q855
+    secrets: inherit
