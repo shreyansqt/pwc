@@ -103,6 +103,19 @@ tracking): find brings new work in; show tells you where existing work stands.
      this pass, a "ready for review" post to Stella or a "we found a bug, please
      check" to Alison is invisible to find-work, and you'd only see it by accident.
 
+     **Use the search tool that can actually see the channel — `slack_search_public`
+     is blind to private channels.** `slack_search_public` only searches *public*
+     channels; run against a private channel it returns "No results found" —
+     indistinguishable from a genuinely quiet channel, with no error to tip you off.
+     For any channel flagged `private: true` in the config (and whenever unsure), scan
+     with `slack_search_public_and_private` (`channel_types` including
+     `private_channel`). Treat a `slack_read_channel` result as unreliable if its
+     newest message predates the `oldest` you passed — it silently ignores `oldest` on
+     some channels and returns stale history, so it is not a safe fallback here either.
+     (This is the stb-product-private miss, 2026-07-06: two review asks — Alison's
+     SMT-1017 and Alex's SMT-997 re-review — sat unseen because the public search
+     returned empty and the channel was reported quiet.)
+
      **`slack_read_channel` returns the post text, NOT the thread under it — and a
      post's text is not its current state.** A channel post is the *root* of a thread;
      replies (including your own) live under it and routinely change what the post
