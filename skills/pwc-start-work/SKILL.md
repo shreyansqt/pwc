@@ -211,12 +211,24 @@ of the way.
      after, drawn from the title/notes, so the worker knows the target. This is the
      *only* substantive content the seed carries, and it describes the destination, not
      the route. Do not spell out steps, tools, or sequencing to get there.
+   - **The plain-language summary first — the opening move of the report-back.** Before
+     any options or recommendation, the worker's first output after investigating must
+     be a short **plain-language summary that rebuilds the context**: what the problem
+     is, what the idea/task is, what *this specific ticket* is asking for, and the key
+     decision(s) at stake — in simple words, no jargon, no code detail. It's a
+     *reminder* that re-establishes the shared picture (the user has many tasks in
+     flight and may be cold on this one), not a status report. Only after that summary
+     come the options and the recommendation. Phrase it in the seed as: *"When you come
+     back, lead with a plain-language summary that reminds me what this task is — the
+     problem, the idea, what this ticket asks for, and the key decisions — in simple
+     words. Then give your options and recommendation."*
    - **The investigate-then-propose-then-ask directive** — phrase it as: *"Investigate
-     enough to understand this task, then STOP and come back to me with your
-     understanding, the approaches you see (with trade-offs) and your recommendation,
-     and ask how I'd like to proceed. Don't make any change — no code, no branch, no
-     ticket move, no Slack post, no job — until we've agreed an approach."* This is the
-     part that puts the *how* decision back with the worker + user.
+     enough to understand this task, then STOP and come back to me: first the
+     plain-language summary above, then your understanding, the approaches you see (with
+     trade-offs) and your recommendation, and ask how I'd like to proceed. Don't make
+     any change — no code, no branch, no ticket move, no Slack post, no job — until
+     we've agreed an approach."* This is the part that puts the *how* decision back with
+     the worker + user.
    - **The skill pointer, framed as the tool to use *once an approach is agreed*** — run
      `skill-hints --type <task-type>` and, if it returns any skills, mention them as the
      likely tool for *carrying out* the work after the user has chosen a direction — NOT
