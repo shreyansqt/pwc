@@ -107,6 +107,17 @@ worker to.
    **parent** message's ts (not a reply's), so the ref covers the whole thread. If a
    thread for this task is already attached, you don't need to re-add it.
 
+5. **Attach any playground/investigation artifact you created for this task.** When
+   the work produced a dump, CSV, or scratch dir under `_playground/` (see the
+   workspace convention), attach its path as a working ref so it's findable from the
+   task later, not just buried on disk:
+   ```
+   python3 $SCRIPTS/taskdb.py add-ref --task <id> --kind working --ref-type file \
+     --value "<absolute-path>" --label "<what this artifact is>"
+   ```
+   Prefer the investigation's directory (the `_playground/<YYYY-MM>/<key>-<slug>/`
+   leaf) over each file. If it's already attached, don't re-add it.
+
 ## Notes
 
 - `--set-status` updates the status field in the same transaction; `note` is
