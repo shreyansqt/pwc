@@ -61,14 +61,22 @@ def build_claude_command(*, session_id, resume, cwd, seed_prompt=None):
     Trade-off: a positional prompt AUTO-SUBMITS — the worker starts on the seed
     rather than letting the user review it un-submitted first. That's the chosen
     behavior (the seed is the same load-context-then-start-ticket boilerplate every
-    time, and reliable delivery matters more than the review gate). On RESUME no
-    prompt is passed (the worker already carries its context).
+    time, and reliable delivery matters more than the review gate).
+
+    On RESUME the resumed session already carries its full prior context, so a seed
+    is optional — but when one IS given it is a *follow-up* (a new ask for the
+    resumed worker, e.g. "answer this teammate's question"), and it is appended as
+    the positional prompt just like a fresh spawn. `claude --resume <id> '<prompt>'`
+    resumes with history intact AND auto-submits the prompt (verified 2026-07-07),
+    so a resume-with-follow-up needs no hand-paste. Resume with no seed stays bare.
     """
     args = ["claude"]
     mode = "fresh"
     if resume and transcript_path(cwd, session_id).exists():
         args += ["--resume", session_id]
         mode = "resume"
+        if seed_prompt:
+            args.append(seed_prompt)  # follow-up on resume -> claude auto-submits it
     else:
         args += ["--session-id", session_id]  # fresh / resume-fallback
         if seed_prompt:
@@ -198,10 +206,11 @@ def main(argv=None):
         seed_prompt=seed_prompt,
     )
     # The seed rides in the launch command as claude's positional prompt
-    # (auto-submitted), but only on a fresh spawn — a resume carries its own context
-    # and gets no prompt. `seed_in_command` tracks whether `command` actually
-    # contains it, so spawn() can report the right seed status.
-    seed_in_command = bool(seed_prompt) and mode != "resume"
+    # (auto-submitted) on BOTH a fresh spawn and a resume-with-follow-up — the only
+    # difference is meaning (fresh = the task seed; resume = a follow-up ask). A
+    # resume with no seed carries no prompt. `seed_in_command` tracks whether
+    # `command` actually contains a prompt, so spawn() reports the right seed status.
+    seed_in_command = bool(seed_prompt)
 
     result = {
         "session_id": session_id,

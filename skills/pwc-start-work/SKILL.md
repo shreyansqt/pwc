@@ -50,9 +50,12 @@ of the way.
   claude **auto-submits the seed on startup** (the worker starts working immediately;
   there is no review-then-Enter step). Prints
   `{session_id, cwd, mode, transcript_expected, seed}` where `seed` is `submitted`
-  (baked into the launch command and auto-submitted) or `skipped` (no seed — e.g. a
-  resume). The seed is no longer typed into the input box, so there is no `not-typed`
-  failure mode and nothing for the user to paste by hand.
+  (baked into the launch command and auto-submitted) or `skipped` (no `--prompt`
+  given). **A `--prompt` is honored on `--resume` too** — `claude --resume <id>
+  '<prompt>'` resumes with full history AND auto-submits the prompt, so you can pipe a
+  *follow-up* into a resumed worker and it runs on its own (verified 2026-07-07). The
+  seed is never typed into the input box, so there is no `not-typed` failure mode and
+  nothing for the user to paste by hand.
 - **(desktop mode)** `python3 $SCRIPTS/handoff.py --task <id> --cwd <dir> --session-id <uuid> [--prompt -] [--name "<id> · <gist>"]`
   — copies the seed to the clipboard (`pbcopy`) and prints
   `{session_id, cwd, seed, clipboard}` where `clipboard` is `copied` / `failed` /
@@ -109,13 +112,17 @@ of the way.
      user at its tab. Stop.
    - **Dead/gone, and its transcript still exists** → resume: call `spawn.py` with
      that same `--session-id` and `--resume`. The worker comes back with its full
-     prior conversation. **On a resume, `spawn.py` intentionally does not type a seed**
-     (the worker already carries its context), so the result returns `"seed":
-     "skipped"` — this is correct, not a failure. Any `--prompt` you pipe on a resume
-     is dropped. So tell the user the worker resumed with its history (and to just
-     continue in the tab) — **don't** describe it as auto-starting on a fresh seed the
-     way a fresh spawn does. If you want to nudge the resumed worker in a specific
-     direction, say so to the user as text to paste, since no seed is submitted.
+     prior conversation. **If you're resuming *to hand it a follow-up*** (the common
+     case — a teammate replied, the blocker cleared, there's a new ask), pipe that
+     follow-up via `--prompt -` just like a fresh seed: `claude --resume` auto-submits
+     it, so the resumed worker runs the follow-up on its own with its full history
+     intact (result reports `"seed": "submitted"`). Write the follow-up the same way
+     you'd write a seed — state the new ask, point at any refs — but you don't need to
+     re-explain the task (the worker already carries it). **Resuming with no follow-up**
+     (just reopening the tab for the user to continue in) → omit `--prompt`; the result
+     reports `"seed": "skipped"`, which is correct, and you tell the user the worker
+     resumed with its history for them to continue in the tab. Only fall back to
+     "here's text to paste" if `--prompt` delivery fails for some reason.
    - **No live `session_id` on the task → do NOT jump to fresh yet. Look back through
      the event log for a prior session to resume first.** A task's `session_id` is
      *detached* (cleared) every time a worker reports `done`/`blocked`/`note` and its
@@ -129,8 +136,9 @@ of the way.
      whether its transcript still exists (`worker_status.py` for liveness; the
      transcript path is `~/.claude/projects/<cwd-slug>/<session-id>.jsonl`). If a prior
      session's transcript survives, **resume that** (`spawn.py --session-id <that-id>
-     --resume`) and nudge it toward the new development (the unblock) as paste text —
-     its context is worth far more than a clean slate. Only when there is genuinely no
+     --resume --prompt -`) and pipe the follow-up that nudges it toward the new
+     development (the unblock) — it auto-submits, so the resumed worker picks up the
+     new ask on its own. Its context is worth far more than a clean slate. Only when there is genuinely no
      prior session, or every prior transcript is gone, do you spawn **fresh**. Spawning
      fresh on an unblocked task whose original session is still resumable is a real
      defect — it throws away the exact context the task needs.
@@ -250,7 +258,10 @@ of the way.
 
    Keep it to a few lines. End with something like *"Start by getting oriented, then
    come back to me before doing anything."* so the worker settles into investigate mode
-   rather than execution. For a resumed session, no seed is typed at all (step 3).
+   rather than execution. (This whole part builds the *fresh-spawn* seed. For a
+   resumed session you don't rebuild the task seed — you either pass a short follow-up
+   via `--prompt -` (the new ask; auto-submits) or omit `--prompt` entirely; see
+   step 3.)
 
    **Reporting: at completion, not on startup.** The `/pwc-report-status` ask is
    strictly the *closing* step ("when you're done or blocked") — never "report now" or
@@ -272,8 +283,9 @@ of the way.
    seed un-submitted; on a slow start that detection timed out, the seed was never
    typed, and the user had to copy-paste it by hand. Passing the seed as the launch
    prompt removes that timing race entirely.) The `--name` titles the tab. The result
-   reports `seed`: `"submitted"` (baked into the launch command and auto-submitted) or
-   `"skipped"` (no seed — a resume).
+   reports `seed`: `"submitted"` (a `--prompt` was baked into the launch command and
+   auto-submitted — on a fresh spawn this is the task seed, on a resume it's a
+   follow-up) or `"skipped"` (no `--prompt` — a bare resume with no follow-up).
 
    **desktop mode → `handoff.py`.** There is no terminal to spawn into, so this
    **does not open anything** — it copies the seed to the clipboard (`pbcopy`) and
@@ -296,7 +308,11 @@ of the way.
      them at the tab to expect that proposal (and steer it), not to watch it execute.
      (No review-then-Enter step anymore.) If `seed` came back `"skipped"` on what
      should have been a fresh spawn, something is off — flag it rather than claiming
-     the worker started.
+     the worker started. **On a resume:** if you piped a follow-up (`seed:
+     "submitted"`), tell the user the worker resumed with its full history and is
+     already working the follow-up in that tab; if you did a bare resume (`seed:
+     "skipped"`), tell them it resumed with its history and is waiting for them to
+     continue in the tab.
 
    - **desktop mode:** tell the user to **open a new Claude Code session in the Desktop
      app's code section, in directory `<the resolved cwd>`, and paste** (the seed is on
