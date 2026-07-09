@@ -406,78 +406,6 @@ def cmd_archive(args):
     emit(pwc_db.row_to_dict(row))
 
 
-# Event kinds that mean the worker reported a real outcome before its session
-# ended — i.e. the session ended *reported*, not *vanished*. A worker also logs
-# plain notes; any worker-sourced event after dispatch counts as "it spoke."
-_TERMINAL_KINDS = ("blocked", "awaiting-review", "done", "status", "note")
-
-
-def _ended_reported(conn, tid: str) -> dict | None:
-    """If the worker logged something after its last dispatch, return that event.
-
-    Distinguishes a session that ended *after reporting* (normal: worker runs,
-    reports via /pwc-report-status or a status change, user closes the tab) from one
-    that *vanished* (crashed/closed with nothing said). Returns the latest such
-    event, or None if the session left no word.
-    """
-    dispatched = conn.execute(
-        "SELECT at FROM events WHERE task_id = ? AND kind = 'dispatched' "
-        "ORDER BY at DESC, id DESC LIMIT 1",
-        (tid,),
-    ).fetchone()
-    if dispatched is None:
-        return None
-    placeholders = ",".join("?" * len(_TERMINAL_KINDS))
-    row = conn.execute(
-        f"SELECT at, source, kind, detail FROM events "
-        f"WHERE task_id = ? AND at >= ? AND id > 0 "
-        f"  AND (source = 'worker' OR kind IN ({placeholders})) "
-        f"  AND kind NOT IN ('dispatched', 'gone') "
-        f"ORDER BY at DESC, id DESC LIMIT 1",
-        (tid, dispatched["at"], *_TERMINAL_KINDS),
-    ).fetchone()
-    return pwc_db.row_to_dict(row)
-
-
-def cmd_set_status_gone(args):
-    """Triage a worker whose session is no longer running.
-
-    A dead session does NOT automatically mean 'gone'. If the worker reported an
-    outcome after it was dispatched (a status change, a /pwc-report-status note, any
-    worker-sourced event), the session ended *reported* — its status is real, so we
-    must NOT clobber it to 'gone'. We only clear the stale session_id and log a note.
-    Only a session that vanished with nothing said becomes 'gone — needs triage'.
-    `--force` overrides (mark gone regardless), for genuinely abandoned work.
-    """
-    conn = pwc_db.connect(args.workspace)
-    with conn:
-        tid = _require_task(conn, args.task)["id"]
-        reported = None if args.force else _ended_reported(conn, tid)
-        if reported is not None:
-            # Session ended after reporting — preserve status, just detach the
-            # finished session so it isn't swept again.
-            conn.execute(
-                "UPDATE tasks SET session_id = NULL, updated_at = ? WHERE id = ?",
-                (now_iso(), tid),
-            )
-            _insert_event(
-                conn, task_id=tid, source="brief", kind="note",
-                detail=(f"worker session ended after reporting "
-                        f"({reported['kind']!r} at {reported['at']}); "
-                        f"status preserved, session detached"),
-            )
-        else:
-            conn.execute(
-                "UPDATE tasks SET status = 'gone', session_id = NULL, updated_at = ? "
-                "WHERE id = ?",
-                (now_iso(), tid),
-            )
-            _insert_event(conn, task_id=tid, source="brief", kind="gone",
-                          detail="worker session vanished with no report — needs triage")
-        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (tid,)).fetchone()
-    emit(pwc_db.row_to_dict(row))
-
-
 def cmd_promote(args):
     """Give a task a new canonical id (e.g. a Jira key it just gained), keeping its
     old id as an alias so prior references still resolve. Re-points the task row,
@@ -701,12 +629,6 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--unarchive", action="store_true",
                    help="put an archived task back on the board")
     s.set_defaults(func=cmd_archive)
-
-    s = sub.add_parser("set-status-gone")
-    s.add_argument("--task", required=True)
-    s.add_argument("--force", action="store_true",
-                   help="mark gone even if the worker reported before its session ended")
-    s.set_defaults(func=cmd_set_status_gone)
 
     s = sub.add_parser("promote")
     s.add_argument("--task", required=True, help="current id or alias")

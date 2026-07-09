@@ -22,15 +22,14 @@ pwc/                      # this repo — the SOURCE (develop & commit here)
   schema.sql              # the task database schema
   scripts/                # shared deterministic mechanism ("the hands")
     taskdb.py             #   single read/write path to the task database (CLI, JSON I/O)
-    spawn.py              #   spawn a worker in an iTerm2 window (iterm2 mode)
-    handoff.py            #   hand a worker seed to the user via clipboard (desktop mode)
-    worker_status.py      #   is a worker session still running? (pgrep; iterm2 mode)
-    sources.py            #   per-workspace sources config + launch mode (read/write/validate)
+    spawn.py              #   spawn a worker in an iTerm2 window
+    worker_status.py      #   is a worker session still running? (pgrep)
+    sources.py            #   per-workspace sources config (read/write/validate)
     claude_md.py          #   splice the PWC section into a workspace CLAUDE.md
     pwc_db.py, _common.py #   shared connection / discovery helpers
   skills/                 # the coordinator's brain (SKILL.md each, pwc- prefixed)
-    pwc-setup-workspace/  pwc-find-work/  pwc-show-work/
-    pwc-pick-work/  pwc-start-work/  pwc-report-status/
+    pwc-setup-workspace/  pwc-find-work/  pwc-show-work/  pwc-pick-work/
+    pwc-start-work/  pwc-report-status/  pwc-show-task/
   install.sh              # symlink skills globally + init a workspace's task database
 ```
 
@@ -55,10 +54,8 @@ Two parts:
 
 - **Python 3** (stdlib `sqlite3` — no packages needed for the task database).
 - **iTerm2** with the Python API enabled (Preferences → General → Magic → *Enable
-  Python API*) and `pip install iterm2` — required only in **`iterm2` mode**, for
-  spawning worker tabs. Not needed in **`desktop` mode** (Claude Desktop / no
-  terminal — see *Modes* below).
-- `pgrep` (standard on macOS) — for worker-status checks (`iterm2` mode only).
+  Python API*) and `pip install iterm2` — for spawning worker tabs.
+- `pgrep` (standard on macOS) — for worker-status checks.
 
 ## Use
 
@@ -78,28 +75,6 @@ Start a Claude Code session **in the workspace** and:
   inline. Also resumes a stopped task by reopening its prior session.
 - **`/pwc-report-status`** — used *by a worker* to report status (blocked / awaiting-review
   / done / note) back to the task database.
-
-## Modes: iTerm2 vs Claude Desktop
-
-PWC supports two **worker-launch modes**, chosen per workspace at
-`/pwc-setup-workspace` (stored as `"mode"` in `.pwc/sources.json`; default
-`iterm2`):
-
-- **`iterm2`** — the original model. `/pwc-start-work` spawns a worker in a new
-  iTerm2 tab (via `spawn.py`) and types the seed into it; `/pwc-show-work` checks
-  worker liveness via `pgrep`. Requires iTerm2 with the Python API enabled.
-- **`desktop`** — for a **Claude Desktop** user with **no terminal / no iTerm2**.
-  Nothing can be spawned, so `/pwc-start-work` instead **hands the seed to the
-  user**: it copies the seed to the clipboard (`handoff.py` → `pbcopy`) and tells
-  the user which directory to open a new session in (the Desktop app's code section
-  sees the global skills, so the seed's `/pwc-show-task` call resolves there). The
-  user opens the session and pastes. `/pwc-show-work` **skips the `pgrep` liveness
-  sweep** — a Desktop worker isn't a local process — and relies on reported status
-  (`/pwc-report-status`), asking the user where it matters.
-
-The coordinator's whole brief / find / triage / pick loop is identical in both
-modes; only worker dispatch and liveness differ. Flip an existing workspace with
-`python3 scripts/sources.py --workspace <ws> set-mode --mode <iterm2|desktop>`.
 
 ## Inspecting the task database directly
 

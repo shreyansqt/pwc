@@ -1,9 +1,0 @@
-# Xcode / build
-build/
-DerivedData/
-*.xcuserstate
-xcuserdata/
-.DS_Store
-
-# XcodeGen generates this from project.yml
-PWCBar.xcodeproj/

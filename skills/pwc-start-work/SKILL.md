@@ -1,19 +1,15 @@
 ---
 name: pwc-start-work
-description: Act on a PWC task — either dispatch a worker (a Claude Code session, spawned in its own iTerm2 tab or, in Claude Desktop mode, handed to the user to open) for substantial work, or handle it inline for trivial work. Also covers resuming a task whose worker has stopped. The default is to dispatch a worker.
+description: Act on a PWC task — either dispatch a worker (a Claude Code session, spawned in its own iTerm2 tab) for substantial work, or handle it inline for trivial work. Also covers resuming a task whose worker has stopped. The default is to dispatch a worker.
 ---
 
 # /pwc-start-work
 
 Turn a tracked task into action. `/pwc-start-work` decides whether the task warrants
-its own **worker** (a Claude Code session) or can be handled **inline** by the
-coordinator, then does it. How a worker is launched depends on the workspace's
-**mode**: in **`iterm2`** mode it's spawned in a new tab; in **`desktop`** mode (a
-Claude Desktop user with no terminal) the seed is handed to the user to open the
-session themselves. It also covers **resumption** — there is no separate resume
-command; picking a stopped task back up is just starting it again, reopening its
-prior session when one survives (iterm2 mode only — a desktop handoff has no live
-process to reopen).
+its own **worker** (a Claude Code session, spawned in a new iTerm2 tab) or can be
+handled **inline** by the coordinator, then does it. It also covers **resumption** —
+there is no separate resume command; picking a stopped task back up is just starting
+it again, reopening its prior session when one survives.
 
 A worker is a normal Claude Code session that *you* drive — `/pwc-start-work` opens it
 in the right repo with the task's context pre-loaded so you can begin immediately.
@@ -26,11 +22,7 @@ of the way.
 - **Workspace root**: the current directory (e.g. `~/work/acme`).
   A task's `workdir` is relative to this (a repo like `service-backend`, or the
   root itself).
-- **Launch mode**: read `python3 $SCRIPTS/sources.py mode` first — it returns
-  `{"mode": "iterm2"|"desktop"}` (default `iterm2`). **`iterm2`** spawns a worker tab
-  (requires iTerm2 with the Python API enabled). **`desktop`** is for a Claude
-  Desktop user with no terminal: instead of spawning, you **hand the user the seed**
-  to open a session themselves. The worker path below branches on this at step 5.
+- **Spawning requires iTerm2** with the Python API enabled.
 
 ## Tools
 
@@ -43,9 +35,7 @@ of the way.
   the substance.
 - `python3 $SCRIPTS/worker_status.py --session-ids <uuid>` — whether the task's existing
   session (if any) is currently running.
-- `python3 $SCRIPTS/sources.py mode` — the launch mode (`iterm2` | `desktop`). Read
-  it first; it decides which dispatch tool below you use.
-- **(iterm2 mode)** `python3 $SCRIPTS/spawn.py --task <id> --cwd <dir> --session-id <uuid> [--resume] [--prompt -] [--name "<id> · <gist>"]`
+- `python3 $SCRIPTS/spawn.py --task <id> --cwd <dir> --session-id <uuid> [--resume] [--prompt -] [--name "<id> · <gist>"]`
   — open the worker tab and launch claude with the seed as its positional prompt, so
   claude **auto-submits the seed on startup** (the worker starts working immediately;
   there is no review-then-Enter step). Prints
@@ -56,12 +46,6 @@ of the way.
   *follow-up* into a resumed worker and it runs on its own (verified 2026-07-07). The
   seed is never typed into the input box, so there is no `not-typed` failure mode and
   nothing for the user to paste by hand.
-- **(desktop mode)** `python3 $SCRIPTS/handoff.py --task <id> --cwd <dir> --session-id <uuid> [--prompt -] [--name "<id> · <gist>"]`
-  — copies the seed to the clipboard (`pbcopy`) and prints
-  `{session_id, cwd, seed, clipboard}` where `clipboard` is `copied` / `failed` /
-  `skipped`. Does NOT spawn anything — the user opens the session themselves. There is
-  no resume concept here (no live process to reopen); a "resume" is just a fresh
-  handoff with the same `--session-id`.
 - `python3 $SCRIPTS/taskdb.py set-session --task <id> --session-id <uuid> --workdir <dir>`
   — record the pre-allocated session id at spawn (atomic with a `dispatched` event).
 - `python3 $SCRIPTS/taskdb.py clear-session --task <id>` — the inverse: NULL the
@@ -103,11 +87,8 @@ of the way.
    later resume still resolve. (Skip if the id already is the key, or there's no Jira
    identity ref.)
 
-3. **Decide fresh vs. resume.** **(desktop mode: skip the liveness check — a Desktop
-   worker is not a local process, so `worker_status.py`/`pgrep` can't see it. Treat
-   it as fresh and re-hand-off the seed with the task's existing `session_id` if it
-   has one. There's no live tab to point the user back to.)** In **iterm2 mode**, if
-   the task has a `session_id`, check it with `worker_status.py`:
+3. **Decide fresh vs. resume.** If the task has a `session_id`, check it with
+   `worker_status.py`:
    - **Alive** → the worker already exists. Don't spawn a duplicate; just point the
      user at its tab. Stop.
    - **Dead/gone, and its transcript still exists** → resume: call `spawn.py` with
@@ -273,10 +254,9 @@ of the way.
 5. **Pre-allocate and dispatch.** Generate a UUID and pass it as `--session-id` (so
    the id is known before any process exists). Pipe the seed via `--prompt -`. Pass a
    scannable `--name "<id> · <short gist>"` — the id plus a 3–5 word gist from the
-   title (e.g. `SMT-677 · BO auth review`, `slack-ocr · OCR income prefill`). The tool
-   you call depends on the mode read in the Configuration:
+   title (e.g. `SMT-677 · BO auth review`, `slack-ocr · OCR income prefill`).
 
-   **iterm2 mode → `spawn.py`.** Opens the worker tab and launches claude with the
+   `spawn.py` opens the worker tab and launches claude with the
    seed as its positional prompt, so claude **auto-submits the seed on startup** — the
    worker begins working on its own, no human Enter needed. (This replaced the old
    type-into-the-box approach, which polled the screen for claude's TUI then typed the
@@ -287,12 +267,6 @@ of the way.
    auto-submitted — on a fresh spawn this is the task seed, on a resume it's a
    follow-up) or `"skipped"` (no `--prompt` — a bare resume with no follow-up).
 
-   **desktop mode → `handoff.py`.** There is no terminal to spawn into, so this
-   **does not open anything** — it copies the seed to the clipboard (`pbcopy`) and
-   returns `clipboard`: `"copied"` / `"failed"` / `"skipped"`. The user opens a new
-   session themselves. Nothing is auto-submitted because there's nothing to submit
-   into yet.
-
 6. **Record it, then tell the user how to start the worker.** Right after dispatch,
    run `taskdb.py set-session --task <id> --session-id <uuid> --workdir <dir>` (writes
    the session id and a `dispatched` event, so the task is tracked from the instant
@@ -300,28 +274,17 @@ of the way.
    (`taskdb.py update-task --task <id> --status in-progress`) — dispatching a worker is
    what flips a task from `pending` to `in-progress`. (On a resume of an already-started
    task it's already in-progress; setting it again is harmless.) Then, in your reply:
-
-   - **iterm2 mode:** tell the user the worker tab is open and the seed was
-     **auto-submitted**, so the worker is already **getting oriented** — it'll
-     investigate the task and then come back to *them* in that tab with its
-     understanding, options, and a recommendation before changing anything. So point
-     them at the tab to expect that proposal (and steer it), not to watch it execute.
-     (No review-then-Enter step anymore.) If `seed` came back `"skipped"` on what
-     should have been a fresh spawn, something is off — flag it rather than claiming
-     the worker started. **On a resume:** if you piped a follow-up (`seed:
-     "submitted"`), tell the user the worker resumed with its full history and is
-     already working the follow-up in that tab; if you did a bare resume (`seed:
-     "skipped"`), tell them it resumed with its history and is waiting for them to
-     continue in the tab.
-
-   - **desktop mode:** tell the user to **open a new Claude Code session in the Desktop
-     app's code section, in directory `<the resolved cwd>`, and paste** (the seed is on
-     their clipboard if `clipboard` is `"copied"`). Give them the **exact directory**
-     and, if `clipboard` is `"failed"`/`"skipped"`, **include the full seed text** in
-     your reply for them to copy by hand. Don't claim the worker is running — it isn't
-     until they open the session and submit. (No tab, no `pgrep`-able process, so
-     `/pwc-show-work` won't auto-detect it; the user reports status via
-     `/pwc-report-status` when there's something to record.)
+   tell the user the worker tab is open and the seed was **auto-submitted**, so the
+   worker is already **getting oriented** — it'll investigate the task and then come
+   back to *them* in that tab with its understanding, options, and a recommendation
+   before changing anything. So point them at the tab to expect that proposal (and
+   steer it), not to watch it execute. (No review-then-Enter step anymore.) If `seed`
+   came back `"skipped"` on what should have been a fresh spawn, something is off —
+   flag it rather than claiming the worker started. **On a resume:** if you piped a
+   follow-up (`seed: "submitted"`), tell the user the worker resumed with its full
+   history and is already working the follow-up in that tab; if you did a bare resume
+   (`seed: "skipped"`), tell them it resumed with its history and is waiting for them
+   to continue in the tab.
 
 ### Inline path
 
@@ -350,8 +313,7 @@ of the way.
 ## Notes
 
 - **Never resume a session that's still alive** — that's what the worker-status check in
-  step 3 guards against (iterm2 mode; in desktop mode there's no live process to
-  check, so always re-hand-off rather than resume).
+  step 3 guards against.
 - /start does not auto-pick tasks; it acts on a task the user chose (often via
   `/next`). It assumes the user has confirmed.
 - spawn.py does not touch the task database; this skill owns the `set-session` write, so

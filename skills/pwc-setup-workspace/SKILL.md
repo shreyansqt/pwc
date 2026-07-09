@@ -23,12 +23,8 @@ depends on the exact contents, so it's safe to re-run anytime to adjust.
 
 - `python3 $SCRIPTS/sources.py show` — current config (empty if none yet).
 - `python3 $SCRIPTS/sources.py set --json -` — write the config (JSON on stdin).
-  **Note:** `set` replaces the *whole* config, so include `"mode"` in the JSON you
-  write (step 6) or it reverts to the default. Use `set-mode` only to flip an
-  existing workspace's mode without rewriting everything else.
-- `python3 $SCRIPTS/sources.py mode` / `set-mode --mode <iterm2|desktop>` — the
-  worker-launch mode (how `/pwc-start-work` dispatches and how `/pwc-show-work`
-  checks liveness). See step 1b.
+  **Note:** `set` replaces the *whole* config — carry over any existing keys you
+  aren't changing.
 - **Detection** (read-only, to suggest sensible defaults): `gh auth status` and
   `gh repo list <org>` for GitHub; the Atlassian MCP tools for Jira projects; the
   Slack tools for channels; check whether a Gmail/email integration is connected.
@@ -37,23 +33,6 @@ depends on the exact contents, so it's safe to re-run anytime to adjust.
 
 1. **Show the current config** with `sources.py show` so the user sees what's
    already set (if re-running).
-
-1b. **Ask which worker-launch mode this setup uses — iTerm2 or Claude Desktop.**
-   This decides how `/pwc-start-work` dispatches and how `/pwc-show-work` checks
-   workers, so it's set once at onboarding:
-   - **`iterm2`** (default) — the user has iTerm2 with the Python API enabled.
-     `/pwc-start-work` spawns a worker in a new tab and types the seed in;
-     `/pwc-show-work` checks worker liveness via `pgrep`. This is the original model.
-   - **`desktop`** — the user is on the **Claude Desktop app** with **no terminal /
-     no iTerm2** (e.g. Stella). `/pwc-start-work` can't spawn a tab, so it **hands the
-     user the seed** (the working directory + the seed copied to the clipboard) and
-     the user opens a new session themselves in the Desktop app's code section (which
-     sees the global skills) and pastes it. `/pwc-show-work` **skips the `pgrep`
-     liveness sweep** (a Desktop worker isn't a local process) and asks the user for
-     status where it matters.
-   Carry the chosen value into the JSON you write in step 6 as a top-level
-   `"mode": "<iterm2|desktop>"`. (To change it later without re-running full setup,
-   `sources.py set-mode --mode <…>`.)
 
 2. **Detect what's available** — don't make the user recall everything. Probe
    read-only:
@@ -119,9 +98,7 @@ depends on the exact contents, so it's safe to re-run anytime to adjust.
 
 7. **Write the config** by piping the assembled JSON to `sources.py set --json -`.
    The shape is
-   `{"mode": "<iterm2|desktop>", "sources": {"<name>": {"enabled": <bool>, "id_convention": "...", ...params}}, "id_fallback": "task-slug", "skill_hints": {...}, "priority": {"model": "...", "tiers": {...}}}`.
-   Include the `mode` from step 1b (`set` replaces the whole file, so omitting it
-   reverts to the default `iterm2`).
+   `{"sources": {"<name>": {"enabled": <bool>, "id_convention": "...", ...params}}, "id_fallback": "task-slug", "skill_hints": {...}, "priority": {"model": "...", "tiers": {...}}}`.
    Heed any validation warnings it prints (e.g. an enabled source missing a required
    field) and fix them with the user before finishing.
 
