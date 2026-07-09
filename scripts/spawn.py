@@ -24,10 +24,15 @@ Harnesses (`--harness`, default claude):
               interactive use), model via --model. Note: on a fresh spawn the
               session id is MINTED HERE (opencode ids aren't chooseable), so the
               caller must record the RETURNED session_id, not one it generated.
-  codex     — UNVERIFIED (not installed): seed as positional prompt, model via
-              --model. No pre-allocation; resume maps to `codex resume --last`
-              (most recent session in this directory). Untracked: no pgrep
-              liveness, no `pwc set-session`.
+  codex     — session-tracked too (verified 2026-07-10 on v0.144.1): a fresh spawn
+              PRE-CREATES the session via `codex app-server` JSON-RPC
+              (`thread/start` mints the uuid; the rollout file is only written on
+              the server's GRACEFUL shutdown — close stdin and wait, never
+              terminate()), then launches `codex resume <uuid> '<seed>'` — resume
+              accepts a positional prompt and -m/--model, and the uuid in argv
+              gives pgrep liveness. Auto-submit behavior of that prompt: verify on
+              first interactive use. Like opencode, the id is MINTED HERE on a
+              fresh spawn — record the RETURNED session_id.
 Verify a new harness's flags on first real use and update its builder here.
 
 Requires iTerm2 running with the Python API enabled
@@ -202,31 +207,117 @@ def _build_opencode(*, session_id, resume, cwd, seed_prompt, model,
     return mode, args, session_id
 
 
-def _build_codex(*, session_id, resume, cwd, seed_prompt, model):
-    """UNVERIFIED (codex not yet installed/exercised — check flags on first use).
-    No session pre-allocation; resume maps to `codex resume --last` (most recent
-    session in this directory), and a seed can't ride along on a resume."""
-    if resume:
-        args = ["codex", "resume", "--last"]
+_CODEX_SESSIONS = Path.home() / ".codex" / "sessions"
+
+
+def _codex_rollout_exists(session_id: str) -> bool:
+    """Codex stores each session as a rollout file named ...-<uuid>.jsonl under
+    ~/.codex/sessions/YYYY/MM/DD/. Existence of that file is what `codex resume
+    <uuid>` needs."""
+    try:
+        return next(_CODEX_SESSIONS.glob(f"*/*/*/rollout-*-{session_id}.jsonl"),
+                    None) is not None
+    except OSError:
+        return True  # on doubt, attach — a bad resume fails visibly in the tab
+
+
+def _preallocate_codex_session(cwd: str, title: str) -> str:
+    """Mint a codex session BEFORE the worker exists and return its uuid.
+
+    codex has no `session create` CLI, but `codex app-server` (JSON-RPC on stdio,
+    works unauthenticated) does: `thread/start` returns the session uuid and its
+    rollout path. TWO quirks, both verified 2026-07-10 on v0.144.1:
+    - an EMPTY UNNAMED thread is discarded at shutdown — `thread/name/set` is what
+      marks it worth persisting (and names it usefully in codex's resume picker);
+    - the rollout file is only flushed on the server's GRACEFUL shutdown — close
+      stdin and wait; terminate() discards the session.
+    """
+    import json as _json
+    import subprocess
+    import time
+
+    proc = subprocess.Popen(
+        ["codex", "app-server"],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL, text=True, cwd=cwd,
+    )
+
+    def send(obj):
+        proc.stdin.write(_json.dumps(obj) + "\n")
+        proc.stdin.flush()
+
+    sid = path = None
+    try:
+        send({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+              "params": {"clientInfo": {"name": "pwc", "title": "PWC",
+                                        "version": "1.0"}}})
+        send({"jsonrpc": "2.0", "id": 2, "method": "thread/start",
+              "params": {"cwd": cwd}})
+
+        def read_reply(rpc_id, what):
+            deadline = time.time() + 20
+            while time.time() < deadline:
+                line = proc.stdout.readline()
+                if not line:
+                    fail(f"codex app-server exited before answering {what}")
+                try:
+                    msg = _json.loads(line)
+                except ValueError:
+                    continue
+                if msg.get("id") == rpc_id:
+                    if "error" in msg:
+                        fail(f"codex {what} failed: {msg['error'].get('message')}")
+                    return msg["result"]
+            fail(f"codex app-server did not answer {what} within 20s")
+
+        thread = read_reply(2, "thread/start")["thread"]
+        sid, path = thread["sessionId"], thread.get("path")
+        # Name the thread — without this an empty thread is DISCARDED at shutdown.
+        send({"jsonrpc": "2.0", "id": 3, "method": "thread/name/set",
+              "params": {"threadId": sid, "name": title}})
+        read_reply(3, "thread/name/set")
+    finally:
+        # Graceful shutdown — this is what makes codex WRITE the rollout file.
+        try:
+            proc.stdin.close()
+            proc.wait(timeout=10)
+        except Exception:  # noqa: BLE001
+            proc.terminate()
+    if path and not os.path.exists(path):
+        fail(f"codex session {sid} was minted but its rollout file never appeared "
+             f"at {path} — cannot hand a resumable session to the worker")
+    return sid
+
+
+def _build_codex(*, session_id, resume, cwd, seed_prompt, model,
+                 title=None, dry_run=False):
+    """Session-tracked like claude/opencode, same inverted id flow as opencode
+    (codex mints the uuid; pre-created here on a fresh spawn). BOTH fresh and
+    resume launch `codex resume <uuid>` — fresh just resumes the empty
+    pre-created session — so the uuid sits in the process argv (pgrep liveness)
+    either way. `codex resume` takes -m/--model and a positional prompt."""
+    if resume and session_id and _codex_rollout_exists(session_id):
         mode = "resume"
     else:
-        args = ["codex"]
         mode = "fresh"
-        if model:
-            args += ["--model", model]
-        if seed_prompt:
-            args.append(seed_prompt)
-    return mode, args, None  # untracked: codex ids aren't known at spawn time
+        session_id = ("00000000-DRYRUN-not-created" if dry_run
+                      else _preallocate_codex_session(cwd, title or "PWC worker"))
+    args = ["codex", "resume", session_id]
+    if model:
+        args += ["--model", model]
+    if seed_prompt:
+        args.append(seed_prompt)
+    return mode, args, session_id
 
 
 # session_tracked = the harness's session id is known at spawn time and appears in
 # the worker's argv, so identity (`pwc set-session`), pgrep liveness, and resume
-# all work. claude: caller-chosen uuid. opencode: pre-created via its server API.
-# codex: neither — the dispatch skill must NOT `pwc set-session` for it.
+# all work. claude: caller-chosen uuid. opencode/codex: pre-created via their
+# server APIs (they mint the id — callers record the returned one).
 _BUILDERS = {
     "claude": (_build_claude, True),     # (builder, session_tracked)
     "opencode": (_build_opencode, True),
-    "codex": (_build_codex, False),
+    "codex": (_build_codex, True),
 }
 
 
@@ -240,7 +331,7 @@ def build_command(*, harness, session_id, resume, cwd, seed_prompt=None,
     builder, session_tracked = _BUILDERS[harness]
     kwargs = dict(session_id=session_id, resume=resume, cwd=cwd,
                   seed_prompt=seed_prompt, model=model)
-    if harness == "opencode":
+    if harness in ("opencode", "codex"):
         kwargs.update(title=title, dry_run=dry_run)
     mode, args, effective_id = builder(**kwargs)
     inner = f"cd {shlex.quote(cwd)} && {shlex.join(args)}"

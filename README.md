@@ -83,11 +83,10 @@ Each task carries a **harness** (which coding agent runs its worker) and an
 optional **model**. Both are set at queue time from the workspace's routing policy
 (`"routing"` in `.pwc/sources.json`, read via `pwc sources routing`) and are
 user-overridable; `/pwc-start-work` dispatches accordingly (`pwc spawn --harness …
---model …`). **claude** and **opencode** are session-tracked — the session id is
-known before the worker exists (claude: caller-chosen uuid; opencode: pre-created
-via its server API) and sits in the worker's argv, so identity, `pgrep` liveness,
-and resume-by-id all work. **codex** (unverified) is untracked: its workers rely
-on reported status.
+--model …`). All three harnesses — **claude**, **opencode**, **codex** — are
+session-tracked: the session id is known before the worker exists (claude:
+caller-chosen uuid; opencode/codex: pre-created via their server APIs) and sits in
+the worker's argv, so identity, `pgrep` liveness, and resume-by-id all work.
 - **`/pwc-report-status`** — used *by a worker* to report status (blocked / awaiting-review
   / done / note) back to the task database.
 
