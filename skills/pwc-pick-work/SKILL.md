@@ -1,6 +1,6 @@
 ---
 name: pwc-pick-work
-description: Suggest what PWC task to start or resume next, given the current task database state. Ranks by the priority tier set by find-work (per the workspace's configured priority model, read via sources.py priority), then external readiness. Always suggests — never starts work on its own.
+description: Suggest what PWC task to start or resume next, given the current task database state. Ranks by the priority tier set by find-work (per the workspace's configured priority model, read via `pwc sources priority`), then external readiness. Always suggests — never starts work on its own.
 ---
 
 # /pwc-pick-work
@@ -13,18 +13,18 @@ from "holds my state" into "drives me" — so `/next` proposes, and the user dec
 
 ## Configuration
 
-- **Scripts directory**: `~/work/side-projects/pwc/scripts` (`$SCRIPTS`).
+- **CLI**: `pwc` — on PATH (installed by `install.sh` as `~/.local/bin/pwc`). All task-database access goes through it; never read or write the database directly.
 - **Workspace**: the current directory; task database auto-discovered at `<workspace>/.pwc/taskdb.db`.
 
 ## Tools
 
-- `python3 $SCRIPTS/taskdb.py summary` — the tasks to choose from.
-- `python3 $SCRIPTS/taskdb.py detail --task <id>` — pull detail only for the one or
+- `pwc summary` — the tasks to choose from.
+- `pwc detail --task <id>` — pull detail only for the one or
   two candidates worth weighing closely (blockers, last events).
 
 ## Steps
 
-1. **Load all tasks** with `taskdb.py summary`.
+1. **Load all tasks** with `pwc summary`.
 
 2. **Rank candidates.** Favor, roughly in this order:
    - Tasks flagged for attention — an `in-progress` task whose worker died (resumable,
@@ -34,7 +34,7 @@ from "holds my state" into "drives me" — so `/next` proposes, and the user dec
      it's already been set by find-work per the **workspace's configured priority model**.
      `summary` returns rows in priority order, so the top `1` usually *is* the answer.
      To *explain* a suggestion in the workspace's own terms (what `1`/`2`/`3` mean here),
-     read the model with `python3 $SCRIPTS/sources.py priority` and phrase the "why"
+     read the model with `pwc sources priority` and phrase the "why"
      using its `tiers`. If it returns `{}` (no model configured), treat the generic
      default — `1` = someone's blocked on the user, `2` = active work, `3` = solo — and
      within `1`, lean toward the blocking-others kind first (a teammate idling on the
@@ -55,7 +55,7 @@ from "holds my state" into "drives me" — so `/next` proposes, and the user dec
 
 4. **Offer to start it — then stop.** End by offering to start the suggested task
    (which hands off to the /pwc-start-work skill on the user's confirmation). Do not call
-   `spawn.py`, do not modify the task database, do not start anything yourself. Wait for
+   `pwc spawn`, do not modify the task database, do not start anything yourself. Wait for
    an explicit "yes."
 
 ## Notes

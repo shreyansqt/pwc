@@ -18,7 +18,7 @@ of the way.
 
 ## Configuration
 
-- **Scripts directory**: `~/work/side-projects/pwc/scripts` (`$SCRIPTS`).
+- **CLI**: `pwc` — on PATH (installed by `install.sh` as `~/.local/bin/pwc`). All task-database access goes through it; never read or write the database directly.
 - **Workspace root**: the current directory (e.g. `~/work/acme`).
   A task's `workdir` is relative to this (a repo like `service-backend`, or the
   root itself).
@@ -26,16 +26,16 @@ of the way.
 
 ## Tools
 
-- `python3 $SCRIPTS/taskdb.py detail --task <id>` — the task's fields, refs, and
+- `pwc detail --task <id>` — the task's fields, refs, and
   event timeline; the basis for the cwd, the resume decision, and the seed prompt.
   Read it for *routing* — workdir, whether there's a session to resume, and the refs
   to name in the seed. Do **not** use it as license to go read the linked thread/PR/
   Jira yourself; pulling that underlying content into the coordinator's context is the
   worker's job, not yours. The seed names the refs and the task id; the worker derives
   the substance.
-- `python3 $SCRIPTS/worker_status.py --session-ids <uuid>` — whether the task's existing
+- `pwc worker-status --session-ids <uuid>` — whether the task's existing
   session (if any) is currently running.
-- `python3 $SCRIPTS/spawn.py --task <id> --cwd <dir> --session-id <uuid> [--resume] [--prompt -] [--name "<id> · <gist>"]`
+- `pwc spawn --task <id> --cwd <dir> --session-id <uuid> [--resume] [--prompt -] [--name "<id> · <gist>"]`
   — open the worker tab and launch claude with the seed as its positional prompt, so
   claude **auto-submits the seed on startup** (the worker starts working immediately;
   there is no review-then-Enter step). Prints
@@ -46,20 +46,20 @@ of the way.
   *follow-up* into a resumed worker and it runs on its own (verified 2026-07-07). The
   seed is never typed into the input box, so there is no `not-typed` failure mode and
   nothing for the user to paste by hand.
-- `python3 $SCRIPTS/taskdb.py set-session --task <id> --session-id <uuid> --workdir <dir>`
+- `pwc set-session --task <id> --session-id <uuid> --workdir <dir>`
   — record the pre-allocated session id at spawn (atomic with a `dispatched` event).
-- `python3 $SCRIPTS/taskdb.py clear-session --task <id>` — the inverse: NULL the
+- `pwc clear-session --task <id>` — the inverse: NULL the
   session_id (logs a neutral note, not a dispatch; status untouched). Use to back out
   a session recorded by mistake, or to detach a finished/abandoned one so the task
   reads as not-dispatched.
-- `python3 $SCRIPTS/sources.py skill-hints [--type <type>]` — the configured
+- `pwc sources skill-hints [--type <type>]` — the configured
   task-type → skill(s) map. **Run it with `--type <task-type>` while building every
   fresh seed** (step 4): if it returns skills for the type, the seed must strongly
   recommend them. This is the workspace's deliberate routing — e.g. `pr-review` →
   `code-review` — so a PR-review worker always starts from `/code-review`, not from
   whatever tool the coordinator happens to think of. The map is the source of truth
   for "which skill runs this kind of work," not the coordinator's judgement.
-- `python3 $SCRIPTS/taskdb.py update-task` / `log-event` — for inline outcomes.
+- `pwc update-task` / `log-event` — for inline outcomes.
 
 ## Steps
 
@@ -81,17 +81,17 @@ of the way.
 
    **While you have `detail` open, canonicalize the id to its Jira key if needed.**
    If the task has a Jira key as an identity ref but its canonical `id` is still a
-   generated slug (e.g. a `slack-…` task that gained a ticket), `taskdb.py promote
+   generated slug (e.g. a `slack-…` task that gained a ticket), `pwc promote
    --task <id> --new-id <KEY>` first, so the worker's seed and the board both use the
    key. Promote keeps the old id as an alias, so the `session_id` you record and any
    later resume still resolve. (Skip if the id already is the key, or there's no Jira
    identity ref.)
 
 3. **Decide fresh vs. resume.** If the task has a `session_id`, check it with
-   `worker_status.py`:
+   `pwc worker-status`:
    - **Alive** → the worker already exists. Don't spawn a duplicate; just point the
      user at its tab. Stop.
-   - **Dead/gone, and its transcript still exists** → resume: call `spawn.py` with
+   - **Dead/gone, and its transcript still exists** → resume: call `pwc spawn` with
      that same `--session-id` and `--resume`. The worker comes back with its full
      prior conversation. **If you're resuming *to hand it a follow-up*** (the common
      case — a teammate replied, the blocker cleared, there's a new ask), pipe that
@@ -112,11 +112,11 @@ of the way.
      investigation is sitting in its history. This is the common shape for an unblocked
      task (e.g. "tested the endpoint, filed a support ticket, blocked on their reply" →
      reply arrives → resume the worker that did the testing, don't start one that has
-     to rediscover it). So before spawning fresh: run `taskdb.py detail --task <id>`,
+     to rediscover it). So before spawning fresh: run `pwc detail --task <id>`,
      scan the `events` for the most recent `dispatched` event's `session_id`, and check
-     whether its transcript still exists (`worker_status.py` for liveness; the
+     whether its transcript still exists (`pwc worker-status` for liveness; the
      transcript path is `~/.claude/projects/<cwd-slug>/<session-id>.jsonl`). If a prior
-     session's transcript survives, **resume that** (`spawn.py --session-id <that-id>
+     session's transcript survives, **resume that** (`pwc spawn --session-id <that-id>
      --resume --prompt -`) and pipe the follow-up that nudges it toward the new
      development (the unblock) — it auto-submits, so the resumed worker picks up the
      new ask on its own. Its context is worth far more than a clean slate. Only when there is genuinely no
@@ -145,7 +145,7 @@ of the way.
    options and ask me" prompt is safe — it spends the head start on reading, not on
    acting. It also makes it doubly important that the seed points at **named, installed
    skills** the worker can trust and run (like `/pwc-show-task`), not opaque shell like
-   a raw `python3 $SCRIPTS/taskdb.py …` line it can't verify and shouldn't auto-run.
+   a raw `pwc …` line it can't verify and shouldn't auto-run.
 
    **The hard gate: investigate freely, change nothing until the user picks an
    approach.** The worker may read/search/inspect anything — repo, Jira, PR diff,
@@ -256,7 +256,7 @@ of the way.
    scannable `--name "<id> · <short gist>"` — the id plus a 3–5 word gist from the
    title (e.g. `SMT-677 · BO auth review`, `slack-ocr · OCR income prefill`).
 
-   `spawn.py` opens the worker tab and launches claude with the
+   `pwc spawn` opens the worker tab and launches claude with the
    seed as its positional prompt, so claude **auto-submits the seed on startup** — the
    worker begins working on its own, no human Enter needed. (This replaced the old
    type-into-the-box approach, which polled the screen for claude's TUI then typed the
@@ -268,10 +268,10 @@ of the way.
    follow-up) or `"skipped"` (no `--prompt` — a bare resume with no follow-up).
 
 6. **Record it, then tell the user how to start the worker.** Right after dispatch,
-   run `taskdb.py set-session --task <id> --session-id <uuid> --workdir <dir>` (writes
+   run `pwc set-session --task <id> --session-id <uuid> --workdir <dir>` (writes
    the session id and a `dispatched` event, so the task is tracked from the instant
    the worker starts), and **move the task to `in-progress`**
-   (`taskdb.py update-task --task <id> --status in-progress`) — dispatching a worker is
+   (`pwc update-task --task <id> --status in-progress`) — dispatching a worker is
    what flips a task from `pending` to `in-progress`. (On a resume of an already-started
    task it's already in-progress; setting it again is harmless.) Then, in your reply:
    tell the user the worker tab is open and the seed was **auto-submitted**, so the
@@ -289,7 +289,7 @@ of the way.
 ### Inline path
 
 7. **Act directly** via the coordinator's own skills (e.g. `/slack-message`) and
-   record the outcome with `taskdb.py log-event --task <id> --kind note --detail
+   record the outcome with `pwc log-event --task <id> --kind note --detail
    "..."` (and `update-task --status done` if it's finished). Do not spawn a tab.
 
    **Before closing or re-pointing a task inline, verify against the source — then
@@ -316,5 +316,5 @@ of the way.
   step 3 guards against.
 - /start does not auto-pick tasks; it acts on a task the user chose (often via
   `/next`). It assumes the user has confirmed.
-- spawn.py does not touch the task database; this skill owns the `set-session` write, so
+- `pwc spawn` does not touch the task database; this skill owns the `set-session` write, so
   all coordinator-side DB writes go through one path.

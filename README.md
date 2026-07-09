@@ -20,6 +20,7 @@ reasoning behind it, and [`docs/glossary.md`](docs/glossary.md) for the vocabula
 ```
 pwc/                      # this repo — the SOURCE (develop & commit here)
   schema.sql              # the task database schema
+  bin/pwc                 # the CLI entry point (symlinked onto PATH by install.sh)
   scripts/                # shared deterministic mechanism ("the hands")
     taskdb.py             #   single read/write path to the task database (CLI, JSON I/O)
     spawn.py              #   spawn a worker in an iTerm2 window
@@ -41,12 +42,16 @@ Runtime state lives **in each workspace**, never here: `<workspace>/.pwc/taskdb.
 ./install.sh ~/work/acme     # or omit the arg for that default
 ```
 
-Two parts:
+Three parts:
 
 - **Skills go global** — symlinked into `~/.claude/skills/` so *every* Claude Code
   session sees them, in any directory. This matters because a spawned worker runs
   inside a repo (not the workspace root), and a workspace-local skill wouldn't
   resolve there. Because they're symlinks, `git pull` in this repo upgrades them all.
+- **The `pwc` CLI goes on PATH** — `bin/pwc` symlinked to `~/.local/bin/pwc`. One
+  named command for the whole deterministic mechanism (`pwc summary`, `pwc sources
+  show`, `pwc spawn …`, `pwc worker-status …`), runnable by the coordinator and by
+  any worker in any directory — no `python3 <long path>` invocations in skills.
 - **The task database is per-workspace** — `<workspace>/.pwc/taskdb.db`, created on
   install (only if absent). Each workspace keeps its own tasks.
 
@@ -82,8 +87,9 @@ All access normally goes through the coordinator, but the CLI is available for
 debugging:
 
 ```bash
-python3 scripts/taskdb.py --workspace <ws> summary
-python3 scripts/taskdb.py --workspace <ws> detail --task t_0007
+pwc summary                      # workspace discovered from the cwd
+pwc detail --task t_0007
+pwc --workspace <ws> summary     # or explicit
 ```
 
 ## Status

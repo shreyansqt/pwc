@@ -21,7 +21,7 @@ worker to.
 
 ## Configuration
 
-- **Scripts directory**: `~/work/side-projects/pwc/scripts` (`$SCRIPTS`).
+- **CLI**: `pwc` — on PATH (installed by `install.sh` as `~/.local/bin/pwc`). All task-database access goes through it; never read or write the database directly.
 - **Workspace**: where the task database lives (`<workspace>/.pwc/taskdb.db`).
   **Auto-discovered from anywhere inside the workspace — you do NOT need
   `--workspace`, from the coordinator or from a worker.** Discovery walks up from the
@@ -31,15 +31,15 @@ worker to.
   to pass `--workspace` — but is fixed; ignore older instructions that say you must.)
   - **Only** if discovery genuinely fails (you're somewhere with no `.pwc` above you)
     pass `--workspace <root>` — and note it's a **global flag: it goes BEFORE the
-    subcommand**, e.g. `taskdb.py --workspace <root> log-event …`, never
-    `taskdb.py log-event … --workspace <root>` (that errors with "unrecognized
+    subcommand**, e.g. `pwc --workspace <root> log-event …`, never
+    `pwc log-event … --workspace <root>` (that errors with "unrecognized
     arguments"). Normally you won't need it at all.
 - **Task id**: the task you're recording against (e.g. `SMT-921`) — stated in the
   `/pwc-start-work` seed. If unsure, `/pwc-show-task` resolves it.
 
 ## Tools
 
-- `python3 $SCRIPTS/taskdb.py log-event --task <id> --source <src> --kind <kind> --detail "<what>" [--set-status <status>]`
+- `pwc log-event --task <id> --source <src> --kind <kind> --detail "<what>" [--set-status <status>]`
   — the single write path. With `--set-status`, the SAME call also moves the task's
   status field (so `/pwc-show-work` reflects it), not just an event. No `--workspace`
   needed — the db is auto-discovered (see Configuration).
@@ -79,7 +79,7 @@ worker to.
    coordinator` for an inline outcome you handled. No `--workspace` flag — the db is
    auto-discovered from wherever you are (see Configuration):
    ```
-   python3 $SCRIPTS/taskdb.py log-event --task <id> --source <worker|coordinator> \
+   pwc log-event --task <id> --source <worker|coordinator> \
      --kind <in-progress|blocked|done|note> --detail "<concise description>" \
      [--set-status <in-progress|blocked|done>]
    ```
@@ -96,7 +96,7 @@ worker to.
    blind to it and the reply is silently missed (e.g. an approval that lands hours
    later). Do it as part of reporting:
    ```
-   python3 $SCRIPTS/taskdb.py add-ref --task <id> --kind working --ref-type slack \
+   pwc add-ref --task <id> --kind working --ref-type slack \
      --value "<thread-permalink>" --label "<channel>: <what this thread is>"
    ```
    **Use the real `thread_ts`** from the message object (`Message_ts` / `thread_ts`
@@ -112,7 +112,7 @@ worker to.
    workspace convention), attach its path as a working ref so it's findable from the
    task later, not just buried on disk:
    ```
-   python3 $SCRIPTS/taskdb.py add-ref --task <id> --kind working --ref-type file \
+   pwc add-ref --task <id> --kind working --ref-type file \
      --value "<absolute-path>" --label "<what this artifact is>"
    ```
    Prefer the investigation's directory (the `_playground/<YYYY-MM>/<key>-<slug>/`

@@ -16,13 +16,13 @@ depends on the exact contents, so it's safe to re-run anytime to adjust.
 
 ## Configuration
 
-- **Scripts directory**: `~/work/side-projects/pwc/scripts` (`$SCRIPTS`).
+- **CLI**: `pwc` — on PATH (installed by `install.sh` as `~/.local/bin/pwc`). All task-database access goes through it; never read or write the database directly.
 - **Workspace**: the current directory; config written to `<workspace>/.pwc/sources.json`.
 
 ## Tools
 
-- `python3 $SCRIPTS/sources.py show` — current config (empty if none yet).
-- `python3 $SCRIPTS/sources.py set --json -` — write the config (JSON on stdin).
+- `pwc sources show` — current config (empty if none yet).
+- `pwc sources set --json -` — write the config (JSON on stdin).
   **Note:** `set` replaces the *whole* config — carry over any existing keys you
   aren't changing.
 - **Detection** (read-only, to suggest sensible defaults): `gh auth status` and
@@ -31,7 +31,7 @@ depends on the exact contents, so it's safe to re-run anytime to adjust.
 
 ## Steps
 
-1. **Show the current config** with `sources.py show` so the user sees what's
+1. **Show the current config** with `pwc sources show` so the user sees what's
    already set (if re-running).
 
 2. **Detect what's available** — don't make the user recall everything. Probe
@@ -96,7 +96,7 @@ depends on the exact contents, so it's safe to re-run anytime to adjust.
    `"tiers": {"1": "...", "2": "...", "3": "..."}` one-line summary per tier. This is
    optional — skip it and the skills fall back to the generic default above.
 
-7. **Write the config** by piping the assembled JSON to `sources.py set --json -`.
+7. **Write the config** by piping the assembled JSON to `pwc sources set --json -`.
    The shape is
    `{"sources": {"<name>": {"enabled": <bool>, "id_convention": "...", ...params}}, "id_fallback": "task-slug", "skill_hints": {...}, "priority": {"model": "...", "tiers": {...}}}`.
    Heed any validation warnings it prints (e.g. an enabled source missing a required
@@ -113,5 +113,5 @@ depends on the exact contents, so it's safe to re-run anytime to adjust.
   is queued). Setup and finding are separate steps.
 - Detection is best-effort. If a source can't be auto-detected (e.g. an MCP isn't
   connected this session), just ask the user for the values directly.
-- The config is plain JSON in `.pwc/` — it can be hand-edited too, but `sources.py`
+- The config is plain JSON in `.pwc/` — it can be hand-edited too, but `pwc sources`
   is the canonical path (it validates the shape).

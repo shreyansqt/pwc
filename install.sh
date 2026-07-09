@@ -32,6 +32,18 @@ for skill in "${SKILLS[@]}"; do
   echo "linked $skill -> $GLOBAL_SKILLS/$skill"
 done
 
+# 1b. The pwc CLI — one named command for the whole deterministic mechanism, on
+#     PATH so the coordinator AND any worker (whatever harness, whatever cwd) can
+#     run `pwc ...` instead of an opaque python3 path.
+BIN_DIR="$HOME/.local/bin"
+mkdir -p "$BIN_DIR"
+ln -sfn "$PWC_SRC/bin/pwc" "$BIN_DIR/pwc"
+echo "linked pwc -> $BIN_DIR/pwc"
+case ":$PATH:" in
+  *":$BIN_DIR:"*) ;;
+  *) echo "pwc: warning: $BIN_DIR is not on your PATH — add it to use \`pwc\`" >&2 ;;
+esac
+
 # 2. Per-workspace task database.
 mkdir -p "$WS/.pwc"
 python3 "$PWC_SRC/scripts/taskdb.py" --workspace "$WS" init
@@ -43,6 +55,7 @@ python3 "$PWC_SRC/scripts/claude_md.py" --target "$WS/CLAUDE.md"
 
 echo "pwc: installed"
 echo "     skills (global): ${SKILLS[*]}  ->  $GLOBAL_SKILLS"
+echo "     cli:              $BIN_DIR/pwc"
 echo "     task database:    $WS/.pwc/taskdb.db"
 echo "     CLAUDE.md:        PWC section added to $WS/CLAUDE.md"
 echo "     run /pwc-show-work in a Claude Code session started in $WS"

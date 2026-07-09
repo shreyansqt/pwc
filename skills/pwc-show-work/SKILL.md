@@ -22,61 +22,59 @@ threads) is `/pwc-find-work`.
 
 ## Configuration
 
-- **Scripts directory** (the shared PWC mechanism):
-  `~/work/side-projects/pwc/scripts`
-  Referred to below as `$SCRIPTS`. All task database access goes through these scripts —
-  never read or write the database directly.
+- **CLI**: `pwc` — on PATH (installed by `install.sh` as `~/.local/bin/pwc`). All
+  task database access goes through it — never read or write the database directly.
 - **Workspace**: the directory the coordinator is running in. The task database lives at
-  `<workspace>/.pwc/taskdb.db` and the scripts discover it automatically from the
+  `<workspace>/.pwc/taskdb.db` and `pwc` discovers it automatically from the
   current working directory, so no `--workspace` flag is normally needed.
 
 ## Tools
 
-- `python3 $SCRIPTS/taskdb.py summary` — the always-loaded index: one status line
+- `pwc summary` — the always-loaded index: one status line
   per task on the board. The board is every not-done, **not-archived** task plus done
   tasks closed in the last ~2 days (a rolling "what just finished" timeline); older
   done tasks age off on their own. `--all` shows every non-archived task ever;
   `--archived` shows ONLY the archived (off-board, not-completed) set;
   `--done-within-days N` adjusts the done window. Returns a JSON array.
-- `python3 $SCRIPTS/taskdb.py detail --task <id>` — full per-task detail: the
+- `pwc detail --task <id>` — full per-task detail: the
   structured fields, its `refs`, and its event timeline (JSON keys: `task`, `refs`,
   `events`, `aliases` — the references key is `refs`, not `references`). Use only when
   drilling into a specific task, not for the overview.
-- `python3 $SCRIPTS/worker_status.py --json -` — reads a JSON list of
+- `pwc worker-status --json -` — reads a JSON list of
   `{task, session_id}` on stdin, returns each with `alive: true|false`. Tests
   whether each worker session is actually still running.
-- `python3 $SCRIPTS/taskdb.py clear-session --task <id>` — detach a finished/dead
+- `pwc clear-session --task <id>` — detach a finished/dead
   worker session from a task (the task's status is left as-is). Use this in the
   worker-status sweep when a session is `alive: false`. (The old `set-status-gone` is
   retired along with the `gone` status — a vanished worker just stays `in-progress`
   with its session detached.)
-- `python3 $SCRIPTS/taskdb.py stale --threshold-days <N>` — active, **not parked**
+- `pwc stale --threshold-days <N>` — active, **not parked**
   tasks untouched for longer than N days. The staleness-sweep candidates.
-- `python3 $SCRIPTS/taskdb.py parked-aging --threshold-days <N>` — parked tasks
+- `pwc parked-aging --threshold-days <N>` — parked tasks
   aged beyond N days; the gentler "still waiting?" nudge.
-- `python3 $SCRIPTS/taskdb.py events --since <ISO>` — events since a timestamp;
+- `pwc events --since <ISO>` — events since a timestamp;
   the source for the recap.
-- `python3 $SCRIPTS/taskdb.py log-event --kind recap --detail "..."`
+- `pwc log-event --kind recap --detail "..."`
   — record the recap.
 
 `show-work` uses no external-source tools — it reads only the local task database.
 
 ## Steps
 
-1. **Load all tasks.** Run `python3 $SCRIPTS/taskdb.py summary`. If it errors
+1. **Load all tasks.** Run `pwc summary`. If it errors
    with "no task database" the workspace isn't initialized — tell the user to run the PWC
    install/init for this workspace and stop.
 
 2. **Worker-status sweep.** Collect every task in the summary that has a non-null
    `session_id` and is `in-progress` (the only status that implies a worker should be
    running — `pending`/`blocked`/`done` shouldn't have a live worker). Pass them as a
-   JSON list of `{task, session_id}` to `python3 $SCRIPTS/worker_status.py --json -`.
+   JSON list of `{task, session_id}` to `pwc worker-status --json -`.
 
    A dead session is **death, not outcome.** For each `alive: false` result:
    - **Ended after reporting** — the worker logged a status change / note after
      dispatch, then closed (the normal flow: work, report, close the tab). The task's
      status is real and recent — leave it; just detach the finished `session_id`
-     (`taskdb.py clear-session --task <id>`).
+     (`pwc clear-session --task <id>`).
    - **Vanished** — the session died with nothing said since dispatch. The task
      **stays `in-progress`** (it was mid-flight and is resumable) — do not invent a new
      status, do not infer done/failed (it may have unpushed work). Detach the session
@@ -110,8 +108,8 @@ threads) is `/pwc-find-work`.
    context that the next person (or the future you) needs. The note that justifies the
    change must land with the change.
 
-3. **Staleness sweep.** Run `taskdb.py stale --threshold-days 7` and
-   `taskdb.py parked-aging --threshold-days 14`. Staleness is a **signal, not a
+3. **Staleness sweep.** Run `pwc stale --threshold-days 7` and
+   `pwc parked-aging --threshold-days 14`. Staleness is a **signal, not a
    verdict** — never auto-archive on age. Surface stale (non-parked) tasks and ask
    the user, per task, to keep or drop. Surface aged parked tasks as a softer
    nudge ("waiting N days — ping them?"). Take no action without the user's call.
@@ -156,7 +154,7 @@ threads) is `/pwc-find-work`.
    - **Pri** — the numeric priority (`1`/`2`/`3`, blank if null). Lower = higher. Set by
      find-work per the **workspace's configured priority model**; show-work only
      displays it. The tiers' meaning is workspace policy — if you need to gloss what
-     `1`/`2`/`3` mean for this workspace, read `python3 $SCRIPTS/sources.py priority`
+     `1`/`2`/`3` mean for this workspace, read `pwc sources priority`
      (its `tiers`); absent a config, the generic default is `1` = someone's blocked on
      the user, `2` = active work, `3` = solo/research. Don't hardcode a specific
      workspace's tier definitions into this skill.
@@ -193,7 +191,7 @@ threads) is `/pwc-find-work`.
    Archived tasks **do not appear** in `summary` at all (neither the main table nor the
    Recently-finished table), so you won't render them here; they surface only via
    `summary --archived`. **Never mark something `done` just to get it off the board** —
-   if it isn't actually completed, archive it (`taskdb.py archive --task <id> --reason
+   if it isn't actually completed, archive it (`pwc archive --task <id> --reason
    "..."`) so its real status is preserved and it doesn't pollute the "just finished"
    recap. Use `done` only for genuinely-completed work.
 
@@ -237,12 +235,12 @@ threads) is `/pwc-find-work`.
   For older completed work, `summary --all` shows every non-archived task ever;
   `--done-within-days N` widens or narrows the window. **Archiving** is the distinct,
   explicit act for removing *not-completed* work from the board (not mine / dropped /
-  someone else's): `taskdb.py archive --task <id> --reason "..."` sets `archived_at`,
+  someone else's): `pwc archive --task <id> --reason "..."` sets `archived_at`,
   hides it from `summary`, and **preserves its real status** — so it never masquerades
   as `done`. `summary --archived` lists the archived set; `archive --unarchive` puts a
   task back. Never use `done` as a shortcut to clear the board.
 - **Render times in the user's local timezone.** All DB timestamps are stored in
-  UTC (the trailing `Z` is literal — `taskdb.py` uses `now_iso()` from `_common.py`
+  UTC (the trailing `Z` is literal — `pwc` uses `now_iso()` from `_common.py`
   for everything). When showing a time in the briefing, **convert it to the user's
   local timezone** (e.g. Europe/Berlin → CEST in summer, CET in winter) and tag it
   if there's any room for ambiguity. Showing the raw UTC time and calling it

@@ -18,7 +18,7 @@ Two audiences, one skill:
 
 ## Configuration
 
-- **Scripts directory**: `~/work/side-projects/pwc/scripts` (`$SCRIPTS`).
+- **CLI**: `pwc` — on PATH (installed by `install.sh` as `~/.local/bin/pwc`). All task-database access goes through it; never read or write the database directly.
 - **Workspace**: the current directory; task database auto-discovered at
   `<workspace>/.pwc/taskdb.db`. (A worker runs inside a repo under the workspace, so
   discovery still resolves the same db; pass `--workspace` if it doesn't.)
@@ -28,11 +28,11 @@ Two audiences, one skill:
 
 ## Tools
 
-- `python3 $SCRIPTS/taskdb.py detail --task <id>` — the full per-task detail. The
+- `pwc detail --task <id>` — the full per-task detail. The
   primary call. The JSON has exactly these top-level keys: `task` (the fields),
   `refs` (the references — note the key is `refs`, not `references`), `events` (the
   timeline), `aliases`. Read `refs` for PRs/Slack threads/Jira keys.
-- `python3 $SCRIPTS/taskdb.py find-session --session-id <uuid>` — map a worker's
+- `pwc find-session --session-id <uuid>` — map a worker's
   `claude` session id back to its task (returns the summary row, or `null`). Used only
   when no task id was given.
 
@@ -50,7 +50,7 @@ Two audiences, one skill:
    - **Else, in the coordinator with no id**, ask which task (or point at
      `/pwc-show-work`). Don't guess.
 
-2. **Fetch the detail.** Run `taskdb.py detail --task <id>`. If it errors with
+2. **Fetch the detail.** Run `pwc detail --task <id>`. If it errors with
    `no task <id>`, surface that — the id is wrong (done tasks are never removed, so a
    valid id always resolves).
 

@@ -13,13 +13,13 @@ tracking): find brings new work in; show tells you where existing work stands.
 
 ## Configuration
 
-- **Scripts directory**: `~/work/side-projects/pwc/scripts` (`$SCRIPTS`).
+- **CLI**: `pwc` — on PATH (installed by `install.sh` as `~/.local/bin/pwc`). All task-database access goes through it; never read or write the database directly.
 - **Workspace**: the current directory; task database auto-discovered at
   `<workspace>/.pwc/taskdb.db`.
 
 ## Tools
 
-- `python3 $SCRIPTS/sources.py enabled` — the per-workspace config of which sources
+- `pwc sources enabled` — the per-workspace config of which sources
   to scan and how (which Jira project + JQL, which GitHub org, which Slack channels,
   etc.). **Read this first** — it tells you what to scan; don't assume.
 - **External sources**, via the workspace's already-permissioned tools, driven by
@@ -27,16 +27,16 @@ tracking): find brings new work in; show tells you where existing work stands.
   configured JQL), GitHub (`gh pr list` / `gh search` scoped to the configured org
   and watch types), Slack (`slack_search_*` in the configured channels), email
   (Gmail MCP).
-- `python3 $SCRIPTS/taskdb.py find-refs --ref-type <t> --value <v>` — check whether
+- `pwc find-refs --ref-type <t> --value <v>` — check whether
   a candidate is already tracked (so a known item isn't proposed again).
-- `python3 $SCRIPTS/taskdb.py add-task ...` and `add-ref ...` — create a task and
+- `pwc add-task ...` and `add-ref ...` — create a task and
   attach its identity reference, **only after the user confirms**.
-- `python3 $SCRIPTS/taskdb.py log-event --kind new-task --detail "..."` — record the
+- `pwc log-event --kind new-task --detail "..."` — record the
   promotion.
 
 ## Steps
 
-1. **Read the sources config** with `sources.py enabled`. If it's empty (no sources
+1. **Read the sources config** with `pwc sources enabled`. If it's empty (no sources
    configured), tell the user to run `/pwc-setup-workspace` first and stop — there's
    nothing to scan until sources are set up.
 
@@ -51,7 +51,7 @@ tracking): find brings new work in; show tells you where existing work stands.
      since the last scan. This catches brand-new pings *addressed to you*.
    - **Activity on threads you already track** — for every Slack thread linked to a
      task on the board (active tasks *and recently-done ones still in the ~2-day
-     window*; pull the `working`/`identity` slack refs via `taskdb.py detail`),
+     window*; pull the `working`/`identity` slack refs via `pwc detail`),
      `slack_read_thread` for replies since the task was last touched. A teammate
      often replies **without re-@-mentioning you** ("done!", "ok let's make a
      follow-up ticket", "looks good"), and a reply can land on a thread whose task
@@ -194,7 +194,7 @@ tracking): find brings new work in; show tells you where existing work stands.
    - `jira-key` → use the Jira key verbatim as `--task` (e.g. `SMT-874`).
    - `<prefix>-slug` → `--task <prefix>-<short-slug-of-title>` (e.g. `slack-deploy-window`).
    - multi-source or unclear → use the config's top-level `id_fallback`.
-   `taskdb.py` dedups the id automatically if it's taken, so don't worry about
+   `pwc` dedups the id automatically if it's taken, so don't worry about
    collisions. Then:
    `add-task --task <derived-id> --type <jira|pr-review|slack|email|...> --title "..." [--workdir <repo>] --priority <N>`,
    then `add-ref --kind identity --ref-type <t> --value <raw-id>` to attach its
@@ -204,13 +204,13 @@ tracking): find brings new work in; show tells you where existing work stands.
    higher priority; `pick-work` sorts ascending, null last). The priority model is
    **workspace policy, not baked into this skill** — it depends on the workspace's Jira
    columns, team conventions, and single- vs multi-user shape. **Read it with
-   `python3 $SCRIPTS/sources.py priority`** and apply the `model` / `tiers` it returns
+   `pwc sources priority`** and apply the `model` / `tiers` it returns
    to each task you queue. (If a task's band isn't obvious until you've read its Slack
    thread — step 6 — add it at the middle tier and adjust once the cross-link reveals
    the truth; whatever the configured model says about checking real Jira status +
    assignee, do that before committing a tier.)
 
-   **If `sources.py priority` returns `{}` (no model configured), fall back to this
+   **If `pwc sources priority` returns `{}` (no model configured), fall back to this
    generic default** and tell the user the workspace has no priority model set (suggest
    `/pwc-setup-workspace` to add one):
    - **`1`** — someone is actively waiting on the user (review / input / answer), or a
@@ -269,7 +269,7 @@ tracking): find brings new work in; show tells you where existing work stands.
 
 8. **Render the full board at the end.** After queuing (and after reporting what was
    found / linked), always finish by rendering the board exactly as `/pwc-show-work`
-   does — run `taskdb.py summary` and present it in that format: a **main table**
+   does — run `pwc summary` and present it in that format: a **main table**
    (columns `# | Status | Pri | ID | Dir | Desc`) holding only `pending` / `in-progress` /
    `blocked` rows, sorted by status-band then priority, with the emoji status (⚪
    pending / 🟢 in-progress / ⛔ blocked), the task's `Dir` (its `workdir`: a repo name,
@@ -297,16 +297,16 @@ tracking): find brings new work in; show tells you where existing work stands.
   `--task` id directly (the `jira-key` id_convention already does this). And when a
   **slack/email-typed task later gains a Jira ticket** — a bug-form post that gets a
   ticket filed for it, a thread that becomes SMT-NNN — don't just attach the key as a
-  ref or mention it in the title: **`taskdb.py promote --task <old-id> --new-id <KEY>`**
+  ref or mention it in the title: **`pwc promote --task <old-id> --new-id <KEY>`**
   to re-key the task to the Jira key. Promote keeps the old id as an alias (so
   `start`/refs/history still resolve) and re-points everything, so the board then shows
-  the key with no special-casing. (This is `taskdb.py promote` — re-keying an id — NOT
+  the key with no special-casing. (This is `pwc promote` — re-keying an id — NOT
   the "surface, never auto-promote" rule above, which is about not auto-*adding* tasks.)
   Attaching the Jira key as an identity ref is still required either way; promote is how
   the *id itself* follows the key.
 - **When two tickets are really one piece of work** (e.g. a backend ticket and its
   frontend ticket that ship together), don't fake the combine with a stray extra ref
-  and a notes blob. Queue them, then `taskdb.py merge --from <absorbed> --into <survivor>`:
+  and a notes blob. Queue them, then `pwc merge --from <absorbed> --into <survivor>`:
   the survivor inherits both ids as identity refs (so neither gets re-proposed),
   plus the absorbed task's history and aliases, and the absorbed id still resolves
   via `--task`. Confirm the direction with the user (which id survives) before merging.
