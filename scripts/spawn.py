@@ -15,13 +15,19 @@ through one path.
 Harnesses (`--harness`, default claude):
   claude    — fully supported: pre-allocated session id (identity, liveness via
               pgrep, resume via --resume), seed as positional prompt.
-  opencode  — UNVERIFIED (written against docs, not yet exercised): seed via
-              --prompt, model via --model. No session pre-allocation, so no
-              pgrep liveness and no `pwc set-session`; resume maps to
-              `opencode --continue` (that DIRECTORY's most recent session —
-              best-effort, wrong if two workers share a repo).
-  codex     — UNVERIFIED: seed as positional prompt, model via --model. Same
-              no-pre-allocation caveats; resume maps to `codex resume --last`.
+  opencode  — session-tracked too (verified 2026-07-10 on v1.17.18): a fresh spawn
+              PRE-CREATES the session via a transient `opencode serve` +
+              POST /session (the id is known before the worker exists), then
+              launches `opencode --session <ses_id>` — the id is in the process
+              argv, so pgrep liveness works, and resume is the same `--session`
+              attach. Seed via --prompt (auto-submit behavior: verify on first
+              interactive use), model via --model. Note: on a fresh spawn the
+              session id is MINTED HERE (opencode ids aren't chooseable), so the
+              caller must record the RETURNED session_id, not one it generated.
+  codex     — UNVERIFIED (not installed): seed as positional prompt, model via
+              --model. No pre-allocation; resume maps to `codex resume --last`
+              (most recent session in this directory). Untracked: no pgrep
+              liveness, no `pwc set-session`.
 Verify a new harness's flags on first real use and update its builder here.
 
 Requires iTerm2 running with the Python API enabled
@@ -97,24 +103,103 @@ def _build_claude(*, session_id, resume, cwd, seed_prompt, model):
         args += ["--session-id", session_id]  # fresh / resume-fallback
         if seed_prompt:
             args.append(seed_prompt)  # positional prompt -> claude auto-submits it
-    return mode, args
+    return mode, args, session_id
 
 
-def _build_opencode(*, session_id, resume, cwd, seed_prompt, model):
-    """UNVERIFIED (opencode not yet installed/exercised — check flags on first use).
-    No session pre-allocation: `session_id` is ignored, identity/liveness/resume
-    tracking don't apply. `--continue` reopens this directory's most recent
-    session — best-effort resume, wrong if two workers ever shared this repo."""
-    args = ["opencode"]
+_OPENCODE_DB = Path.home() / ".local" / "share" / "opencode" / "opencode.db"
+
+
+def _opencode_session_exists(session_id: str) -> bool:
+    """Read-only peek into opencode's session store. On ANY doubt (schema moved,
+    db missing/locked) say True — attaching to a missing session fails visibly in
+    the worker tab, which beats silently minting a fresh session on a resume."""
+    try:
+        import sqlite3
+        conn = sqlite3.connect(f"file:{_OPENCODE_DB}?mode=ro", uri=True, timeout=2)
+        try:
+            return conn.execute(
+                "SELECT 1 FROM session WHERE id = ?", (session_id,)
+            ).fetchone() is not None
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001
+        return True
+
+
+def _preallocate_opencode_session(cwd: str, title: str) -> str:
+    """Create an opencode session BEFORE the worker exists and return its id.
+
+    opencode has no `session create` CLI and its ids aren't chooseable, but its
+    server API mints one: start a transient `opencode serve` in the worker's cwd
+    (sessions are directory-bound), POST /session, shut the server down. The
+    session persists in opencode's store (verified 2026-07-10), so the later
+    `opencode --session <id>` launch attaches to it.
+    """
+    import json as _json
+    import socket
+    import subprocess
+    import time
+    import urllib.request
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    base = f"http://127.0.0.1:{port}"
+    proc = subprocess.Popen(
+        ["opencode", "serve", "--port", str(port)],
+        cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        deadline = time.time() + 20
+        while True:
+            if proc.poll() is not None:
+                fail("opencode serve exited before becoming ready")
+            try:
+                urllib.request.urlopen(f"{base}/session", timeout=1)
+                break
+            except OSError:
+                if time.time() > deadline:
+                    fail("opencode serve did not become ready within 20s")
+                time.sleep(0.3)
+        req = urllib.request.Request(
+            f"{base}/session",
+            data=_json.dumps({"title": title}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            session = _json.loads(resp.read())
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+    sid = session.get("id")
+    if not sid:
+        fail(f"opencode POST /session returned no id: {session}")
+    return sid
+
+
+def _build_opencode(*, session_id, resume, cwd, seed_prompt, model,
+                    title=None, dry_run=False):
+    """Session-tracked like claude, with inverted id flow: claude accepts a
+    caller-chosen uuid, opencode mints its own — pre-created here on a fresh
+    spawn so it's still known before the worker process exists. Both fresh and
+    resume launch `opencode --session <id>`, so the id sits in the process argv
+    (pgrep liveness) either way."""
+    if resume and session_id and _opencode_session_exists(session_id):
+        mode = "resume"
+    else:
+        mode = "fresh"
+        session_id = ("ses_DRYRUN-not-created" if dry_run
+                      else _preallocate_opencode_session(cwd, title or "PWC worker"))
+    args = ["opencode", "--session", session_id]
     if model:
         args += ["--model", model]
-    mode = "fresh"
-    if resume:
-        args.append("--continue")
-        mode = "resume"
     if seed_prompt:
         args += ["--prompt", seed_prompt]
-    return mode, args
+    return mode, args, session_id
 
 
 def _build_codex(*, session_id, resume, cwd, seed_prompt, model):
@@ -131,28 +216,35 @@ def _build_codex(*, session_id, resume, cwd, seed_prompt, model):
             args += ["--model", model]
         if seed_prompt:
             args.append(seed_prompt)
-    return mode, args
+    return mode, args, None  # untracked: codex ids aren't known at spawn time
 
 
-# claude is the only harness with pre-allocated session ids (identity, pgrep
-# liveness, transcript-based resume). The others launch fine but are untracked:
-# the dispatch skill must NOT `pwc set-session` for them.
+# session_tracked = the harness's session id is known at spawn time and appears in
+# the worker's argv, so identity (`pwc set-session`), pgrep liveness, and resume
+# all work. claude: caller-chosen uuid. opencode: pre-created via its server API.
+# codex: neither — the dispatch skill must NOT `pwc set-session` for it.
 _BUILDERS = {
     "claude": (_build_claude, True),     # (builder, session_tracked)
-    "opencode": (_build_opencode, False),
+    "opencode": (_build_opencode, True),
     "codex": (_build_codex, False),
 }
 
 
-def build_command(*, harness, session_id, resume, cwd, seed_prompt=None, model=None):
-    """Return (mode, launch_command, session_tracked) for the task's harness."""
+def build_command(*, harness, session_id, resume, cwd, seed_prompt=None,
+                  model=None, title=None, dry_run=False):
+    """Return (mode, launch_command, session_id, session_tracked) for the task's
+    harness. `session_id` in the result is the EFFECTIVE id (opencode mints its
+    own on a fresh spawn — record that one), or None for untracked harnesses."""
     if harness not in _BUILDERS:
         fail(f"unknown harness {harness!r} — known: {', '.join(sorted(_BUILDERS))}")
     builder, session_tracked = _BUILDERS[harness]
-    mode, args = builder(session_id=session_id, resume=resume, cwd=cwd,
-                         seed_prompt=seed_prompt, model=model)
+    kwargs = dict(session_id=session_id, resume=resume, cwd=cwd,
+                  seed_prompt=seed_prompt, model=model)
+    if harness == "opencode":
+        kwargs.update(title=title, dry_run=dry_run)
+    mode, args, effective_id = builder(**kwargs)
     inner = f"cd {shlex.quote(cwd)} && {shlex.join(args)}"
-    return mode, inner, session_tracked
+    return mode, inner, effective_id, session_tracked
 
 
 def spawn(*, cwd, command, seed_in_command=False, title=None):
@@ -277,9 +369,10 @@ def main(argv=None):
     if not args.dry_run and shutil.which(args.harness) is None:
         fail(f"harness {args.harness!r} is not installed (not on PATH)")
 
-    mode, command, session_tracked = build_command(
+    mode, command, session_id, session_tracked = build_command(
         harness=args.harness, session_id=session_id, resume=args.resume,
         cwd=cwd, seed_prompt=seed_prompt, model=args.model,
+        title=args.name or args.task, dry_run=args.dry_run,
     )
     # The seed rides in the launch command as the harness's prompt argument
     # (auto-submitted) on BOTH a fresh spawn and a resume-with-follow-up — the only
@@ -291,15 +384,16 @@ def main(argv=None):
     result = {
         "harness": args.harness,
         "model": args.model,
-        # session_id is only meaningful when the harness tracks it (claude);
-        # session_tracked tells the dispatch skill whether to `pwc set-session`.
+        # The EFFECTIVE session id — for opencode a fresh spawn mints it here, so
+        # the dispatch skill must record THIS value, not an id it generated.
+        # None for untracked harnesses (no `pwc set-session` for those).
         "session_id": session_id if session_tracked else None,
         "session_tracked": session_tracked,
         "cwd": cwd,
         "mode": mode,
         "command": command,
     }
-    if session_tracked:
+    if args.harness == "claude":
         result["transcript_expected"] = str(transcript_path(cwd, session_id))
 
     if args.dry_run:

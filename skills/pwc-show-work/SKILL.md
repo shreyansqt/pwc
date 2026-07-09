@@ -84,11 +84,12 @@ threads) is `/pwc-find-work`.
    If the sweep changed anything, re-run `summary`. (There is no `gone` status anymore;
    a vanished worker is just an in-progress task with a dead session.)
 
-   The sweep only covers **claude-harness workers** — they're the only ones with a
-   pre-allocated `session_id` to test, so tasks on another harness (`harness` =
-   opencode/codex/…) never enter it. For those, the task's status is whatever was
-   last reported; if it matters whether one is still in flight, ask the user rather
-   than inferring.
+   The sweep covers every task with a `session_id` — claude and opencode workers
+   both have one (opencode's `ses_…` id is pre-created at spawn and sits in the
+   worker's argv, so `pgrep` sees it the same way). Tasks on an untracked harness
+   (e.g. codex) have no `session_id` and never enter the sweep: their status is
+   whatever was last reported; if it matters whether one is still in flight, ask
+   the user rather than inferring.
 
    **Verify before acting on a worker's reported outcome.** A worker's reported
    status (and the note that comes with it) is *secondhand* — it is what the worker

@@ -256,10 +256,13 @@ of the way.
    if the worker ends without reporting. The user can also run `/pwc-report-status`
    from the coordinator at any time.
 
-5. **Pre-allocate and dispatch.** Generate a UUID and pass it as `--session-id` (so
-   the id is known before any process exists). Pass the task's `--harness` and
-   `--model` when set (from `detail`; omit when NULL — claude with its default model).
-   Pipe the seed via `--prompt -`. Pass a
+5. **Pre-allocate and dispatch.** For a claude task, generate a UUID and pass it as
+   `--session-id` (so the id is known before any process exists). For an opencode
+   task, pass no `--session-id` on a fresh spawn — `pwc spawn` pre-creates the
+   session itself (via opencode's server API) and returns the minted id; **record
+   the result's `session_id`, never one you generated**. Pass the task's
+   `--harness` and `--model` when set (from `detail`; omit when NULL — claude with
+   its default model). Pipe the seed via `--prompt -`. Pass a
    scannable `--name "<id> · <short gist>"` — the id plus a 3–5 word gist from the
    title (e.g. `SMT-677 · BO auth review`, `slack-ocr · OCR income prefill`).
 
@@ -275,12 +278,13 @@ of the way.
    follow-up) or `"skipped"` (no `--prompt` — a bare resume with no follow-up).
 
 6. **Record it, then tell the user how to start the worker.** Right after dispatch,
-   run `pwc set-session --task <id> --session-id <uuid> --workdir <dir>` (writes
-   the session id and a `dispatched` event, so the task is tracked from the instant
-   the worker starts) — **only if the spawn result said `session_tracked: true`**; for
-   a non-claude harness there is no session to record, so instead log the dispatch
-   (`pwc log-event --task <id> --kind dispatched --detail "spawned <harness>
-   (<model>) worker in <dir>"`). Either way, **move the task to `in-progress`**
+   run `pwc set-session --task <id> --session-id <result.session_id> --workdir <dir>`
+   (writes the session id and a `dispatched` event, so the task is tracked from the
+   instant the worker starts) — **only if the spawn result said `session_tracked:
+   true`** (claude, opencode). For an untracked harness (codex) there is no session
+   to record, so instead log the dispatch (`pwc log-event --task <id> --kind
+   dispatched --detail "spawned <harness> (<model>) worker in <dir>"`). Either way,
+   **move the task to `in-progress`**
    (`pwc update-task --task <id> --status in-progress`) — dispatching a worker is
    what flips a task from `pending` to `in-progress`. (On a resume of an already-started
    task it's already in-progress; setting it again is harmless.) Then, in your reply:
@@ -323,24 +327,32 @@ of the way.
 ## Notes
 
 - **Non-claude harnesses (task `harness` = opencode, codex, …).** Dispatch works the
-  same — build the seed, `pwc spawn --harness <h> [--model <m>]` — but everything
-  *session-based* doesn't apply, because only claude pre-allocates session ids:
-  - **Skip step 3's liveness check and the transcript-resume logic** — there's no
-    `session_id` to test. To pick the task back up, spawn with `--resume`: the
-    harness reopens *that directory's most recent session* (best-effort — flag it to
-    the user if two workers may have shared the repo).
-  - **In step 6, don't `set-session`** (log the `dispatched` event instead, as above).
-    `/pwc-show-work`'s dead-worker sweep won't see this worker, so its status is
-    only what gets reported — remind the user of that when you announce the spawn.
-  - **Adapt the seed's PWC references**: the `/pwc-*` skills are Claude Code skills, so
-    for another harness the seed points at the `pwc` CLI instead — *"Run `pwc detail
-    --task <id>` for your full context"* replaces `/pwc-show-task`, and *"record the
-    outcome with `pwc log-event --task <id> --source worker --kind note --detail …`"*
-    replaces `/pwc-report-status`. Everything else in the seed (the gate, the
-    investigate-then-ask directive) is harness-neutral.
-  - The opencode/codex launch flags are **unverified until first real use** — if a
-    spawn errors, check the harness's actual CLI flags against the builders in
-    `spawn.py` and fix them there.
+  same — build the seed, `pwc spawn --harness <h> [--model <m>]` — with these deltas:
+  - **opencode is session-tracked like claude** (verified 2026-07-10): fresh spawns
+    pre-create the session via opencode's server API (record the returned
+    `session_id`), the liveness check in step 3 works (`pwc worker-status` — the
+    `ses_…` id is in the worker's argv), and resume is `pwc spawn --harness opencode
+    --session-id <ses_…> --resume` (spawn verifies the session still exists in
+    opencode's store; if it's gone it mints a fresh one — check the result's
+    `session_id` and mode). Skip only the *transcript-path* check in step 3 — that
+    file layout is claude's; spawn handles opencode existence itself. One unverified
+    detail: whether `--prompt` auto-submits in the TUI — on the first opencode spawn,
+    ask the user to confirm the seed actually ran, and note the answer in the task.
+  - **codex is untracked**: no pre-allocated id, so skip step 3's liveness/resume
+    logic entirely; picking the task back up is `--resume` (codex reopens that
+    directory's most recent session — best-effort). In step 6, log the `dispatched`
+    event instead of `set-session`. `/pwc-show-work`'s dead-worker sweep won't see
+    this worker — remind the user its status is only what gets reported.
+  - **Adapt the seed's PWC references** (all non-claude harnesses): the `/pwc-*`
+    skills are Claude Code skills, so the seed points at the `pwc` CLI instead —
+    *"Run `pwc detail --task <id>` for your full context"* replaces
+    `/pwc-show-task`, and *"record the outcome with `pwc log-event --task <id>
+    --source worker --kind note --detail …`"* replaces `/pwc-report-status`.
+    Everything else in the seed (the gate, the investigate-then-ask directive) is
+    harness-neutral.
+  - codex's launch flags are **unverified until first real use** — if a spawn
+    errors, check the actual CLI flags against the builders in `spawn.py` and fix
+    them there.
 - **Never resume a session that's still alive** — that's what the worker-status check in
   step 3 guards against (claude-harness tasks only).
 - /start does not auto-pick tasks; it acts on a task the user chose (often via
