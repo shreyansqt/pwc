@@ -1,23 +1,36 @@
 #!/usr/bin/env python3
-"""Spawn a PWC worker in a new iTerm2 tab.
+"""Spawn a PWC worker in a new iTerm2 tab, in the task's harness.
 
-Builds a `claude` invocation (fresh `--session-id <uuid>` + seed prompt, or
-`--resume <uuid>`) and runs it in a new tab of the current iTerm2 window, titled
-after the task. Each worker gets its own full-width tab (Cmd-1/2/... to switch);
-the coordinator's tab is untouched. The new tab opens **in the background** —
-iTerm2 always switches focus to a newly-created tab (its API has no
-background-create flag), so we remember the active tab beforehand and re-activate
-it immediately after the new tab is created. Brief flicker; user stays where they
-were. Prints session id, mode, and placement as JSON. Does NOT touch the task DB
-— the dispatch skill calls `taskdb.py set-session` so all DB writes funnel through
-one path.
+Builds the harness's launch invocation (default `claude`: fresh `--session-id
+<uuid>` + seed prompt, or `--resume <uuid>`) and runs it in a new tab of the
+current iTerm2 window, titled after the task. Each worker gets its own full-width
+tab (Cmd-1/2/... to switch); the coordinator's tab is untouched. The new tab opens
+**in the background** — iTerm2 always switches focus to a newly-created tab (its
+API has no background-create flag), so we remember the active tab beforehand and
+re-activate it immediately after the new tab is created. Brief flicker; user stays
+where they were. Prints session id, mode, and placement as JSON. Does NOT touch
+the task DB — the dispatch skill calls `pwc set-session` so all DB writes funnel
+through one path.
+
+Harnesses (`--harness`, default claude):
+  claude    — fully supported: pre-allocated session id (identity, liveness via
+              pgrep, resume via --resume), seed as positional prompt.
+  opencode  — UNVERIFIED (written against docs, not yet exercised): seed via
+              --prompt, model via --model. No session pre-allocation, so no
+              pgrep liveness and no `pwc set-session`; resume maps to
+              `opencode --continue` (that DIRECTORY's most recent session —
+              best-effort, wrong if two workers share a repo).
+  codex     — UNVERIFIED: seed as positional prompt, model via --model. Same
+              no-pre-allocation caveats; resume maps to `codex resume --last`.
+Verify a new harness's flags on first real use and update its builder here.
 
 Requires iTerm2 running with the Python API enabled
 (Preferences -> General -> Magic -> Enable Python API) and `pip install iterm2`.
 Fails with a clear message (never hangs) if it can't connect.
 
 Usage:
-  spawn.py --task <id> --cwd <dir> [--session-id <uuid>] [--resume]
+  spawn.py --task <id> --cwd <dir> [--harness claude|opencode|codex] [--model M]
+           [--session-id <uuid>] [--resume]
            [--prompt-file <path> | --prompt -] [--name <display-name>]
 """
 
@@ -26,6 +39,7 @@ from __future__ import annotations
 import argparse
 import os
 import shlex
+import shutil
 import sys
 import uuid
 from pathlib import Path
@@ -43,8 +57,8 @@ def transcript_path(cwd: str, session_id: str) -> Path:
             / session_slug(cwd) / f"{session_id}.jsonl")
 
 
-def build_claude_command(*, session_id, resume, cwd, seed_prompt=None):
-    """Return (mode, launch_command). On a FRESH spawn the seed is passed as
+def _build_claude(*, session_id, resume, cwd, seed_prompt, model):
+    """The fully-supported harness. On a FRESH spawn the seed is passed as
     `claude`'s positional prompt argument, so claude ingests it as the first user
     message and starts working immediately — reliably, with no TUI timing race.
 
@@ -71,6 +85,8 @@ def build_claude_command(*, session_id, resume, cwd, seed_prompt=None):
     so a resume-with-follow-up needs no hand-paste. Resume with no seed stays bare.
     """
     args = ["claude"]
+    if model:
+        args += ["--model", model]
     mode = "fresh"
     if resume and transcript_path(cwd, session_id).exists():
         args += ["--resume", session_id]
@@ -81,8 +97,62 @@ def build_claude_command(*, session_id, resume, cwd, seed_prompt=None):
         args += ["--session-id", session_id]  # fresh / resume-fallback
         if seed_prompt:
             args.append(seed_prompt)  # positional prompt -> claude auto-submits it
+    return mode, args
+
+
+def _build_opencode(*, session_id, resume, cwd, seed_prompt, model):
+    """UNVERIFIED (opencode not yet installed/exercised — check flags on first use).
+    No session pre-allocation: `session_id` is ignored, identity/liveness/resume
+    tracking don't apply. `--continue` reopens this directory's most recent
+    session — best-effort resume, wrong if two workers ever shared this repo."""
+    args = ["opencode"]
+    if model:
+        args += ["--model", model]
+    mode = "fresh"
+    if resume:
+        args.append("--continue")
+        mode = "resume"
+    if seed_prompt:
+        args += ["--prompt", seed_prompt]
+    return mode, args
+
+
+def _build_codex(*, session_id, resume, cwd, seed_prompt, model):
+    """UNVERIFIED (codex not yet installed/exercised — check flags on first use).
+    No session pre-allocation; resume maps to `codex resume --last` (most recent
+    session in this directory), and a seed can't ride along on a resume."""
+    if resume:
+        args = ["codex", "resume", "--last"]
+        mode = "resume"
+    else:
+        args = ["codex"]
+        mode = "fresh"
+        if model:
+            args += ["--model", model]
+        if seed_prompt:
+            args.append(seed_prompt)
+    return mode, args
+
+
+# claude is the only harness with pre-allocated session ids (identity, pgrep
+# liveness, transcript-based resume). The others launch fine but are untracked:
+# the dispatch skill must NOT `pwc set-session` for them.
+_BUILDERS = {
+    "claude": (_build_claude, True),     # (builder, session_tracked)
+    "opencode": (_build_opencode, False),
+    "codex": (_build_codex, False),
+}
+
+
+def build_command(*, harness, session_id, resume, cwd, seed_prompt=None, model=None):
+    """Return (mode, launch_command, session_tracked) for the task's harness."""
+    if harness not in _BUILDERS:
+        fail(f"unknown harness {harness!r} — known: {', '.join(sorted(_BUILDERS))}")
+    builder, session_tracked = _BUILDERS[harness]
+    mode, args = builder(session_id=session_id, resume=resume, cwd=cwd,
+                         seed_prompt=seed_prompt, model=model)
     inner = f"cd {shlex.quote(cwd)} && {shlex.join(args)}"
-    return mode, inner
+    return mode, inner, session_tracked
 
 
 def spawn(*, cwd, command, seed_in_command=False, title=None):
@@ -178,6 +248,9 @@ def main(argv=None):
     p = argparse.ArgumentParser(prog="spawn.py", description=__doc__)
     p.add_argument("--task", required=True)
     p.add_argument("--cwd", required=True)
+    p.add_argument("--harness", default="claude",
+                   help="coding agent to launch (claude|opencode|codex); default claude")
+    p.add_argument("--model", help="model override for the harness")
     p.add_argument("--session-id")
     p.add_argument("--resume", action="store_true")
     p.add_argument("--prompt-file")
@@ -201,11 +274,14 @@ def main(argv=None):
     elif args.prompt:
         seed_prompt = args.prompt
 
-    mode, command = build_claude_command(
-        session_id=session_id, resume=args.resume, cwd=cwd,
-        seed_prompt=seed_prompt,
+    if not args.dry_run and shutil.which(args.harness) is None:
+        fail(f"harness {args.harness!r} is not installed (not on PATH)")
+
+    mode, command, session_tracked = build_command(
+        harness=args.harness, session_id=session_id, resume=args.resume,
+        cwd=cwd, seed_prompt=seed_prompt, model=args.model,
     )
-    # The seed rides in the launch command as claude's positional prompt
+    # The seed rides in the launch command as the harness's prompt argument
     # (auto-submitted) on BOTH a fresh spawn and a resume-with-follow-up — the only
     # difference is meaning (fresh = the task seed; resume = a follow-up ask). A
     # resume with no seed carries no prompt. `seed_in_command` tracks whether
@@ -213,12 +289,18 @@ def main(argv=None):
     seed_in_command = bool(seed_prompt)
 
     result = {
-        "session_id": session_id,
+        "harness": args.harness,
+        "model": args.model,
+        # session_id is only meaningful when the harness tracks it (claude);
+        # session_tracked tells the dispatch skill whether to `pwc set-session`.
+        "session_id": session_id if session_tracked else None,
+        "session_tracked": session_tracked,
         "cwd": cwd,
         "mode": mode,
-        "transcript_expected": str(transcript_path(cwd, session_id)),
         "command": command,
     }
+    if session_tracked:
+        result["transcript_expected"] = str(transcript_path(cwd, session_id))
 
     if args.dry_run:
         result["dry_run"] = True

@@ -78,6 +78,14 @@ Start a Claude Code session **in the workspace** and:
   without your confirmation.
 - **`/pwc-start-work`** — turns a task into action: spawns a worker (default) or handles it
   inline. Also resumes a stopped task by reopening its prior session.
+
+Each task carries a **harness** (which coding agent runs its worker — claude by
+default; opencode/codex builders exist but are unverified until first use) and an
+optional **model**. Both are set at queue time from the workspace's routing policy
+(`"routing"` in `.pwc/sources.json`, read via `pwc sources routing`) and are
+user-overridable; `/pwc-start-work` dispatches accordingly (`pwc spawn --harness …
+--model …`). Session identity/liveness/resume tracking is claude-only — other
+harnesses can't pre-allocate a session id, so their workers rely on reported status.
 - **`/pwc-report-status`** — used *by a worker* to report status (blocked / awaiting-review
   / done / note) back to the task database.
 

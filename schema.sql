@@ -23,7 +23,15 @@ CREATE TABLE IF NOT EXISTS tasks (
                                                -- (finished): archiving hides a task while PRESERVING its
                                                -- real status, and records WHEN it left. Surfaced only
                                                -- via summary --archived.
-  session_id    TEXT,                          -- pre-allocated worker session uuid (NULL if none)
+  session_id    TEXT,                          -- pre-allocated worker session uuid (NULL if none;
+                                               -- claude-harness only — other harnesses can't
+                                               -- pre-allocate, so their tasks keep this NULL)
+  harness       TEXT,                          -- which coding agent runs this task's worker
+                                               -- (claude|opencode|codex|...); NULL = claude.
+                                               -- Set at queue time by the routing policy
+                                               -- (sources.json "routing"), user-overridable.
+  model         TEXT,                          -- model override for the harness (e.g. "opus",
+                                               -- "zai/glm-4.7"); NULL = the harness's default
   workdir       TEXT,                          -- resolved cwd for dispatch/resume
   inline        INTEGER NOT NULL DEFAULT 0,    -- 1 = handled inline (informational)
   created_at    TEXT NOT NULL,                 -- ISO8601 UTC

@@ -96,9 +96,20 @@ depends on the exact contents, so it's safe to re-run anytime to adjust.
    `"tiers": {"1": "...", "2": "...", "3": "..."}` one-line summary per tier. This is
    optional — skip it and the skills fall back to the generic default above.
 
+6b. **Capture the routing policy (optional)** — which coding agent (harness) and
+   model each kind of task's worker should run in. Skip entirely unless the user
+   has (or plans) more than one harness/subscription — the default is "everything
+   on claude with its default model" and needs no config. When they do want it:
+   store as a top-level `"routing"` object —
+   `{"default": {"harness": "claude", "model": null}, "rules": [{"match": {"type": "..."}, "harness": "...", "model": "...", "why": "..."}], "notes": "<judgment guidance>"}`.
+   `/pwc-find-work` applies it when queueing (first matching rule, else default,
+   user-overridable); `/pwc-start-work` dispatches with what the task carries. Like
+   the priority model, rules are judgment guidance, not a mechanical matcher — the
+   `why` on each rule is what lets the coordinator deviate sensibly.
+
 7. **Write the config** by piping the assembled JSON to `pwc sources set --json -`.
    The shape is
-   `{"sources": {"<name>": {"enabled": <bool>, "id_convention": "...", ...params}}, "id_fallback": "task-slug", "skill_hints": {...}, "priority": {"model": "...", "tiers": {...}}}`.
+   `{"sources": {"<name>": {"enabled": <bool>, "id_convention": "...", ...params}}, "id_fallback": "task-slug", "skill_hints": {...}, "priority": {"model": "...", "tiers": {...}}, "routing": {...}}`.
    Heed any validation warnings it prints (e.g. an enabled source missing a required
    field) and fix them with the user before finishing.
 

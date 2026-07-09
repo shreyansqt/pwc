@@ -84,6 +84,12 @@ threads) is `/pwc-find-work`.
    If the sweep changed anything, re-run `summary`. (There is no `gone` status anymore;
    a vanished worker is just an in-progress task with a dead session.)
 
+   The sweep only covers **claude-harness workers** — they're the only ones with a
+   pre-allocated `session_id` to test, so tasks on another harness (`harness` =
+   opencode/codex/…) never enter it. For those, the task's status is whatever was
+   last reported; if it matters whether one is still in flight, ask the user rather
+   than inferring.
+
    **Verify before acting on a worker's reported outcome.** A worker's reported
    status (and the note that comes with it) is *secondhand* — it is what the worker
    believed when its session ended, and it can be stale, partial, or simply wrong.

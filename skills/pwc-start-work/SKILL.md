@@ -27,7 +27,9 @@ of the way.
 ## Tools
 
 - `pwc detail --task <id>` — the task's fields, refs, and
-  event timeline; the basis for the cwd, the resume decision, and the seed prompt.
+  event timeline; the basis for the cwd, the resume decision, the seed prompt, and
+  the dispatch target (`harness` + `model`, set at queue time by the routing policy;
+  NULL harness = claude, NULL model = the harness's default).
   Read it for *routing* — workdir, whether there's a session to resume, and the refs
   to name in the seed. Do **not** use it as license to go read the linked thread/PR/
   Jira yourself; pulling that underlying content into the coordinator's context is the
@@ -35,11 +37,14 @@ of the way.
   the substance.
 - `pwc worker-status --session-ids <uuid>` — whether the task's existing
   session (if any) is currently running.
-- `pwc spawn --task <id> --cwd <dir> --session-id <uuid> [--resume] [--prompt -] [--name "<id> · <gist>"]`
-  — open the worker tab and launch claude with the seed as its positional prompt, so
-  claude **auto-submits the seed on startup** (the worker starts working immediately;
-  there is no review-then-Enter step). Prints
-  `{session_id, cwd, mode, transcript_expected, seed}` where `seed` is `submitted`
+- `pwc spawn --task <id> --cwd <dir> [--harness <h>] [--model <m>] --session-id <uuid> [--resume] [--prompt -] [--name "<id> · <gist>"]`
+  — open the worker tab and launch the task's harness (default claude) with the seed
+  as its prompt, so it **auto-submits the seed on startup** (the worker starts working
+  immediately; there is no review-then-Enter step). Prints
+  `{harness, model, session_id, session_tracked, cwd, mode, transcript_expected, seed}`
+  where `session_tracked` says whether this harness pre-allocates session ids (claude:
+  true — it gates `set-session` and everything session-based; see the **Non-claude
+  harnesses** note) and `seed` is `submitted`
   (baked into the launch command and auto-submitted) or `skipped` (no `--prompt`
   given). **A `--prompt` is honored on `--resume` too** — `claude --resume <id>
   '<prompt>'` resumes with full history AND auto-submits the prompt, so you can pipe a
@@ -252,7 +257,9 @@ of the way.
    from the coordinator at any time.
 
 5. **Pre-allocate and dispatch.** Generate a UUID and pass it as `--session-id` (so
-   the id is known before any process exists). Pipe the seed via `--prompt -`. Pass a
+   the id is known before any process exists). Pass the task's `--harness` and
+   `--model` when set (from `detail`; omit when NULL — claude with its default model).
+   Pipe the seed via `--prompt -`. Pass a
    scannable `--name "<id> · <short gist>"` — the id plus a 3–5 word gist from the
    title (e.g. `SMT-677 · BO auth review`, `slack-ocr · OCR income prefill`).
 
@@ -270,7 +277,10 @@ of the way.
 6. **Record it, then tell the user how to start the worker.** Right after dispatch,
    run `pwc set-session --task <id> --session-id <uuid> --workdir <dir>` (writes
    the session id and a `dispatched` event, so the task is tracked from the instant
-   the worker starts), and **move the task to `in-progress`**
+   the worker starts) — **only if the spawn result said `session_tracked: true`**; for
+   a non-claude harness there is no session to record, so instead log the dispatch
+   (`pwc log-event --task <id> --kind dispatched --detail "spawned <harness>
+   (<model>) worker in <dir>"`). Either way, **move the task to `in-progress`**
    (`pwc update-task --task <id> --status in-progress`) — dispatching a worker is
    what flips a task from `pending` to `in-progress`. (On a resume of an already-started
    task it's already in-progress; setting it again is harmless.) Then, in your reply:
@@ -312,8 +322,27 @@ of the way.
 
 ## Notes
 
+- **Non-claude harnesses (task `harness` = opencode, codex, …).** Dispatch works the
+  same — build the seed, `pwc spawn --harness <h> [--model <m>]` — but everything
+  *session-based* doesn't apply, because only claude pre-allocates session ids:
+  - **Skip step 3's liveness check and the transcript-resume logic** — there's no
+    `session_id` to test. To pick the task back up, spawn with `--resume`: the
+    harness reopens *that directory's most recent session* (best-effort — flag it to
+    the user if two workers may have shared the repo).
+  - **In step 6, don't `set-session`** (log the `dispatched` event instead, as above).
+    `/pwc-show-work`'s dead-worker sweep won't see this worker, so its status is
+    only what gets reported — remind the user of that when you announce the spawn.
+  - **Adapt the seed's PWC references**: the `/pwc-*` skills are Claude Code skills, so
+    for another harness the seed points at the `pwc` CLI instead — *"Run `pwc detail
+    --task <id>` for your full context"* replaces `/pwc-show-task`, and *"record the
+    outcome with `pwc log-event --task <id> --source worker --kind note --detail …`"*
+    replaces `/pwc-report-status`. Everything else in the seed (the gate, the
+    investigate-then-ask directive) is harness-neutral.
+  - The opencode/codex launch flags are **unverified until first real use** — if a
+    spawn errors, check the harness's actual CLI flags against the builders in
+    `spawn.py` and fix them there.
 - **Never resume a session that's still alive** — that's what the worker-status check in
-  step 3 guards against.
+  step 3 guards against (claude-harness tasks only).
 - /start does not auto-pick tasks; it acts on a task the user chose (often via
   `/next`). It assumes the user has confirmed.
 - `pwc spawn` does not touch the task database; this skill owns the `set-session` write, so

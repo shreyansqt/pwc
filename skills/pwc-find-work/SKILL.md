@@ -196,9 +196,21 @@ tracking): find brings new work in; show tells you where existing work stands.
    - multi-source or unclear → use the config's top-level `id_fallback`.
    `pwc` dedups the id automatically if it's taken, so don't worry about
    collisions. Then:
-   `add-task --task <derived-id> --type <jira|pr-review|slack|email|...> --title "..." [--workdir <repo>] --priority <N>`,
+   `add-task --task <derived-id> --type <jira|pr-review|slack|email|...> --title "..." [--workdir <repo>] --priority <N> [--harness <h>] [--model <m>]`,
    then `add-ref --kind identity --ref-type <t> --value <raw-id>` to attach its
    identity reference, then `log-event --kind new-task`. Report back what was queued.
+
+   **Set `--harness` / `--model` by the workspace's routing policy.** Read it once
+   per run with `pwc sources routing`: apply the first matching rule (by task type /
+   traits), else the `default`. This decides which coding agent (claude, opencode,
+   …) and model `/pwc-start-work` will dispatch the task's worker in — set at queue
+   time so the user can veto it in the same confirmation. Show the choice with each
+   candidate only when it deviates from the default (a non-default harness or model
+   is worth a mention; the default is noise). If routing returns `{}`, omit both
+   flags — everything defaults to claude with its default model, and say nothing.
+   The rules are guidance to apply with judgment (like the priority model), not a
+   mechanical matcher; when a rule's `why` clearly doesn't fit this task, deviate
+   and say so.
 
    **Set `--priority` by the workspace's configured priority model** (lower number =
    higher priority; `pick-work` sorts ascending, null last). The priority model is

@@ -56,6 +56,9 @@ def _migrate(conn) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_tasks_archived ON tasks(archived_at)"
     )
+    for col in ("harness", "model"):
+        if col not in cols:
+            conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} TEXT")
 
 
 def row_to_dict(row: sqlite3.Row | None) -> dict | None:

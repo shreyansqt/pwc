@@ -49,6 +49,7 @@ Usage:
   sources.py enabled              # print only the enabled sources (what /find-work scans)
   sources.py skill-hints [--type T]  # the task-type -> skill(s) map (or one type's list)
   sources.py priority             # the workspace's priority model (P1/P2/P3 rules), or {}
+  sources.py routing              # the model/harness routing policy, or {}
 
 All output is JSON on stdout; diagnostics on stderr; exit 1 on error.
 """
@@ -153,6 +154,32 @@ def cmd_priority(args):
     emit(data.get("priority", {}) or {})
 
 
+def cmd_routing(args):
+    """The workspace's model/harness routing policy (empty object if unset).
+
+    /pwc-find-work reads this when queueing a task to set its `harness` and `model`
+    (user-overridable at confirmation); /pwc-start-work dispatches with whatever the
+    task carries. Routing is workspace policy — which models/subscriptions are
+    available and what kind of work each is trusted with — so it lives here, NOT
+    hardcoded in the skills. Shape:
+
+        "routing": {
+          "default": {"harness": "claude", "model": null},   // null model = harness default
+          "rules": [                                          // first match wins
+            {"match": {"type": "slack"}, "harness": "claude", "model": "haiku",
+             "why": "quick replies don't need a big model"}
+          ],
+          "notes": "<free-text guidance for judgment calls the rules don't cover>"
+        }
+
+    The rules are guidance the coordinator applies with judgment (like the priority
+    model), not a mechanical matcher. Returns {} when unset — the skills then default
+    everything to the claude harness with its default model.
+    """
+    data = _load(args.workspace)
+    emit(data.get("routing", {}) or {})
+
+
 def cmd_set(args):
     """Replace the whole config from a JSON body on stdin (--json -)."""
     if args.json != "-":
@@ -182,6 +209,7 @@ def main(argv=None):
     s.add_argument("--type", help="return only this task type's hints (a list)")
     s.set_defaults(func=cmd_skill_hints)
     sub.add_parser("priority").set_defaults(func=cmd_priority)
+    sub.add_parser("routing").set_defaults(func=cmd_routing)
     args = p.parse_args(argv)
     try:
         args.func(args)
