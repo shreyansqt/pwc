@@ -18,7 +18,7 @@ import argparse
 import sys
 
 import pwc_db
-from _common import days_ago_iso, emit, fail, now_iso
+from _common import days_ago_iso, emit, fail, now_iso, read_json_stdin, store_config
 
 # Columns surfaced in the always-loaded summary (the index tier). Deliberately
 # small — one status line's worth per task.
@@ -409,6 +409,57 @@ def cmd_archive(args):
     emit(pwc_db.row_to_dict(row))
 
 
+_EXPORT_TABLES = ("tasks", "task_aliases", "task_refs", "events")
+
+
+def cmd_export(args):
+    """Dump the whole workspace as JSON — the migration/backup/exit format.
+
+    Shape: {"tasks": [...], "task_aliases": [...], "task_refs": [...],
+    "events": [...]}. The hub's /import accepts exactly this (and its /export
+    returns it), so moving a workspace local→hub or hub→local is one pipe.
+    """
+    conn = pwc_db.connect(args.workspace)
+    dump = {}
+    for table in _EXPORT_TABLES:
+        order = "id" if table in ("task_refs", "events") else "rowid"
+        rows = conn.execute(f"SELECT * FROM {table} ORDER BY {order}").fetchall()
+        dump[table] = pwc_db.rows_to_dicts(rows)
+    emit(dump)
+
+
+def cmd_import(args):
+    """Load an export dump into an EMPTY workspace (refuses to merge).
+
+    task_refs/events are re-inserted without their autoincrement ids, in
+    original-id order, so timelines stay sorted; everything else keeps its ids.
+    """
+    if args.json != "-":
+        fail("import: only --json - (read from stdin) is supported")
+    dump = read_json_stdin()
+    missing = [t for t in _EXPORT_TABLES if not isinstance(dump.get(t), list)]
+    if missing:
+        fail(f"import: dump is missing table(s): {', '.join(missing)}")
+    conn = pwc_db.connect(args.workspace)
+    with conn:
+        if conn.execute("SELECT 1 FROM tasks LIMIT 1").fetchone():
+            fail("import: this workspace already has tasks — import only into an "
+                 "empty task database (init a fresh one, or delete .pwc/taskdb.db)")
+        counts = {}
+        for table in _EXPORT_TABLES:
+            rows = dump[table]
+            for row in rows:
+                cols = {k: v for k, v in row.items()
+                        if not (table in ("task_refs", "events") and k == "id")}
+                placeholders = ",".join("?" * len(cols))
+                conn.execute(
+                    f"INSERT INTO {table} ({','.join(cols)}) VALUES ({placeholders})",
+                    tuple(cols.values()),
+                )
+            counts[table] = len(rows)
+    emit({"imported": counts})
+
+
 def cmd_promote(args):
     """Give a task a new canonical id (e.g. a Jira key it just gained), keeping its
     old id as an alias so prior references still resolve. Re-points the task row,
@@ -653,11 +704,33 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--into", required=True, help="surviving task; inherits refs + history")
     s.set_defaults(func=cmd_merge)
 
+    s = sub.add_parser("export", help="dump the workspace's tasks/refs/events/aliases "
+                                      "as JSON (for hub migration or backup)")
+    s.set_defaults(func=cmd_export)
+
+    s = sub.add_parser("import", help="load an export dump into an EMPTY workspace "
+                                      "(JSON on stdin via --json -)")
+    s.add_argument("--json", metavar="-", required=True)
+    s.set_defaults(func=cmd_import)
+
     return p
 
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    # Hub-backed workspace? Route the operation over HTTPS instead of local
+    # sqlite — the response is byte-compatible, so nothing downstream can tell.
+    # `init` stays local-ish: on a hub workspace there is no local db to create.
+    store = store_config(args.workspace)
+    if store.get("store") == "hub":
+        if args.cmd == "init":
+            emit({"store": "hub", "url": store["url"],
+                  "workspace": store["workspace"],
+                  "note": "hub-backed workspace — no local task database to init"})
+            return
+        import hub_client
+        hub_client.run(args.cmd, args, store)
+        return
     try:
         args.func(args)
     except FileNotFoundError as e:

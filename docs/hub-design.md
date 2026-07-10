@@ -103,10 +103,11 @@ the backend. Accepted cost: the operation logic exists twice (Python locally,
 TypeScript in the Worker). The operations are small and stable; duplication
 beats shared-engine cleverness.
 
-**Offline behavior:** every successful read refreshes a local cache, so an
-offline laptop still renders a "stale as of HH:MM" board; offline writes spool
-locally and replay on reconnect. Local-first stays a real experience, not a
-memory — the network is an accelerator, not a dependency for glancing.
+**Offline behavior — v1 is online-only (decided 2026-07-11).** An unreachable
+hub is a clean error, not silent divergence. The read-cache ("stale as of
+HH:MM" board) and write-spool (queue offline, replay on reconnect) remain the
+designed extension, added behind the same driver seam if offline coordination
+turns out to matter in practice.
 
 ## Decision 5: roles symmetrize; only dispatch stays machine-to-machine
 
@@ -159,25 +160,42 @@ worker, recorded as a working ref; the coordinator fetches on demand
 directory (Syncthing) is the escalation if on-demand pulling proves to be
 friction.
 
-## Phasing
+## Scope (trimmed 2026-07-11, build started)
 
-- **Phase 0 (before any hub code):** scheduled backup of the current local
-  task databases (`sqlite3 .backup` → mini and/or R2). Today's exposure is one
-  copy on one laptop; that shouldn't outlive the week.
-- **Phase 1:** `hub/` Worker + D1 + migrations; `hub` driver in `pwc` with read
-  cache + write spool; `pwc export/import`; migrate the smarta workspace.
-- **Phase 2:** runhost heartbeat job (VPN-free liveness); Obsidian board
-  projection; `pwc pull <task>`.
-- **Phase 3:** mobile surface on the same Worker API.
+**In:** `hub/` Worker + D1 schema (public template); private instance repo
+(`pwc-infra`); `hub` driver in `pwc` (online-only, store.json per workspace);
+`pwc export`/`import` in both backends; conformance test; migrate the smarta
+workspace; install the CLI + token on the mini so remote workers report over
+HTTPS.
 
-## Open questions (settle during build)
+**Out (cut or deferred, with reasons):**
+- *Backup cron for the local databases* — cut: superseded by the migration
+  itself (D1 Time Travel + optional R2 export). Accepted risk: until cutover,
+  the task database remains a single local copy.
+- *Obsidian board projection* — cut: it was only ever a phone-glance stopgap;
+  the hub API is the real mobile story.
+- *Read-cache + write-spool* — deferred (see offline behavior above).
+- *Runhost heartbeats, `pwc pull`, mobile surface* — later phases, unchanged.
 
-- Token model: single bearer token per deployment first, or per-workspace tokens
-  from day one?
-- Hub API shape: strict 1:1 with taskdb subcommands (assumed above) vs a
-  coarser batch endpoint for the briefing read.
-- Read-cache format and staleness display; write-spool replay ordering
-  guarantees (event uuids make ingestion idempotent — added at the same time).
-- Whether `find-refs`-style queries move server-side wholesale or the briefing
-  fetches and filters client-side.
-- D1 latency from Europe in practice; batch the briefing reads if needed.
+## Decisions settled during build (2026-07-11)
+
+- **API shape:** `POST /w/<workspace>/<op>` mirroring the taskdb subcommands
+  1:1, request body = the argparse fields, response = byte-compatible with the
+  local `emit()` output. The Python client (`hub_client.py`) is a dumb
+  passthrough; all semantics live in the Worker.
+- **Token model:** one bearer token per deployment to start (client copy at
+  `~/.config/pwc/hub-token`, chmod 600; deployment copy via `wrangler secret`);
+  per-workspace tokens only if a workspace is ever shared.
+- **Store config:** `<workspace>/.pwc/store.json` — separate from sources.json
+  (task-store wiring vs find-work config). Absent file = local, forever.
+- **Import safety:** `/import` (and local `pwc import`) refuse non-empty
+  targets — migration can't silently merge into existing data.
+- **Deploy auth:** the laptop's default wrangler login is the smarta WORK
+  account; the hub deploys with a personal-account API token via
+  `CLOUDFLARE_API_TOKEN`, never by switching the default login.
+
+## Open questions (still open)
+
+- D1 latency from Europe in practice; batch the briefing reads if it drags.
+- Whether event uuids (for idempotent spool replay) go in now-dormant columns
+  or wait for the spool itself.

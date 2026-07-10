@@ -1,0 +1,34 @@
+{
+	// This is a PUBLIC TEMPLATE (this repo is public) — it has no real ids or
+	// secrets in it. To run your own hub:
+	//
+	//   1. Copy this whole `hub/` directory into your private instance repo
+	//      (see docs/hub-design.md, Decision 3 — same template/instance split
+	//      as a `deployment-secrets` repo).
+	//   2. Create the D1 database:      wrangler d1 create pwc-hub
+	//      That prints a database_id — paste it into the d1_databases entry
+	//      below in place of the placeholder.
+	//   3. Apply the schema:            wrangler d1 execute pwc-hub --remote --file=schema.sql
+	//   4. Set the bearer token:        wrangler secret put PWC_TOKEN
+	//      (generate one yourself, e.g. `openssl rand -hex 32`; every request
+	//      except GET /health must send `Authorization: Bearer <that token>`)
+	//   5. Deploy:                      wrangler deploy
+	//
+	// One deployment can serve multiple logical workspaces (see Decision 2) —
+	// the workspace name is a path segment (`/w/<workspace>/<op>`), not
+	// something configured here.
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "pwc-hub",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-06-01",
+	"observability": {
+		"enabled": true
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "pwc-hub",
+			"database_id": "<YOUR-D1-DATABASE-ID>"
+		}
+	]
+}
