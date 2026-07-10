@@ -68,7 +68,15 @@ threads) is `/pwc-find-work`.
 2. **Worker-status sweep.** Collect every task in the summary that has a non-null
    `session_id` and is `in-progress` (the only status that implies a worker should be
    running — `pending`/`blocked`/`done` shouldn't have a live worker). Pass them as a
-   JSON list of `{task, session_id}` to `pwc worker-status --json -`.
+   JSON list of `{task, session_id}` to `pwc worker-status --json -`. **For a task
+   with a `runhost`, include `"ssh"` in its row** (the runhost's ssh target from
+   `pwc sources runhosts`) — its worker is a process on that machine, and the check
+   hops over ssh.
+
+   **`alive: null` + `unreachable: true` is UNKNOWN, not dead** — the remote host
+   couldn't be reached (Tailscale down, mini offline), and the worker there is
+   probably still running. Do NOT clear the session or change anything; report the
+   task as "worker on <runhost> — host unreachable, liveness unknown" and move on.
 
    A dead session is **death, not outcome.** For each `alive: false` result:
    - **Ended after reporting** — the worker logged a status change / note after
@@ -80,6 +88,8 @@ threads) is `/pwc-find-work`.
      status, do not infer done/failed (it may have unpushed work). Detach the session
      and note "worker died, resumable" so the user can resume or re-decide. Surface
      these in the briefing as the in-progress rows whose worker is no longer live.
+     (A **remote** worker's `alive: false` is trustworthy — the host answered and the
+     process is gone; only `unreachable` results are exempt from this handling.)
 
    If the sweep changed anything, re-run `summary`. (There is no `gone` status anymore;
    a vanished worker is just an in-progress task with a dead session.)

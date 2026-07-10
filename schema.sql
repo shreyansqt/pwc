@@ -32,6 +32,10 @@ CREATE TABLE IF NOT EXISTS tasks (
                                                -- (sources.json "routing"), user-overridable.
   model         TEXT,                          -- model override for the harness (e.g. "opus",
                                                -- "zai/glm-4.7"); NULL = the harness's default
+  runhost       TEXT,                          -- named machine the worker runs on (key into
+                                               -- sources.json "runhosts"); NULL = this machine.
+                                               -- Remote workers run inside tmux over SSH, so they
+                                               -- survive the laptop sleeping.
   workdir       TEXT,                          -- resolved cwd for dispatch/resume
   inline        INTEGER NOT NULL DEFAULT 0,    -- 1 = handled inline (informational)
   created_at    TEXT NOT NULL,                 -- ISO8601 UTC

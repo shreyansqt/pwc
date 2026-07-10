@@ -87,6 +87,16 @@ user-overridable; `/pwc-start-work` dispatches accordingly (`pwc spawn --harness
 session-tracked: the session id is known before the worker exists (claude:
 caller-chosen uuid; opencode/codex: pre-created via their server APIs) and sits in
 the worker's argv, so identity, `pgrep` liveness, and resume-by-id all work.
+
+Tasks can also carry a **runhost** — a named always-on machine (registered in
+`"runhosts"` in `.pwc/sources.json`) the worker runs on instead of this one.
+A remote worker runs inside a **tmux session over SSH** (claude harness only for
+now): the iTerm tab is just a viewport, so closing it — or the laptop sleeping —
+doesn't stop the worker; reattach anytime with the spawn result's
+`attach_command`. The seed is staged to a file on the remote host (no nested
+quoting), liveness hops over ssh (`worker-status` rows take an `"ssh"` field;
+an unreachable host reports `alive: null`, never "dead"), and resume is the same
+pre-allocated session id on the same host.
 - **`/pwc-report-status`** — used *by a worker* to report status (blocked / awaiting-review
   / done / note) back to the task database.
 

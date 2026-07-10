@@ -50,6 +50,7 @@ Usage:
   sources.py skill-hints [--type T]  # the task-type -> skill(s) map (or one type's list)
   sources.py priority             # the workspace's priority model (P1/P2/P3 rules), or {}
   sources.py routing              # the model/harness routing policy, or {}
+  sources.py runhosts             # named remote machines workers can run on, or {}
 
 All output is JSON on stdout; diagnostics on stderr; exit 1 on error.
 """
@@ -180,6 +181,29 @@ def cmd_routing(args):
     emit(data.get("routing", {}) or {})
 
 
+def cmd_runhosts(args):
+    """Named remote machines workers can run on (empty object if unset).
+
+    A task with `runhost` set is dispatched over SSH into a tmux session on that
+    machine (so it survives this laptop sleeping); NULL runhost = this machine.
+    /pwc-start-work resolves the task's runhost here to get the SSH target and the
+    remote workspace root (for mapping the task's workdir to a remote cwd). Shape:
+
+        "runhosts": {
+          "grumpyorange": {
+            "ssh": "grumpyorange",                    // ssh target (~/.ssh/config alias)
+            "workspace_root": "/Users/g/work/smarta", // remote equivalent of this workspace
+            "pre": "…",                                // optional: how to bring the host up
+            "notes": "what this host is good for / can't reach"
+          }
+        }
+
+    Returns {} when unset — every worker then runs locally.
+    """
+    data = _load(args.workspace)
+    emit(data.get("runhosts", {}) or {})
+
+
 def cmd_set(args):
     """Replace the whole config from a JSON body on stdin (--json -)."""
     if args.json != "-":
@@ -210,6 +234,7 @@ def main(argv=None):
     s.set_defaults(func=cmd_skill_hints)
     sub.add_parser("priority").set_defaults(func=cmd_priority)
     sub.add_parser("routing").set_defaults(func=cmd_routing)
+    sub.add_parser("runhosts").set_defaults(func=cmd_runhosts)
     args = p.parse_args(argv)
     try:
         args.func(args)

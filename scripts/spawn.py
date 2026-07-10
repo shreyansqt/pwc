@@ -39,8 +39,20 @@ Requires iTerm2 running with the Python API enabled
 (Preferences -> General -> Magic -> Enable Python API) and `pip install iterm2`.
 Fails with a clear message (never hangs) if it can't connect.
 
+Remote workers (`--ssh <target>`, claude harness only for now): the worker runs on
+a named machine inside a REMOTE TMUX SESSION, so it survives this laptop sleeping
+or the tab closing — the iTerm tab is just a viewport (`ssh -t <target> tmux
+new-session -A -s pwc-<task> …`; reattach anytime with the same command). The seed
+is STAGED to a file on the remote host first (`~/.pwc/seeds/<uuid>.txt` via ssh
+stdin) and the launch reads it with `$(cat …)` — long multiline seeds never pass
+through nested shell quoting. `--cwd` must be the REMOTE path (the dispatch skill
+maps the task's workdir through the runhost's `workspace_root`). Liveness still
+works: the pre-allocated uuid is in the remote claude's argv, and worker_status.py
+greps it over ssh.
+
 Usage:
   spawn.py --task <id> --cwd <dir> [--harness claude|opencode|codex] [--model M]
+           [--ssh <target>] [--runhost <name>]
            [--session-id <uuid>] [--resume]
            [--prompt-file <path> | --prompt -] [--name <display-name>]
 """
@@ -321,6 +333,74 @@ _BUILDERS = {
 }
 
 
+_SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=8"]
+
+
+def _tmux_name(task: str) -> str:
+    """tmux session names reject '.' and ':'; keep it simple and predictable."""
+    import re
+    return "pwc-" + re.sub(r"[^A-Za-z0-9_-]", "-", task)
+
+
+def _ssh_run(target, command, *, input_text=None, what=""):
+    """Run a non-interactive command on the remote host; fail loudly."""
+    import subprocess
+    result = subprocess.run(
+        ["ssh", *_SSH_OPTS, target, command],
+        input=input_text, capture_output=True, text=True, timeout=30,
+    )
+    if result.returncode != 0:
+        fail(f"ssh {target} failed ({what or command}): "
+             f"{(result.stderr or result.stdout).strip()[:200]}")
+    return result.stdout
+
+
+def build_remote_claude_command(*, ssh_target, session_id, resume, cwd,
+                                seed_prompt, model, task, dry_run):
+    """Build the ssh+tmux launch for a REMOTE claude worker.
+
+    Fresh AND resume run inside `tmux new-session -A -s pwc-<task>` on the remote
+    host — `-A` attaches if the session already exists, so the same command is
+    also how the user reopens a live worker's viewport. The seed is staged to
+    `~/.pwc/seeds/<uuid>.txt` on the remote host (via ssh stdin, never nested
+    quoting) and consumed with `$(cat …)` as claude's positional prompt.
+    `~/.local/bin` is prepended to PATH inside the session because claude's
+    native install lives there and non-login shells don't have it.
+    """
+    remote_transcript = (f"$HOME/.claude/projects/"
+                         f"{cwd.replace('/', '-')}/{session_id}.jsonl")
+    mode = "fresh"
+    if resume and not dry_run:
+        exists = _ssh_run(
+            ssh_target, f'test -f "{remote_transcript}" && echo yes || echo no',
+            what="remote transcript check").strip() == "yes"
+        if exists:
+            mode = "resume"
+
+    inner_parts = ['export PATH="$HOME/.local/bin:$PATH"',
+                   f"cd {shlex.quote(cwd)}"]
+    claude_cmd = "claude"
+    if model:
+        claude_cmd += f" --model {shlex.quote(model)}"
+    if mode == "resume":
+        claude_cmd += f" --resume {session_id}"
+    else:
+        claude_cmd += f" --session-id {session_id}"
+    if seed_prompt:
+        seed_path = f"$HOME/.pwc/seeds/{session_id}.txt"
+        if not dry_run:
+            _ssh_run(ssh_target, 'mkdir -p "$HOME/.pwc/seeds" && '
+                                 f'cat > "{seed_path}"',
+                     input_text=seed_prompt, what="seed staging")
+        claude_cmd += f' "$(cat "{seed_path}")"'
+    inner_parts.append(claude_cmd)
+    inner = " && ".join(inner_parts)
+
+    tmux_cmd = f"tmux new-session -A -s {_tmux_name(task)} {shlex.quote(inner)}"
+    command = f"ssh -t {shlex.quote(ssh_target)} {shlex.quote(tmux_cmd)}"
+    return mode, command
+
+
 def build_command(*, harness, session_id, resume, cwd, seed_prompt=None,
                   model=None, title=None, dry_run=False):
     """Return (mode, launch_command, session_id, session_tracked) for the task's
@@ -434,6 +514,11 @@ def main(argv=None):
     p.add_argument("--harness", default="claude",
                    help="coding agent to launch (claude|opencode|codex); default claude")
     p.add_argument("--model", help="model override for the harness")
+    p.add_argument("--ssh", help="run the worker on this remote host (ssh target) "
+                                 "inside tmux; --cwd must be the REMOTE path. "
+                                 "claude harness only for now.")
+    p.add_argument("--runhost", help="display name of the remote host (recorded in "
+                                     "the result; the task's runhost field)")
     p.add_argument("--session-id")
     p.add_argument("--resume", action="store_true")
     p.add_argument("--prompt-file")
@@ -442,10 +527,6 @@ def main(argv=None):
     p.add_argument("--dry-run", action="store_true",
                    help="print the command without opening a tab (for testing)")
     args = p.parse_args(argv)
-
-    cwd = str(Path(args.cwd).expanduser())
-    if not os.path.isdir(cwd):
-        fail(f"--cwd does not exist: {cwd}")
 
     session_id = args.session_id or str(uuid.uuid4())
 
@@ -457,14 +538,33 @@ def main(argv=None):
     elif args.prompt:
         seed_prompt = args.prompt
 
-    if not args.dry_run and shutil.which(args.harness) is None:
-        fail(f"harness {args.harness!r} is not installed (not on PATH)")
-
-    mode, command, session_id, session_tracked = build_command(
-        harness=args.harness, session_id=session_id, resume=args.resume,
-        cwd=cwd, seed_prompt=seed_prompt, model=args.model,
-        title=args.name or args.task, dry_run=args.dry_run,
-    )
+    if args.ssh:
+        # Remote worker: cwd is a REMOTE path — validate remotely, build ssh+tmux.
+        if args.harness != "claude":
+            fail(f"remote workers support only the claude harness for now "
+                 f"(got {args.harness!r}) — opencode/codex pre-allocation would "
+                 f"need their server APIs run on the remote host")
+        cwd = args.cwd
+        if not args.dry_run:
+            _ssh_run(args.ssh, f'test -d {shlex.quote(cwd)}',
+                     what=f"remote cwd check: {cwd}")
+        mode, command = build_remote_claude_command(
+            ssh_target=args.ssh, session_id=session_id, resume=args.resume,
+            cwd=cwd, seed_prompt=seed_prompt, model=args.model,
+            task=args.task, dry_run=args.dry_run,
+        )
+        session_tracked = True
+    else:
+        cwd = str(Path(args.cwd).expanduser())
+        if not os.path.isdir(cwd):
+            fail(f"--cwd does not exist: {cwd}")
+        if not args.dry_run and shutil.which(args.harness) is None:
+            fail(f"harness {args.harness!r} is not installed (not on PATH)")
+        mode, command, session_id, session_tracked = build_command(
+            harness=args.harness, session_id=session_id, resume=args.resume,
+            cwd=cwd, seed_prompt=seed_prompt, model=args.model,
+            title=args.name or args.task, dry_run=args.dry_run,
+        )
     # The seed rides in the launch command as the harness's prompt argument
     # (auto-submitted) on BOTH a fresh spawn and a resume-with-follow-up — the only
     # difference is meaning (fresh = the task seed; resume = a follow-up ask). A
@@ -484,7 +584,14 @@ def main(argv=None):
         "mode": mode,
         "command": command,
     }
-    if args.harness == "claude":
+    if args.ssh:
+        result["runhost"] = args.runhost or args.ssh
+        result["ssh"] = args.ssh
+        result["tmux_session"] = _tmux_name(args.task)
+        # How to reopen the viewport if the tab is closed (worker keeps running).
+        result["attach_command"] = (
+            f"ssh -t {shlex.quote(args.ssh)} tmux attach -t {_tmux_name(args.task)}")
+    elif args.harness == "claude":
         result["transcript_expected"] = str(transcript_path(cwd, session_id))
 
     if args.dry_run:

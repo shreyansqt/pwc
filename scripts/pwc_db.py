@@ -56,7 +56,7 @@ def _migrate(conn) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_tasks_archived ON tasks(archived_at)"
     )
-    for col in ("harness", "model"):
+    for col in ("harness", "model", "runhost"):
         if col not in cols:
             conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} TEXT")
 

@@ -200,11 +200,12 @@ tracking): find brings new work in; show tells you where existing work stands.
    then `add-ref --kind identity --ref-type <t> --value <raw-id>` to attach its
    identity reference, then `log-event --kind new-task`. Report back what was queued.
 
-   **Set `--harness` / `--model` by the workspace's routing policy.** Read it once
+   **Set `--harness` / `--model` (and `--runhost`, if a rule names one) by the
+   workspace's routing policy.** Read it once
    per run with `pwc sources routing`: apply the first matching rule (by task type /
    traits), else the `default`. This decides which coding agent (claude, opencode,
-   …) and model `/pwc-start-work` will dispatch the task's worker in — set at queue
-   time so the user can veto it in the same confirmation. Show the choice with each
+   …), model, and machine `/pwc-start-work` will dispatch the task's worker on — set
+   at queue time so the user can veto it in the same confirmation. Show the choice with each
    candidate only when it deviates from the default (a non-default harness or model
    is worth a mention; the default is noise). If routing returns `{}`, omit both
    flags — everything defaults to claude with its default model, and say nothing.

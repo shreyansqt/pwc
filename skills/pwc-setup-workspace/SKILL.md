@@ -107,9 +107,18 @@ depends on the exact contents, so it's safe to re-run anytime to adjust.
    the priority model, rules are judgment guidance, not a mechanical matcher — the
    `why` on each rule is what lets the coordinator deviate sensibly.
 
+6c. **Register remote runhosts (optional)** — always-on machines workers can be
+   dispatched to over SSH + tmux (they survive the laptop sleeping). Skip unless
+   the user has one. Shape, as a top-level `"runhosts"` object:
+   `{"<name>": {"ssh": "<ssh-config alias>", "workspace_root": "<remote path of this workspace>", "pre": "<how to bring the connection up, e.g. a Tailscale check>", "notes": "<what it's good for / can't reach>"}}`.
+   Confirm key-auth SSH works and the workspace repos exist at `workspace_root`
+   on the host; note that remote workers can't reach this machine's MCP
+   connectors, VPN-gated databases, or a browser. A task is routed there via its
+   `runhost` field (settable by routing rules or per task).
+
 7. **Write the config** by piping the assembled JSON to `pwc sources set --json -`.
    The shape is
-   `{"sources": {"<name>": {"enabled": <bool>, "id_convention": "...", ...params}}, "id_fallback": "task-slug", "skill_hints": {...}, "priority": {"model": "...", "tiers": {...}}, "routing": {...}}`.
+   `{"sources": {"<name>": {"enabled": <bool>, "id_convention": "...", ...params}}, "id_fallback": "task-slug", "skill_hints": {...}, "priority": {"model": "...", "tiers": {...}}, "routing": {...}, "runhosts": {...}}`.
    Heed any validation warnings it prints (e.g. an enabled source missing a required
    field) and fix them with the user before finishing.
 

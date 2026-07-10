@@ -28,8 +28,13 @@ of the way.
 
 - `pwc detail --task <id>` — the task's fields, refs, and
   event timeline; the basis for the cwd, the resume decision, the seed prompt, and
-  the dispatch target (`harness` + `model`, set at queue time by the routing policy;
-  NULL harness = claude, NULL model = the harness's default).
+  the dispatch target (`harness` + `model` + `runhost`, set at queue time by the
+  routing policy; NULL harness = claude, NULL model = the harness's default,
+  NULL runhost = this machine).
+- `pwc sources runhosts` — the named remote machines workers can run on
+  (`{name: {ssh, workspace_root, …}}`, or `{}`). Resolve a task's `runhost` here
+  to get the `--ssh` target and to map the task's `workdir` onto the REMOTE
+  workspace root (`<workspace_root>/<workdir>` is the remote cwd).
   Read it for *routing* — workdir, whether there's a session to resume, and the refs
   to name in the seed. Do **not** use it as license to go read the linked thread/PR/
   Jira yourself; pulling that underlying content into the coordinator's context is the
@@ -37,7 +42,7 @@ of the way.
   the substance.
 - `pwc worker-status --session-ids <uuid>` — whether the task's existing
   session (if any) is currently running.
-- `pwc spawn --task <id> --cwd <dir> [--harness <h>] [--model <m>] --session-id <uuid> [--resume] [--prompt -] [--name "<id> · <gist>"]`
+- `pwc spawn --task <id> --cwd <dir> [--harness <h>] [--model <m>] [--ssh <target> --runhost <name>] --session-id <uuid> [--resume] [--prompt -] [--name "<id> · <gist>"]`
   — open the worker tab and launch the task's harness (default claude) with the seed
   as its prompt, so it **auto-submits the seed on startup** (the worker starts working
   immediately; there is no review-then-Enter step). Prints
@@ -326,6 +331,28 @@ of the way.
 
 ## Notes
 
+- **Remote workers (task `runhost` set).** The worker runs on that machine inside
+  a **remote tmux session** — it survives the laptop sleeping and the tab closing;
+  the iTerm tab is just a viewport. Deltas from a local dispatch:
+  - Resolve the runhost via `pwc sources runhosts`: pass `--ssh <its ssh>` and
+    `--runhost <name>` to spawn, and pass `--cwd` as the **remote** path
+    (`<workspace_root>/<task workdir>`). Run any `pre` step the runhost config
+    names (e.g. checking Tailscale is up) before spawning.
+  - **claude harness only for now** — spawn rejects opencode/codex remotely
+    (their session pre-allocation would have to run on the remote host).
+  - Everything session-based works: same pre-allocated uuid, liveness via
+    `pwc worker-status --json -` with `"ssh"` in the row, resume via the same
+    spawn call with `--resume` (spawn checks the remote transcript itself).
+  - The spawn result includes `attach_command` — give it to the user as the way
+    to reopen the worker's viewport if they close the tab (`ssh -t <host> tmux
+    attach -t pwc-<task>`); closing the tab does NOT stop a remote worker, say so.
+  - **First dispatch into a directory claude has never seen on that host stops at
+    the folder-trust prompt** ("Yes, I trust this folder") before the seed runs —
+    tell the user their first action in the tab is pressing Enter once, or
+    pre-trust the repo dirs during runhost setup.
+  - Remote workers can't reach this machine's task database, MCP connectors, the
+    VPN-gated prod DB, or a browser — route repo-centric work there, keep
+    prod-data investigation local.
 - **Non-claude harnesses (task `harness` = opencode, codex, …).** Dispatch works the
   same — build the seed, `pwc spawn --harness <h> [--model <m>]` — with these deltas:
   - **opencode and codex are session-tracked like claude** (both verified

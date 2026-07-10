@@ -24,7 +24,7 @@ from _common import days_ago_iso, emit, fail, now_iso
 # small — one status line's worth per task.
 _SUMMARY_COLS = (
     "id, type, title, status, priority, parked, parked_reason, "
-    "archived_at, workdir, session_id, harness, model, last_event_at"
+    "archived_at, workdir, session_id, harness, model, runhost, last_event_at"
 )
 
 
@@ -243,12 +243,12 @@ def cmd_add_task(args):
         ts = now_iso()
         conn.execute(
             "INSERT INTO tasks (id, type, title, status, priority, notes, "
-            "  parked, parked_reason, workdir, harness, model, inline, "
+            "  parked, parked_reason, workdir, harness, model, runhost, inline, "
             "  created_at, updated_at, last_event_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (tid, args.type, args.title, args.status, args.priority, args.notes,
              1 if args.parked else 0, args.parked_reason, args.workdir,
-             args.harness, args.model,
+             args.harness, args.model, args.runhost,
              1 if args.inline else 0, ts, ts, ts),
         )
         _insert_event(conn, task_id=tid, source="coordinator", kind="created",
@@ -264,7 +264,7 @@ def cmd_update_task(args):
         tid = old["id"]  # canonical
         sets, params, changes = [], [], []
         for field in ("title", "status", "priority", "notes", "parked_reason",
-                      "workdir", "harness", "model"):
+                      "workdir", "harness", "model", "runhost"):
             val = getattr(args, field)
             if val is not None:
                 sets.append(f"{field} = ?")
@@ -583,6 +583,8 @@ def build_parser() -> argparse.ArgumentParser:
                                      "(claude|opencode|codex|...); default claude")
     s.add_argument("--model", help="model override for the harness (e.g. opus, "
                                    "zai/glm-4.7); default = the harness's default")
+    s.add_argument("--runhost", help="named machine (sources.json runhosts key) the "
+                                     "worker runs on; default = this machine")
     s.add_argument("--parked", action="store_true")
     s.add_argument("--parked-reason")
     s.add_argument("--inline", action="store_true")
@@ -597,6 +599,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--workdir")
     s.add_argument("--harness")
     s.add_argument("--model")
+    s.add_argument("--runhost")
     s.add_argument("--parked-reason")
     s.add_argument("--parked", type=int, choices=(0, 1))
     s.set_defaults(func=cmd_update_task)
