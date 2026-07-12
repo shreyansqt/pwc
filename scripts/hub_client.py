@@ -16,12 +16,25 @@ is a clean error, not silent divergence.
 from __future__ import annotations
 
 import json
+import ssl
 import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
 
 from _common import emit, fail
+
+
+def _ssl_context() -> ssl.SSLContext:
+    """A context that actually has CA certificates. Some python builds (e.g.
+    MacPorts) ship with an empty default trust store; fall back to the system
+    bundle so HTTPS verification works instead of failing closed."""
+    ctx = ssl.create_default_context()
+    if ctx.cert_store_stats().get("x509_ca", 0) == 0:
+        system_bundle = Path("/etc/ssl/cert.pem")
+        if system_bundle.exists():
+            ctx = ssl.create_default_context(cafile=str(system_bundle))
+    return ctx
 
 # argparse Namespace fields that are routing, not operation arguments.
 _SKIP = {"workspace", "func", "cmd"}
@@ -51,11 +64,14 @@ def run(op: str, args, store: dict) -> None:
         headers={
             "Content-Type": "application/json",
             "Authorization": f"Bearer {_token(store)}",
+            # urllib's default "Python-urllib/3.x" UA trips Cloudflare's browser
+            # integrity check (error 1010) — identify as a real client instead.
+            "User-Agent": "pwc-hub-client/1.0",
         },
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=30, context=_ssl_context()) as resp:
             # Re-emit through the same formatter local mode uses, so output is
             # byte-identical between backends (the hub sends compact JSON).
             emit(json.loads(resp.read().decode()))
