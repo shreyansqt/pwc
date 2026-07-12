@@ -34,7 +34,28 @@ pwc/                      # this repo — the SOURCE (develop & commit here)
   install.sh              # symlink skills globally + init a workspace's task database
 ```
 
-Runtime state lives **in each workspace**, never here: `<workspace>/.pwc/taskdb.db`.
+Runtime state lives **in each workspace**, never here: `<workspace>/.pwc/taskdb.db`
+— or, for a **hub-backed** workspace, in your own deployed hub (see below).
+
+## The hub (optional): your task databases in your own Cloudflare account
+
+By default every workspace is a local SQLite file. `hub/` is a public template —
+a small Worker + D1 database — that any workspace can graduate onto, so the task
+database survives any single machine, is restorable point-in-time (D1 Time
+Travel), and is writable by workers on remote machines over HTTPS (no VPN):
+
+- Deploy your own instance (`hub/README.md`; keep the real ids in a small
+  private repo). One deployment serves many workspaces.
+- Flip a workspace: `pwc export > dump.json`, POST it to `/w/<name>/import`,
+  write `<workspace>/.pwc/store.json` (`{"store": "hub", "url": …, "workspace":
+  …, "token_file": …}`), and rename the old `taskdb.db` away. `pwc export` works
+  against the hub too — leaving is one command, there is no lock-in.
+- Skills and the CLI are backend-blind: `pwc summary` is `pwc summary` either
+  way (`hub/conformance.py` enforces that — 26/26 ops structurally identical).
+- `sources.json`, `store.json`, and worker sessions/transcripts stay per-machine;
+  only the task database moves.
+
+Design + rejected alternatives: [`docs/hub-design.md`](docs/hub-design.md).
 
 ## Install
 
