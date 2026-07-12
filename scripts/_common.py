@@ -52,6 +52,31 @@ def config_path(workspace: str | os.PathLike[str] | None = None) -> Path:
     return root / ".pwc" / "sources.json"
 
 
+def store_config(workspace: str | os.PathLike[str] | None = None) -> dict:
+    """The workspace's task-store config from <workspace>/.pwc/store.json.
+
+    Absent file = {"store": "local"} — today's behavior, forever the default.
+    A hub-backed workspace looks like:
+      {"store": "hub", "url": "https://…workers.dev", "workspace": "smarta",
+       "token_file": "~/.config/pwc/hub-token"}
+    Only the task DATABASE moves to the hub; sources.json (and store.json itself)
+    stay local files — they're config, not state.
+    """
+    root = Path(workspace).resolve() if workspace else find_workspace_root()
+    p = root / ".pwc" / "store.json"
+    if not p.exists():
+        return {"store": "local"}
+    try:
+        cfg = _json.loads(p.read_text())
+    except (ValueError, OSError) as e:
+        fail(f"could not read store config at {p}: {e}")
+    if cfg.get("store") == "hub":
+        for key in ("url", "workspace"):
+            if not cfg.get(key):
+                fail(f"store config at {p} is store=hub but missing {key!r}")
+    return cfg
+
+
 def now_iso() -> str:
     """Current time, ISO8601 UTC, second precision (sorts lexically)."""
     return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
