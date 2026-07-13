@@ -360,7 +360,7 @@ def _task_sessions(task_id: str, workspace=None) -> list[dict]:
     that was ever retried."""
     cmd = ["pwc"]
     if workspace:
-        cmd += ["--workspace", workspace]
+        cmd += ["--workspace", str(workspace)]
     cmd += ["sessions", "--task", task_id]
     try:
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
@@ -590,16 +590,48 @@ def session_owners(workspace=None, *, all_workspaces: bool = False) -> dict[str,
     owners: dict[str, str] = {}
     spaces = discover_workspaces() if all_workspaces else [workspace]
     for space in spaces:
+        # 1. The event log — the historical record, and still the fallback for a
+        #    workspace whose task_sessions has not been backfilled yet.
         for e in _events_of(space) if space else []:
             if e.get("kind") != "dispatched" or not e.get("task_id"):
                 continue
             m = _SESSION_RE.search(e.get("detail") or "")
             if m:
                 owners[m.group(1)] = e["task_id"]
-        # Live rows win — a running worker's current session is the freshest truth.
+        # 2. task_sessions — the AUTHORITATIVE provenance table. It holds every
+        #    session that ever ran each task (including ones a re-dispatch used to
+        #    overwrite and the old sweep used to erase), so it supersedes the scrape.
+        for t in _all_task_ids(space):
+            for sess in _task_sessions(t, space):
+                owners[sess["session_id"]] = t
+        # 3. Live rows win — a running worker's current session is the freshest truth.
         for t in _all_sessions(space):
             owners[t["session_id"]] = t["id"]
     return owners
+
+
+def _all_task_ids(workspace=None) -> list[str]:
+    """EVERY task id in the workspace — including ARCHIVED ones.
+
+    `summary --all` means "every non-archived task", not "every task": archived tasks
+    are a separate query (`--archived`). Attribution that used only `--all` silently
+    dropped every archived task's sessions (smarta has 19 archived tasks), which is
+    precisely the kind of quiet under-count this whole cost pipeline exists to
+    eliminate. An archived task's spend is just as real as any other's.
+    """
+    ids: list[str] = []
+    for flag in ("--all", "--archived"):
+        cmd = ["pwc"]
+        if workspace:
+            cmd += ["--workspace", str(workspace)]
+        cmd += ["summary", flag]
+        try:
+            out = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if out.returncode == 0:
+                ids += [r["id"] for r in json.loads(out.stdout)]
+        except (OSError, subprocess.SubprocessError, ValueError):
+            continue
+    return list(dict.fromkeys(ids))
 
 
 def cmd_backfill(args):
