@@ -59,10 +59,13 @@ def _migrate(conn) -> None:
     for col in ("harness", "model", "runhost"):
         if col not in cols:
             conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} TEXT")
-    # task_usage is created by schema.sql on a fresh DB; CREATE TABLE IF NOT EXISTS
-    # already makes it a no-op on an existing one, so nothing to ALTER here — but a
-    # DB that predates the table gets it from the same script, since init() runs
-    # schema.sql before this. Left explicit so the next column add has a home.
+    # task_usage and task_sessions are created by schema.sql on every init (CREATE
+    # TABLE IF NOT EXISTS), so a DB that predates them picks them up there — nothing
+    # to ALTER. After creating task_sessions, backfill it from the append-only
+    # `dispatched` events: existing DBs have dispatch history that tasks.session_id
+    # never kept (the old sweep NULLed it on worker death; a re-dispatch overwrote
+    # it). Run `pwc backfill-sessions` for that — it is idempotent and explicit rather
+    # than a silent side effect of init.
 
 
 def row_to_dict(row: sqlite3.Row | None) -> dict | None:

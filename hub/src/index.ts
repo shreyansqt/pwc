@@ -227,6 +227,8 @@ interface SetSessionBody {
 	task: string;
 	session_id: string;
 	workdir?: string | null;
+	harness?: string | null;
+	model?: string | null;
 }
 interface ClearSessionBody {
 	task: string;
@@ -249,6 +251,7 @@ interface ExportShape {
 	task_aliases: Record<string, unknown>[];
 	task_refs: Record<string, unknown>[];
 	events: Record<string, unknown>[];
+	task_sessions: Record<string, unknown>[];
 }
 
 // ── row helpers ─────────────────────────────────────────────────────────────
@@ -555,6 +558,13 @@ async function opLogEvent(db: D1Database, workspace: string, body: Partial<LogEv
 }
 
 /** Record the pre-allocated worker session id at spawn, atomic with a dispatched event. */
+/**
+ * Record the worker session at spawn. Appends to task_sessions (the durable
+ * provenance — every session that ever ran this task) AND points tasks.session_id at
+ * it (just "the one to resume next"). A RESUME of an existing session hits the same
+ * task_sessions row (PK is workspace+task+session) and refreshes started_at — it is
+ * the same session reopened, not a new one.
+ */
 async function opSetSession(db: D1Database, workspace: string, body: Partial<SetSessionBody>) {
 	if (!body.task) fail('set-session: task is required');
 	if (!body.session_id) fail('set-session: session_id is required');
@@ -568,8 +578,16 @@ async function opSetSession(db: D1Database, workspace: string, body: Partial<Set
 		params.push(body.workdir);
 	}
 	params.push(workspace, tid);
+	const harness = body.harness ?? task.harness ?? null;
+	const model = body.model ?? task.model ?? null;
 	await db.batch([
 		db.prepare(`UPDATE tasks SET ${sets.join(', ')} WHERE workspace = ? AND id = ?`).bind(...params),
+		db
+			.prepare(
+				'INSERT INTO task_sessions (workspace, task_id, session_id, harness, model, started_at) VALUES (?,?,?,?,?,?) ' +
+					'ON CONFLICT(workspace, task_id, session_id) DO UPDATE SET started_at = excluded.started_at',
+			)
+			.bind(workspace, tid, body.session_id, harness, model, ts),
 		db
 			.prepare('INSERT INTO events (workspace, task_id, at, source, kind, detail) VALUES (?,?,?,?,?,?)')
 			.bind(workspace, tid, ts, 'coordinator', 'dispatched', `session ${body.session_id}`),
@@ -577,6 +595,63 @@ async function opSetSession(db: D1Database, workspace: string, body: Partial<Set
 	]);
 	const row = await db.prepare('SELECT * FROM tasks WHERE workspace = ? AND id = ?').bind(workspace, tid).first<TaskRow>();
 	return omitWorkspace(row as unknown as Record<string, unknown>);
+}
+
+/** Every session that has ever run this task, oldest first (the provenance record). */
+async function opSessions(db: D1Database, workspace: string, body: Partial<{ task: string }>) {
+	if (!body.task) fail('sessions: task is required');
+	const task = await requireTask(db, workspace, body.task);
+	const { results } = await db
+		.prepare(
+			'SELECT session_id, harness, model, started_at FROM task_sessions ' +
+				'WHERE workspace = ? AND task_id = ? ORDER BY started_at, session_id',
+		)
+		.bind(workspace, task.id)
+		.all();
+	return results ?? [];
+}
+
+/**
+ * Rebuild task_sessions from the append-only `dispatched` event log.
+ *
+ * Every spawn wrote a `dispatched` event carrying its session id, and events are never
+ * mutated — so the full history survived even where tasks.session_id did not (the old
+ * sweep NULLed it on worker death; a re-dispatch overwrote it). The event log is thus
+ * the only complete record of what ran what, and this is the one-time repair.
+ * Idempotent.
+ */
+async function opBackfillSessions(db: D1Database, workspace: string) {
+	const { results } = await db
+		.prepare("SELECT task_id, at, detail FROM events WHERE workspace = ? AND kind = 'dispatched' AND task_id IS NOT NULL ORDER BY at, id")
+		.bind(workspace)
+		.all<{ task_id: string; at: string; detail: string | null }>();
+	const re = /\b(?:session\s+)?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|ses_[A-Za-z0-9]+)\b/;
+	const stmts = [];
+	const seen = new Set<string>();
+	for (const ev of results ?? []) {
+		const m = re.exec(ev.detail ?? '');
+		if (!m) continue;
+		const sid = m[1];
+		const key = `${ev.task_id} ${sid}`;
+		if (seen.has(key)) continue;
+		seen.add(key);
+		stmts.push(
+			db
+				.prepare(
+					'INSERT INTO task_sessions (workspace, task_id, session_id, harness, model, started_at) ' +
+						'SELECT ?, ?, ?, harness, model, ? FROM tasks WHERE workspace = ? AND id = ? ' +
+						'ON CONFLICT(workspace, task_id, session_id) DO UPDATE SET ' +
+						'  started_at = MIN(task_sessions.started_at, excluded.started_at)',
+				)
+				.bind(workspace, ev.task_id, sid, ev.at, workspace, ev.task_id),
+		);
+	}
+	if (stmts.length) await db.batch(stmts);
+	return {
+		dispatch_events_scanned: (results ?? []).length,
+		sessions_restored: stmts.length,
+		note: 'rebuilt from the append-only `dispatched` events — the only record that survived the old clear-session sweep and re-dispatch overwrites',
+	};
 }
 
 /**
@@ -753,17 +828,19 @@ async function opMerge(db: D1Database, workspace: string, body: Partial<MergeBod
 
 /** New op: dump every row for this workspace, workspace column stripped. */
 async function opExport(db: D1Database, workspace: string): Promise<ExportShape> {
-	const [tasks, aliases, refs, events] = await Promise.all([
+	const [tasks, aliases, refs, events, sessions] = await Promise.all([
 		db.prepare('SELECT * FROM tasks WHERE workspace = ? ORDER BY created_at, id').bind(workspace).all(),
 		db.prepare('SELECT * FROM task_aliases WHERE workspace = ? ORDER BY created_at, alias').bind(workspace).all(),
 		db.prepare('SELECT * FROM task_refs WHERE workspace = ? ORDER BY id').bind(workspace).all(),
 		db.prepare('SELECT * FROM events WHERE workspace = ? ORDER BY id').bind(workspace).all(),
+		db.prepare('SELECT * FROM task_sessions WHERE workspace = ? ORDER BY started_at, session_id').bind(workspace).all(),
 	]);
 	return {
 		tasks: tasks.results.map((r) => omitWorkspace(r as Record<string, unknown>)),
 		task_aliases: aliases.results.map((r) => omitWorkspace(r as Record<string, unknown>)),
 		task_refs: refs.results.map((r) => omitWorkspace(r as Record<string, unknown>)),
 		events: events.results.map((r) => omitWorkspace(r as Record<string, unknown>)),
+		task_sessions: sessions.results.map((r) => omitWorkspace(r as Record<string, unknown>)),
 	};
 }
 
@@ -794,6 +871,14 @@ async function opImport(db: D1Database, workspace: string, body: Partial<ExportS
 			db
 				.prepare(`INSERT INTO task_aliases (workspace, ${cols.join(',')}) VALUES (?, ${cols.map(() => '?').join(',')})`)
 				.bind(workspace, ...cols.map((c) => a[c]))
+		);
+	}
+	for (const sess of body.task_sessions ?? []) {
+		const cols = Object.keys(sess);
+		statements.push(
+			db
+				.prepare(`INSERT INTO task_sessions (workspace, ${cols.join(',')}) VALUES (?, ${cols.map(() => '?').join(',')})`)
+				.bind(workspace, ...cols.map((c) => sess[c]))
 		);
 	}
 	// task_refs and events carry an `id` field in the export shape (useful for
@@ -858,6 +943,8 @@ type Op =
 	| 'add-ref'
 	| 'log-event'
 	| 'set-session'
+	| 'sessions'
+	| 'backfill-sessions'
 	| 'clear-session'
 	| 'archive'
 	| 'promote'
@@ -878,6 +965,8 @@ const KNOWN_OPS: ReadonlySet<string> = new Set<Op>([
 	'add-ref',
 	'log-event',
 	'set-session',
+	'sessions',
+	'backfill-sessions',
 	'clear-session',
 	'archive',
 	'promote',
@@ -915,6 +1004,10 @@ async function handleOp(db: D1Database, workspace: string, op: Op, body: Record<
 			return opAddRef(db, workspace, body as Partial<AddRefBody>);
 		case 'log-event':
 			return opLogEvent(db, workspace, body as Partial<LogEventBody>);
+		case 'sessions':
+			return opSessions(db, workspace, body);
+		case 'backfill-sessions':
+			return opBackfillSessions(db, workspace);
 		case 'set-session':
 			return opSetSession(db, workspace, body as Partial<SetSessionBody>);
 		case 'clear-session':

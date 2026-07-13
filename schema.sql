@@ -23,9 +23,14 @@ CREATE TABLE IF NOT EXISTS tasks (
                                                -- (finished): archiving hides a task while PRESERVING its
                                                -- real status, and records WHEN it left. Surfaced only
                                                -- via summary --archived.
-  session_id    TEXT,                          -- pre-allocated worker session uuid (NULL if none;
-                                               -- claude-harness only — other harnesses can't
-                                               -- pre-allocate, so their tasks keep this NULL)
+  session_id    TEXT,                          -- the session to RESUME NEXT (the most recent one).
+                                               -- A convenience pointer, NOT the provenance record —
+                                               -- task_sessions holds every session that ever ran this
+                                               -- task, append-only. Do NOT null this when a worker
+                                               -- dies: a dead process is not a gone session (the
+                                               -- transcript persists and stays resumable), and
+                                               -- clearing it breaks both resume and cost measurement.
+                                               -- Liveness is computed by pgrep, never stored here.
   harness       TEXT,                          -- which coding agent runs this task's worker
                                                -- (claude|opencode|codex|...); NULL = claude.
                                                -- Set at queue time by the routing policy
@@ -94,6 +99,43 @@ CREATE TABLE IF NOT EXISTS events (
 
 CREATE INDEX IF NOT EXISTS idx_events_task ON events(task_id, at);
 CREATE INDEX IF NOT EXISTS idx_events_at ON events(at);
+
+-- Every session that has EVER run this task. Append-only; nothing is ever deleted.
+--
+-- A task does not have *a* session — it has a HISTORY of them, and this is not an
+-- edge case. You resume a task days later (same session, reopened), a worker crashes
+-- and you retry (new session), or — now that routing exists — you re-run the same task
+-- on a different model (new session, new harness). Real data from this workspace:
+-- yotp-find-testers was dispatched 3x on ONE session (resume working correctly), while
+-- pwc-route-tests ran on TWO different sessions in one day (the first opencode worker
+-- was killed after a seed bug, the second did the work).
+--
+-- `tasks.session_id` is a single slot, so it silently OVERWRITES: pwc-route-tests' first
+-- session — with real tokens spent — vanished from the task row entirely. And because
+-- one slot cannot express "no live worker," /pwc-show-work's sweep used to NULL it when
+-- a worker died (`clear-session`) — i.e. exactly when a task FINISHED — destroying the
+-- only pointer to its transcript. That made finished tasks BOTH unresumable (start-work
+-- would launch cold instead of `claude --resume <uuid>`) and unpriceable (`pwc cost`
+-- finds the transcript by that id). This table is the fix: provenance lives here,
+-- permanently, and tasks.session_id degrades to a convenience pointer.
+--
+-- Liveness is NEVER stored — `pwc worker-status` runs pgrep and computes it on demand.
+-- A dead PROCESS is not a gone SESSION: the transcript persists on disk and stays
+-- resumable indefinitely.
+CREATE TABLE IF NOT EXISTS task_sessions (
+  task_id    TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  session_id TEXT NOT NULL,                    -- the HARNESS's session id (claude uuid,
+                                               -- opencode ses_…, codex uuid) — the id in
+                                               -- the worker process's argv, NOT an iTerm id
+  harness    TEXT,                             -- which agent ran it (claude|opencode|codex)
+  model      TEXT,                             -- the model it was dispatched with
+  started_at TEXT NOT NULL,                    -- ISO8601 UTC of the dispatch
+  PRIMARY KEY (task_id, session_id)            -- a resumed session is the SAME row
+                                               -- (re-dispatch just updates started_at)
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_sessions_task ON task_sessions(task_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_task_sessions_session ON task_sessions(session_id);
 
 -- What a session actually CONSUMED. TOKENS, not dollars — deliberately.
 --

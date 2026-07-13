@@ -352,22 +352,55 @@ def measure(conn, *, task_id: str | None, session_id: str, harness: str) -> list
     return written, reported
 
 
+def _task_sessions(task_id: str, workspace=None) -> list[dict]:
+    """EVERY session that ever ran this task (via `pwc sessions`), not just the
+    latest. A task is routinely run by more than one session — resumed days later,
+    retried after a crash, re-run on a different model — and `tasks.session_id` holds
+    only the most recent, so pricing off that alone silently under-reports every task
+    that was ever retried."""
+    cmd = ["pwc"]
+    if workspace:
+        cmd += ["--workspace", workspace]
+    cmd += ["sessions", "--task", task_id]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        return json.loads(out.stdout) if out.returncode == 0 else []
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return []
+
+
 def cmd_task(args):
     row = _task_row(args.task, args.workspace)
     conn = usage_db(args.workspace)
-    if not row["session_id"]:
+
+    # Price EVERY session this task ever ran, not just the current one. Fall back to
+    # tasks.session_id for a task dispatched before task_sessions existed and not yet
+    # backfilled (`pwc backfill-sessions`).
+    sessions = _task_sessions(row["id"], args.workspace)
+    if not sessions and row["session_id"]:
+        sessions = [{"session_id": row["session_id"], "harness": row["harness"],
+                     "model": row["model"]}]
+    if not sessions:
         emit({"task": args.task, "cost_usd": None, "tokens": None,
               "why": "no session recorded — an inline task, or one never dispatched, "
                      "has no transcript to measure"})
         return
-    harness = row["harness"] or "claude"
+
+    written, reported = [], None
     with conn:
-        written, reported = measure(conn, task_id=row["id"],
-                                    session_id=row["session_id"], harness=harness)
+        for sess in sessions:
+            harness = sess.get("harness") or row["harness"] or "claude"
+            got, rep = measure(conn, task_id=row["id"],
+                               session_id=sess["session_id"], harness=harness)
+            written.extend(got)
+            if rep is not None:
+                reported = (reported or 0.0) + rep
+    harness = row["harness"] or "claude"
     if not written:
         emit({"task": args.task, "cost_usd": None, "tokens": None,
-              "why": f"no usage found in the {harness} store for session "
-                     f"{row['session_id']} (transcript pruned, or never ran)"})
+              "sessions": [s["session_id"] for s in sessions],
+              "why": f"no usage found in the harness store for "
+                     f"{len(sessions)} session(s) (transcript pruned, or never ran)"})
         return
     table_models = models_mod.table()["models"]
     total = 0.0
@@ -376,14 +409,26 @@ def cmd_task(args):
     for entry in written:
         model_row = _match_model(entry["model"], table_models)
         usd = _price_row(entry, model_row)
+        spent = any(entry.get(k) for k in _ZERO)
         if usd is None:
-            unpriced.append(entry["model"])
+            # A ZERO-TOKEN session is not an unpriceable one — it just never ran (a
+            # worker killed before it did anything, e.g. the seed never landed). It
+            # contributes nothing, so it must not poison the task's total; only a
+            # session that actually SPENT tokens we can't price is a real gap.
+            if spent:
+                unpriced.append(entry["model"])
+            else:
+                usd = 0.0
         else:
             total += usd
         lines.append({**entry, "cost_usd": usd,
-                      "priced_as": model_row["key"] if model_row else None})
+                      "priced_as": model_row["key"] if model_row else None,
+                      "ran": spent})
     out = {
-        "task": args.task, "harness": harness, "session_id": row["session_id"],
+        "task": args.task, "harness": harness,
+        "session_id": row["session_id"],          # the one to resume next
+        "sessions": [s["session_id"] for s in sessions],  # every one that ever ran it
+        "session_count": len(sessions),
         "cost_usd": round(total, 4) if not unpriced else None,
         "by_model": lines,
         "note": _subscription_note(harness),

@@ -1,0 +1,24 @@
+# Not secrets for the Worker — these are for the WRANGLER CLI, so it talks to the
+# right Cloudflare account.
+#
+# The problem: `wrangler` keeps ONE global OAuth session
+# (~/Library/Preferences/.wrangler/config/default.toml). If that session is a client's
+# account (e.g. smarta), every wrangler command in this repo silently targets THEIR
+# account — `wrangler d1 execute` against a client's production Cloudflare is not a
+# mistake you want to make. And `wrangler login` would overwrite the client session,
+# which you also don't want.
+#
+# The fix: env vars TAKE PRECEDENCE over the global OAuth session, so you can hold
+# both identities at once — OAuth for the client, a scoped API token for this project.
+# Nothing is logged out, nothing is clobbered.
+#
+# Source these before running any wrangler command in hub/:
+#
+#   export CLOUDFLARE_API_TOKEN=$(cat ~/.config/pwc/cf-api-token)
+#   export CLOUDFLARE_ACCOUNT_ID=0c685faea5fb6c9f889a8f96a9a8e959   # Personal Account
+#
+# Verify which account you're pointed at BEFORE any destructive command:
+#   npx wrangler d1 list        # should show pwc-hub, not the client's databases
+#
+# The token is a Cloudflare API token (Workers + D1 write) for the personal account.
+# It is NOT in this repo — it lives at ~/.config/pwc/cf-api-token (chmod 600).

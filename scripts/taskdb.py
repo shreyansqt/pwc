@@ -335,30 +335,138 @@ def cmd_log_event(args):
 
 
 def cmd_set_session(args):
-    """Record the pre-allocated worker session id at spawn, atomic with a dispatched event."""
+    """Record the worker session at spawn. Appends to task_sessions AND points
+    tasks.session_id at it, atomically with a `dispatched` event.
+
+    task_sessions is the durable provenance (every session that ever ran this task);
+    tasks.session_id is just "the one to resume next". A RESUME of an existing session
+    hits the same task_sessions row (PK is task+session) and refreshes started_at —
+    it is the same session, reopened, not a new one.
+    """
     conn = pwc_db.connect(args.workspace)
     with conn:
-        tid = _require_task(conn, args.task)["id"]
+        task = _require_task(conn, args.task)
+        tid = task["id"]
+        ts = now_iso()
         sets = ["session_id = ?", "updated_at = ?"]
-        params = [args.session_id, now_iso()]
+        params = [args.session_id, ts]
         if args.workdir is not None:
             sets.append("workdir = ?")
             params.append(args.workdir)
         params.append(tid)
         conn.execute(f"UPDATE tasks SET {', '.join(sets)} WHERE id = ?", params)
+        # The permanent record. Harness/model default to whatever the task carries,
+        # so a session is always attributable to what actually ran it.
+        conn.execute(
+            "INSERT INTO task_sessions (task_id, session_id, harness, model, started_at) "
+            "VALUES (?,?,?,?,?) "
+            "ON CONFLICT(task_id, session_id) DO UPDATE SET started_at = excluded.started_at",
+            (tid, args.session_id, args.harness or task["harness"],
+             args.model or task["model"], ts),
+        )
         _insert_event(conn, task_id=tid, source="coordinator",
                       kind="dispatched", detail=f"session {args.session_id}")
         row = conn.execute("SELECT * FROM tasks WHERE id = ?", (tid,)).fetchone()
     emit(pwc_db.row_to_dict(row))
 
 
-def cmd_clear_session(args):
-    """Detach a task's worker session: set session_id back to NULL.
+_DISPATCH_SESSION_RE = _re.compile(
+    r"\b(?:session\s+)?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+    r"|ses_[A-Za-z0-9]+)\b")
 
-    The inverse of `set-session`. Use when a worker's session is done/gone, or was
-    recorded by mistake, and the task should read as not-dispatched. Logs a neutral
-    note (NOT a `dispatched` event — clearing is not a dispatch) and leaves status
-    untouched; change status separately with `update-task` if needed.
+
+def cmd_backfill_sessions(args):
+    """Rebuild task_sessions from the `dispatched` event log.
+
+    Every spawn wrote an append-only `dispatched` event carrying its session id, and
+    events are never mutated — so the full dispatch history survived even where
+    `tasks.session_id` did not (the old sweep NULLed it whenever a worker died, and a
+    re-dispatch silently overwrote it). That makes the event log the ONLY complete
+    record of what ran what, and this the one-time repair.
+
+    Idempotent: re-running just re-upserts the same rows.
+    """
+    conn = pwc_db.connect(args.workspace)
+    with conn:
+        rows = conn.execute(
+            "SELECT task_id, at, detail FROM events "
+            "WHERE kind = 'dispatched' AND task_id IS NOT NULL ORDER BY at, id"
+        ).fetchall()
+        seen, restored = set(), 0
+        for r in rows:
+            m = _DISPATCH_SESSION_RE.search(r["detail"] or "")
+            if not m:
+                continue
+            sid = m.group(1)
+            key = (r["task_id"], sid)
+            task = conn.execute(
+                "SELECT harness, model FROM tasks WHERE id = ?", (r["task_id"],)
+            ).fetchone()
+            if task is None:  # task was merged/deleted; its events may still exist
+                continue
+            conn.execute(
+                "INSERT INTO task_sessions (task_id, session_id, harness, model, started_at) "
+                "VALUES (?,?,?,?,?) "
+                "ON CONFLICT(task_id, session_id) DO UPDATE SET "
+                "  started_at = MIN(task_sessions.started_at, excluded.started_at)",
+                (r["task_id"], sid, task["harness"], task["model"], r["at"]),
+            )
+            if key not in seen:
+                seen.add(key)
+                restored += 1
+        multi = conn.execute(
+            "SELECT COUNT(*) n FROM (SELECT task_id FROM task_sessions "
+            "GROUP BY task_id HAVING COUNT(*) > 1)"
+        ).fetchone()["n"]
+    emit({
+        "dispatch_events_scanned": len(rows),
+        "sessions_restored": restored,
+        "tasks_with_multiple_sessions": multi,
+        "note": "rebuilt from the append-only `dispatched` events — the only record "
+                "that survived the old clear-session sweep and re-dispatch overwrites",
+    })
+
+
+def cmd_sessions(args):
+    """Every session that has ever run this task, oldest first.
+
+    The provenance record `tasks.session_id` cannot hold (it has one slot and silently
+    overwrites). This is what `pwc cost` sums over, and what tells you a task was
+    retried, resumed, or re-run on a different model.
+    """
+    conn = pwc_db.connect(args.workspace)
+    tid = _require_task(conn, args.task)["id"]
+    rows = conn.execute(
+        "SELECT session_id, harness, model, started_at FROM task_sessions "
+        "WHERE task_id = ? ORDER BY started_at, session_id",
+        (tid,),
+    ).fetchall()
+    emit(pwc_db.rows_to_dicts(rows))
+
+
+def cmd_clear_session(args):
+    """Detach a task's worker session: set session_id back to NULL. DESTRUCTIVE.
+
+    The inverse of `set-session`. Use ONLY when a session id was recorded by MISTAKE
+    (wrong id, wrong task) and should genuinely be forgotten.
+
+    Do NOT use it to mean "the worker isn't running anymore." A dead worker PROCESS is
+    not a gone SESSION: the harness transcript persists on disk and stays resumable
+    (`claude --resume <uuid>`) indefinitely, and the session id is the ONLY handle on
+    it. Clearing it silently costs you three things — resume (`/pwc-start-work` reopens
+    the prior session instead of starting cold, so a task picked up days later keeps
+    its context), cost measurement (`pwc cost` finds the transcript by this id), and
+    the provenance record of what actually did the work.
+
+    Liveness is COMPUTED, not stored: `pwc worker-status` runs pgrep and answers
+    "is a worker running?" on demand. So nulling this field to encode "not running"
+    trades a durable fact for a transient one you can re-derive in milliseconds.
+    (This was a real bug: /pwc-show-work's sweep used to clear the session of every
+    dead worker — i.e. exactly when a task FINISHED — so tasks became unresumable and
+    unpriceable at the moment their history mattered most.)
+
+    Logs a neutral note (NOT a `dispatched` event — clearing is not a dispatch) and
+    leaves status untouched; change status separately with `update-task` if needed.
     """
     conn = pwc_db.connect(args.workspace)
     with conn:
@@ -409,7 +517,7 @@ def cmd_archive(args):
     emit(pwc_db.row_to_dict(row))
 
 
-_EXPORT_TABLES = ("tasks", "task_aliases", "task_refs", "events")
+_EXPORT_TABLES = ("tasks", "task_aliases", "task_refs", "events", "task_sessions")
 
 
 def cmd_export(args):
@@ -678,9 +786,26 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--task", required=True)
     s.add_argument("--session-id", required=True)
     s.add_argument("--workdir")
+    s.add_argument("--harness", help="what ran it (defaults to the task's harness)")
+    s.add_argument("--model", help="what it was dispatched with (defaults to the task's)")
     s.set_defaults(func=cmd_set_session)
 
-    s = sub.add_parser("clear-session")
+    s = sub.add_parser("sessions",
+                       help="every session that has ever run this task (append-only)")
+    s.add_argument("--task", required=True)
+    s.set_defaults(func=cmd_sessions)
+
+    s = sub.add_parser(
+        "backfill-sessions",
+        help="reconstruct task_sessions from the append-only `dispatched` event log "
+             "(for tasks dispatched before task_sessions existed, or whose session_id "
+             "was destroyed by the old clear-session sweep)")
+    s.set_defaults(func=cmd_backfill_sessions)
+
+    s = sub.add_parser(
+        "clear-session",
+        help="DESTRUCTIVE: NULL a task's session_id. Only for an id recorded by "
+             "MISTAKE — never to mean 'the worker stopped' (that breaks resume + cost)")
     s.add_argument("--task", required=True)
     s.set_defaults(func=cmd_clear_session)
 

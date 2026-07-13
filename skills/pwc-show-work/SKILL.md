@@ -43,11 +43,14 @@ threads) is `/pwc-find-work`.
 - `pwc worker-status --json -` — reads a JSON list of
   `{task, session_id}` on stdin, returns each with `alive: true|false`. Tests
   whether each worker session is actually still running.
-- `pwc clear-session --task <id>` — detach a finished/dead
-  worker session from a task (the task's status is left as-is). Use this in the
-  worker-status sweep when a session is `alive: false`. (The old `set-status-gone` is
-  retired along with the `gone` status — a vanished worker just stays `in-progress`
-  with its session detached.)
+- `pwc clear-session --task <id>` — **do NOT use this in the sweep.** It NULLs a task's
+  session id, which destroys the only pointer to its transcript: the task can then
+  never be resumed with its context (`/pwc-start-work` would start cold) and its cost
+  can never be measured. A dead worker process is not a gone session — the session
+  stays resumable on disk, and liveness is recomputed by `worker-status` on every
+  sweep anyway. Reserve this for the rare case where a session id was recorded by
+  mistake (wrong id, wrong task). (The old `set-status-gone` is retired along with the
+  `gone` status — a vanished worker just stays `in-progress`.)
 - `pwc stale --threshold-days <N>` — active, **not parked**
   tasks untouched for longer than N days. The staleness-sweep candidates.
 - `pwc parked-aging --threshold-days <N>` — parked tasks
@@ -78,21 +81,45 @@ threads) is `/pwc-find-work`.
    probably still running. Do NOT clear the session or change anything; report the
    task as "worker on <runhost> — host unreachable, liveness unknown" and move on.
 
-   A dead session is **death, not outcome.** For each `alive: false` result:
+   A dead session is **death, not outcome.** And crucially:
+
+   **DO NOT clear the session id when a worker dies.** A dead *process* is not a gone
+   *session*. The harness session — its full transcript and history — persists on disk
+   indefinitely and stays resumable (`claude --resume <uuid>`) for as long as the
+   transcript exists. The session id is the ONLY handle on it, and it is what makes
+   three things work: **resume** (`/pwc-start-work` reopens the prior session instead
+   of starting cold — pick a task back up two days later and it still has its
+   context), **cost** (`pwc cost` finds the transcript by that id), and liveness
+   itself.
+
+   Liveness is **computed, not stored**: `pwc worker-status` runs `pgrep` and gives a
+   live answer on demand, every sweep. So there is no need to encode "no worker
+   running" by destroying the session id — doing so trades a durable fact
+   (*this session did this work*) for a transient one (*it isn't running right now*)
+   that you can re-derive in milliseconds anyway.
+
+   So for each `alive: false` result, **report it and change nothing about the
+   session**:
    - **Ended after reporting** — the worker logged a status change / note after
      dispatch, then closed (the normal flow: work, report, close the tab). The task's
-     status is real and recent — leave it; just detach the finished `session_id`
-     (`pwc clear-session --task <id>`).
+     status is real and recent. Leave it as-is.
    - **Vanished** — the session died with nothing said since dispatch. The task
      **stays `in-progress`** (it was mid-flight and is resumable) — do not invent a new
-     status, do not infer done/failed (it may have unpushed work). Detach the session
-     and note "worker died, resumable" so the user can resume or re-decide. Surface
-     these in the briefing as the in-progress rows whose worker is no longer live.
+     status, do not infer done/failed (it may have unpushed work). Note "worker died,
+     resumable" so the user can resume or re-decide, and surface it in the briefing as
+     an in-progress row whose worker is no longer live.
      (A **remote** worker's `alive: false` is trustworthy — the host answered and the
      process is gone; only `unreachable` results are exempt from this handling.)
 
+   `pwc clear-session` still exists, but it is now a **deliberate, manual** operation
+   for the rare case where a session id was recorded by mistake (wrong id, wrong task)
+   and should genuinely be forgotten. It is **not** part of the sweep. Clearing a real
+   session's id is destructive: the transcript stays on disk but nothing points to it,
+   so the task can never be resumed with its context and its cost can never be
+   measured.
+
    If the sweep changed anything, re-run `summary`. (There is no `gone` status anymore;
-   a vanished worker is just an in-progress task with a dead session.)
+   a vanished worker is just an in-progress task whose worker is not currently live.)
 
    The sweep covers every task with a `session_id` — claude, opencode, and codex
    workers all have one (the non-claude ids are pre-created at spawn and sit in

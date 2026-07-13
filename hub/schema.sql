@@ -106,3 +106,31 @@ CREATE TABLE IF NOT EXISTS events (
 
 CREATE INDEX IF NOT EXISTS idx_events_ws_task ON events(workspace, task_id, at);
 CREATE INDEX IF NOT EXISTS idx_events_ws_at ON events(workspace, at);
+
+-- Every session that has EVER run a task. Append-only; nothing is ever deleted.
+-- Mirrors the local schema.sql table of the same name — see there for the full why.
+--
+-- Short version: a task does not have *a* session, it has a HISTORY of them (resumed
+-- days later, retried after a crash, re-run on a different model). `tasks.session_id`
+-- is a single slot, so it silently overwrote — and because one slot cannot express
+-- "no live worker", the old /pwc-show-work sweep NULLed it whenever a worker died,
+-- i.e. exactly when a task FINISHED. That destroyed the only pointer to the session's
+-- transcript, making finished tasks both unresumable (`claude --resume <uuid>`) and
+-- unpriceable (`pwc cost` finds the transcript by that id). Provenance lives here now;
+-- tasks.session_id is just "the one to resume next". Liveness is never stored — pgrep
+-- computes it on demand.
+CREATE TABLE IF NOT EXISTS task_sessions (
+  workspace  TEXT NOT NULL,
+  task_id    TEXT NOT NULL,
+  session_id TEXT NOT NULL,                    -- the HARNESS's session id (claude uuid,
+                                               -- opencode ses_…, codex uuid) — the id in
+                                               -- the worker's argv, NOT an iTerm id
+  harness    TEXT,                             -- claude|opencode|codex
+  model      TEXT,                             -- what it was dispatched with
+  started_at TEXT NOT NULL,                    -- ISO8601 UTC of the dispatch
+  PRIMARY KEY (workspace, task_id, session_id),-- a RESUMED session is the SAME row
+  FOREIGN KEY (workspace, task_id) REFERENCES tasks(workspace, id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_sessions_ws_task
+  ON task_sessions(workspace, task_id, started_at);
