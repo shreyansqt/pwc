@@ -4,7 +4,7 @@ from route import route, required_tier
 DOMAIN = "implementation"
 
 
-def _model(key, *, available=True, trusted=True, context=200_000, tiers=None,
+def _model(key, *, available=True, data_ok=True, context=200_000, tiers=None,
            cost_in=1.0, cost_out=5.0, cache_read=1.0, cache_write=1.0):
     return {
         "key": key,
@@ -12,7 +12,7 @@ def _model(key, *, available=True, trusted=True, context=200_000, tiers=None,
         "model": f"test/{key}",
         "catalog_id": f"test/{key}",
         "available": available,
-        "trusted": trusted,
+        "data_ok": data_ok,
         "context": context,
         "cost_in": cost_in,
         "cost_out": cost_out,
@@ -84,20 +84,20 @@ def test_required_tier_does_not_exceed_5():
     assert need == 5
 
 
-# ── 5. risk=prod-data only picks trusted=true models ───────────────────────────
-def test_prod_data_requires_trusted():
-    untrusted = _model("untrusted", trusted=False, tiers={DOMAIN: 4})
-    trusted = _model("trusted", trusted=True, tiers={DOMAIN: 4})
-    result = route(_profile(risk="prod-data", reasoning=3), _table(untrusted, trusted))
-    assert result["key"] == "trusted"
+# ── 5. risk=prod-data only picks data_ok=true models ───────────────────────────
+def test_prod_data_requires_data_ok():
+    blocked = _model("blocked", data_ok=False, tiers={DOMAIN: 4})
+    allowed = _model("allowed", data_ok=True, tiers={DOMAIN: 4})
+    result = route(_profile(risk="prod-data", reasoning=3), _table(blocked, allowed))
+    assert result["key"] == "allowed"
     rejected = {r["key"]: r["why"] for r in result["rejected"]}
-    assert "untrusted" in rejected
-    assert "not trusted" in rejected["untrusted"]
+    assert "blocked" in rejected
+    assert "not cleared for production data" in rejected["blocked"]
 
 
 def test_prod_data_enforces_min_tier():
-    lo = _model("lo", trusted=True, tiers={DOMAIN: 3})
-    hi = _model("hi", trusted=True, tiers={DOMAIN: 4})
+    lo = _model("lo", data_ok=True, tiers={DOMAIN: 3})
+    hi = _model("hi", data_ok=True, tiers={DOMAIN: 4})
     result = route(_profile(risk="prod-data", reasoning=3, verifiability=3),
                    _table(lo, hi))
     assert result["key"] == "hi"

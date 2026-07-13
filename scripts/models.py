@@ -88,16 +88,37 @@ _STALE_DAYS = 7.0
 # to be corrected by real outcomes (`set-tier`, written by /pwc-report-status at
 # task close). Don't treat them as authoritative; treat them as a starting bet.
 #
-# `trusted` is a SEPARATE axis from capability, and conflating the two is a real
-# bug we shipped and caught: "is this model good enough?" and "may this model see
-# production data?" are different questions. A cheap third-party model can be
-# perfectly capable and still be somewhere you don't want customer data going. So
-# trust is declared per-row, by you, and the router filters on it independently of
-# tiers. Default here: the harnesses whose providers you already have a commercial
-# relationship with (Anthropic, OpenAI) are trusted; the metered OpenRouter
-# passthroughs are not. Flip any of these in the overlay if you disagree.
+# `data_ok` — MAY THIS MODEL SEE PRODUCTION CUSTOMER DATA? A separate axis from
+# capability, because "is it good enough" and "may it see customer records" are
+# different questions; conflating them is a bug we shipped and caught (a prod-data
+# task routed to a third-party API purely for being cheap).
+#
+# The values below are NOT a claim that any provider is contractually safe. Researched
+# 2026-07-13 (docs/data-handling.md has the sources), the actual picture is:
+#
+#   - NO consumer plan carries a Data Processing Agreement. Under GDPR Art. 28,
+#     processing a client's customer data needs one with EACH processor. Claude
+#     Max/Pro and ChatGPT Plus do not come with one. That gap applies to the
+#     "data_ok" providers too — it is the real blocker, not the training toggle.
+#   - Codex on ChatGPT Plus TRAINS ON YOUR DATA BY DEFAULT (consumer policy, not the
+#     API policy), and has a second Codex-only toggle the main ChatGPT setting does
+#     not cover.
+#   - Claude Pro/Max: training is a mandatory choice (5y retention if on, 30d if
+#     off); safety-flagged conversations are retained up to 2 years and feedback
+#     ratings up to 5 years EVEN WITH TRAINING OFF.
+#   - OpenRouter models CAN be made zero-retention (`zdr: true` +
+#     `data_collection: "deny"` + `allow_fallbacks: false`), which for DeepSeek
+#     routes AWAY from its PRC first-party endpoint to a Western ZDR host. Verified:
+#     pinning DeepSeek's own endpoint with zdr:true is REFUSED outright.
+#
+# So `data_ok = false` on the OpenRouter rows is NOT "these are the dodgy ones" —
+# it is a conservative default for a freelancer handling a client's German banking
+# data with no DPA anywhere. The honest position is that prod data should ideally
+# not enter ANY of these prompts (work from schemas, anonymized fixtures, synthetic
+# repros). Flip a row in the overlay when you have a documented basis, and put the
+# basis in the overlay `note` so the reasoning outlives the decision.
 _SEED = [
-    # key, harness, dispatch model, catalog id, trusted, tiers
+    # key, harness, dispatch model, catalog id, data_ok, tiers
     ("claude/opus", "claude", "opus", "anthropic/claude-opus-4.8", True,
      {"code-review": 5, "implementation": 5, "research-writing": 5, "ops-comms": 4}),
     ("claude/fable", "claude", "fable", "anthropic/claude-fable-5", True,
@@ -132,10 +153,10 @@ def _seed_table() -> dict:
         "fetched_at": None,  # never fetched -> stale by definition
         "models": [
             {"key": key, "harness": harness, "model": model, "catalog_id": catalog,
-             "context": None, "available": None, "trusted": trusted,
+             "context": None, "available": None, "data_ok": data_ok,
              **{f: None for f in PRICE_FIELDS},
              "tiers": dict(tiers)}
-            for key, harness, model, catalog, trusted, tiers in _SEED
+            for key, harness, model, catalog, data_ok, tiers in _SEED
         ],
         "overlay": {},
     }
@@ -183,8 +204,8 @@ def merged_models(data: dict) -> list[dict]:
             row["note"] = ov["note"]
         if ov.get("available") is not None:  # a manual "don't route here" veto
             row["available"] = ov["available"]
-        if ov.get("trusted") is not None:  # "I'm fine sending real data here" (or not)
-            row["trusted"] = ov["trusted"]
+        if ov.get("data_ok") is not None:  # "I'm fine sending real data here" (or not)
+            row["data_ok"] = ov["data_ok"]
         out.append(row)
     return out
 

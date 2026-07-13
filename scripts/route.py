@@ -17,8 +17,8 @@ The decision, in order:
        "allowed to see real data" are different questions and collapsing them is a
        bug (we shipped it once and caught it: a prod-data task routed straight to a
        third-party metered API purely because it cleared the tier floor). So:
-         (a) `trusted` must be true — a privacy/contractual judgment you declare per
-             model in the table, NOT something inferred from price or capability; and
+         (a) `data_ok` must be true — a privacy judgment you declare per model in the
+             table, NOT something inferred from price or capability; and
          (b) tier >= _PROD_DATA_MIN_TIER — real data means a mistake is expensive,
              so don't economize on capability either.
 
@@ -147,10 +147,10 @@ def route(profile: dict, table: dict) -> dict:
             rejected.append({"key": key, "why": "harness unavailable "
                                                 "(not installed or not authenticated)"})
             continue
-        if risk == "prod-data" and not row.get("trusted"):
+        if risk == "prod-data" and not row.get("data_ok"):
             rejected.append({"key": key,
-                             "why": "not trusted with production data "
-                                    "(set `trusted` in the table/overlay to allow)"})
+                             "why": "not cleared for production data "
+                                    "(set `data_ok` in the table/overlay to allow)"})
             continue
         if context_need and (row.get("context") or 0) < context_need:
             rejected.append({"key": key,

@@ -244,11 +244,27 @@ tracking): find brings new work in; show tells you where existing work stands.
      which is exactly right: you can't afford a plausible-but-wrong answer you won't
      notice.
    - **`--risk`** — `none` | `outward` (a human will read the output as-is: a Slack
-     message, a PR comment, a customer email) | `prod-data` (the work touches real
-     production/customer data). `prod-data` is a hard gate, not a hint: it restricts
-     routing to models explicitly marked `trusted` in the table AND raises the
-     capability floor. **Never** pass `prod-data` loosely, and never omit it when it
-     applies.
+     message, a PR comment, a customer email) | `prod-data`.
+
+     **`prod-data` means real customer records will LITERALLY ENTER THE PROMPT** — you
+     will paste a customer's transactions in, run a query against production and feed
+     back the rows, attach a real export. It does **not** mean "this code runs near a
+     database" or "this service touches customer data in production." Reviewing a
+     diff, implementing a feature, refining a ticket, writing a migration: the model
+     sees *code*, not customer records. Those are `none`.
+
+     Getting this wrong is expensive in both directions. Over-tagging pins routine
+     work to the most restricted (and most expensive) models for no privacy benefit —
+     the model never saw a customer record either way. Under-tagging leaks real data
+     to a surface you didn't choose. So ask the concrete question: *will a customer's
+     actual data be in the text I send?*
+
+     When it IS `prod-data`, it's a hard gate: routing is restricted to models marked
+     `data_ok` in the table AND the capability floor rises. But note the honest
+     position (docs/data-handling.md): with consumer plans there is **no Data
+     Processing Agreement with any provider**, so the real answer is usually *don't
+     put the customer data in a prompt at all* — work from schemas, anonymized
+     fixtures, or a synthetic reproduction. Suggest that before routing it anywhere.
    - **`--context-need`** (optional) — tokens of context the work needs held at once.
      Pass it when a task obviously needs a lot (a big refactor across many files);
      omit otherwise.
