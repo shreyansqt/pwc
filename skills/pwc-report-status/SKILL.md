@@ -118,6 +118,50 @@ worker to.
    Prefer the investigation's directory (the `_playground/<YYYY-MM>/<key>-<slug>/`
    leaf) over each file. If it's already attached, don't re-add it.
 
+6. **On `done` only — measure what it cost, and rate the model that ran it.** This is
+   the feedback loop that makes routing get *better* instead of staying a guess.
+
+   **a. Measure.** Run `pwc cost --task <id>`. This re-reads the worker session's
+   actual token usage from its harness's own store and prices it against the model
+   table. Report the figure in one line. Two things to say correctly rather than
+   glibly:
+   - For **claude/codex** the number is *fair-value at rack rate* — those tokens ran
+     on a subscription, so it is what they WOULD have cost on the open market, not
+     money billed. That is precisely the number that answers "would a cheaper plan
+     cover me?", so don't round it away.
+   - For **opencode/OpenRouter** it is real metered spend.
+   If it returns `cost_usd: null`, say why (an inline task has no session; a pruned
+   transcript can't be read) rather than reporting zero — **a fabricated zero is worse
+   than a missing number**, because it silently understates the very bill this exists
+   to measure.
+
+   Cost is **re-read live, never frozen at close**: a worker session keeps spending
+   after its task is done (the follow-up skill tweak, the docs pass). Re-running
+   `pwc cost --task <id>` later always returns the up-to-date total, so don't treat
+   the close-out figure as final.
+
+   **b. Rate the routing.** Ask the user one question: *was that model right for this
+   task?* — too weak / about right / overkill, plus a one-liner. If they say too weak
+   or overkill, write the correction into the table's overlay:
+   ```
+   pwc models set-tier --key <model-key> --domain <the task's domain> \
+     --tier <1-5> --note "<the one-liner>"
+   ```
+   Lower the tier when a model underperformed (it will stop winning that kind of
+   work); raise it when a cheap model did great (it will start winning more). The
+   correction lands in the **overlay**, so the next `pwc models fetch` cannot revert
+   it — the table becomes calibrated to this user's real experience rather than to
+   vendor benchmarks.
+
+   Then log it so the decision is auditable:
+   ```
+   pwc log-event --task <id> --kind routing-outcome \
+     --detail "<harness>/<model>: <rating> — <one-liner> (\$<cost>)"
+   ```
+
+   **Skip this whole step for a task with no worker** (inline, never dispatched) —
+   there's nothing to measure and nothing to rate.
+
 ## Notes
 
 - `--set-status` updates the status field in the same transaction; `note` is

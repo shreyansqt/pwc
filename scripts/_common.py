@@ -77,9 +77,59 @@ def store_config(workspace: str | os.PathLike[str] | None = None) -> dict:
     return cfg
 
 
+def model_table_path() -> Path:
+    """The GLOBAL model table at ~/.config/pwc/model-table.json.
+
+    Global, not per-workspace: which models exist, what they cost, and how good
+    they are at what is a fact about the WORLD (and about this person's taste),
+    not about one workspace's body of work. Every workspace routes off the same
+    table. Overridable with $PWC_MODEL_TABLE (tests, alternate profiles).
+    """
+    env = os.environ.get("PWC_MODEL_TABLE")
+    if env:
+        return Path(env).expanduser()
+    return Path.home() / ".config" / "pwc" / "model-table.json"
+
+
+def ssl_context():
+    """An SSL context that actually has CA certificates.
+
+    Some python builds (notably MacPorts — the one on this machine) ship an EMPTY
+    default trust store, so every HTTPS call fails closed with
+    CERTIFICATE_VERIFY_FAILED. Fall back to the system CA bundle rather than
+    disabling verification. Shared by every outbound caller (hub_client, models).
+    """
+    import ssl as _ssl
+    ctx = _ssl.create_default_context()
+    if ctx.cert_store_stats().get("x509_ca", 0) == 0:
+        bundle = Path("/etc/ssl/cert.pem")
+        if bundle.exists():
+            ctx = _ssl.create_default_context(cafile=str(bundle))
+    return ctx
+
+
 def now_iso() -> str:
     """Current time, ISO8601 UTC, second precision (sorts lexically)."""
     return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def parse_iso(ts: str) -> _dt.datetime | None:
+    """Parse an ISO8601 UTC stamp (trailing Z) back to an aware datetime, or None."""
+    if not ts:
+        return None
+    try:
+        return _dt.datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=_dt.timezone.utc)
+    except ValueError:
+        return None
+
+
+def age_days(ts: str) -> float | None:
+    """How many days ago `ts` was (None if unparseable) — the staleness clock."""
+    t = parse_iso(ts)
+    if t is None:
+        return None
+    return (_dt.datetime.now(_dt.timezone.utc) - t).total_seconds() / 86400.0
 
 
 def days_ago_iso(days: float) -> str:

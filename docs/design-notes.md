@@ -239,3 +239,64 @@ Things we're not building, but are designing in a way that doesn't preclude:
   by: the task database is a queryable SQLite store behind one CLI. Build only if
   the terminal interface turns out to
   be a real friction point.
+
+## Cost-aware model routing: why the table is global, tokens are the record, and there are no fallbacks
+
+PWC now picks the model for each task (`pwc route`) instead of defaulting everything
+to claude. Five decisions in that build were non-obvious enough to record.
+
+**Every model is priced at rack rate — subscriptions are NOT free.** The tempting
+model was "claude/codex ride a subscription, so their marginal cost is zero, so prefer
+them." That is exactly backwards for the goal. Pricing a subscription at zero makes the
+router *maximize* the spend you're trying to evaluate, and hides whether the plan still
+earns its price — you'd never learn you could drop from €180 to €20. So every model is
+priced at its true API rate, the router sorts on that, and `pwc cost --report` shows
+what each harness actually consumed. For subscription harnesses that figure is
+*fair-value at rack rate* (what the tokens would cost on the open market, not money
+billed) — which is precisely the number that answers "would a cheaper plan cover me?"
+The report says so rather than implying it's an invoice.
+
+**Store tokens, derive dollars.** The first instinct was to record cost at task close.
+But prices move constantly (the very first `models fetch` produced 44 changes), so a
+stored dollar figure is welded to a stale table and history stops being reproducible —
+you could never re-ask "what would last month have cost on DeepSeek?" Tokens keep that
+question open forever, and they outlive the harnesses' own storage (transcripts get
+pruned, opencode's sqlite gets vacuumed). Hence `task_usage` holds four token counts;
+dollars are computed on the way out, against whatever price set you ask about.
+
+**Cost is a property of the session, re-read live — not an event captured at close.**
+A worker keeps spending after its task is marked done: the follow-up skill tweak, the
+docs pass. Snapshotting at close would systematically under-count exactly the long tail
+we're trying to measure. So `pwc cost --task X` re-reads and upserts every time, and
+the number always reflects everything that session has done to date. `task_id` is
+nullable for the same reason: the coordinator's own session and inline tasks burn real
+tokens with no task attached, and a report that omitted them would understate the bill
+it exists to produce.
+
+**Cache reads are the bill, and pricing on input+output is wrong by ~250x.** A live PWC
+worker session logged 32M cache-read tokens against 30k input. Priced naively as
+in+out it looked like $3.30; priced correctly it was $24.34, of which $16 was cache
+reads alone. Agentic sessions re-send their whole context every turn, so the cache
+classes dominate. The table therefore carries four price columns, not two, and the
+router's ranking blends them by a stated (assumed) token mix.
+
+**"Capable enough" and "allowed to see real data" are different questions.** We shipped
+the collapse of these two and caught it in testing: a `prod-data` task routed straight
+to a third-party metered API because it cleared the capability floor. Capability is a
+tier; trust is a separate declared flag. `--risk prod-data` now filters on both. The
+lesson generalizes — a privacy constraint wearing a cost costume will always get
+optimized away.
+
+**No fallback chains, on purpose.** If nothing qualifies, `route` exits nonzero and
+says what filtered everything out. The alternative — silently downgrading to a model
+already judged unfit — is how you get a "cheap" run that quietly produces garbage on a
+task that needed care. A failed dispatch is a decision for the user, not something for
+the router to paper over. Same reasoning as the `available` hard filter: a model whose
+harness isn't authenticated would fail at spawn, so it must never be *picked*, rather
+than being picked and then falling back.
+
+**The overlay is structural, not a promise.** Capability tiers are the user's judgment;
+costs are the vendor's fact. Keeping corrections in a separate top-level `overlay`
+object (rather than as fields inside the rows) is what makes "your calibration survives
+a refresh" true by construction: `fetch` rewrites `models[]` wholesale and literally
+cannot touch the overlay. Verified: rate a model down, refresh, the rating holds.

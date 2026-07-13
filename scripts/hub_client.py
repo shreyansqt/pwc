@@ -16,25 +16,12 @@ is a clean error, not silent divergence.
 from __future__ import annotations
 
 import json
-import ssl
 import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
 
-from _common import emit, fail
-
-
-def _ssl_context() -> ssl.SSLContext:
-    """A context that actually has CA certificates. Some python builds (e.g.
-    MacPorts) ship with an empty default trust store; fall back to the system
-    bundle so HTTPS verification works instead of failing closed."""
-    ctx = ssl.create_default_context()
-    if ctx.cert_store_stats().get("x509_ca", 0) == 0:
-        system_bundle = Path("/etc/ssl/cert.pem")
-        if system_bundle.exists():
-            ctx = ssl.create_default_context(cafile=str(system_bundle))
-    return ctx
+from _common import emit, fail, ssl_context as _ssl_context
 
 # argparse Namespace fields that are routing, not operation arguments.
 _SKIP = {"workspace", "func", "cmd"}

@@ -59,6 +59,10 @@ def _migrate(conn) -> None:
     for col in ("harness", "model", "runhost"):
         if col not in cols:
             conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} TEXT")
+    # task_usage is created by schema.sql on a fresh DB; CREATE TABLE IF NOT EXISTS
+    # already makes it a no-op on an existing one, so nothing to ALTER here — but a
+    # DB that predates the table gets it from the same script, since init() runs
+    # schema.sql before this. Left explicit so the next column add has a home.
 
 
 def row_to_dict(row: sqlite3.Row | None) -> dict | None:

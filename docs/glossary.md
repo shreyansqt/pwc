@@ -37,6 +37,35 @@ project + JQL, which GitHub org, which Slack channels, …). Written by
 `/pwc-setup-workspace`, read by `/pwc-find-work`. Per-workspace, so different workspaces
 draw work from different places.
 
+**Model table** — The JSON file at `~/.config/pwc/model-table.json`: one row per
+model (harness, the exact `--model` string that harness wants, cost per Mtok, context
+window, capability tier 1-5 per domain). **Global, not per-workspace** — which models
+exist and what they cost is a fact about the world, not about one body of work. Read
+by `pwc route` to decide and `pwc cost` to price. See `pwc models`.
+
+**Overlay** — The part of the model table that is *yours*: tier corrections and notes,
+kept in a separate top-level object so a refresh **cannot** clobber them (`pwc models
+fetch` rewrites the rows wholesale and never touches the overlay). This is what makes
+the table converge on *your* experience rather than on vendor benchmarks — every "that
+model was overkill / too weak" at task close lands here.
+
+**Task profile** — What a task NEEDS, expressed independently of any model: domain
+(code-review | implementation | research-writing | ops-comms), reasoning 1-5,
+verifiability 1-5, risk (none | outward | prod-data), context need. `/pwc-find-work`
+judges it at queue time and hands it to `pwc route`. The inversion is the point: the
+task says what it needs, the table decides who serves it — so a new model is a new
+row, not a code change.
+
+**Verifiability** — How cheaply a WRONG answer would be caught. Code with tests that
+must pass is high; a research memo whose wrongness is silent is low. Low verifiability
+makes `route` demand a *higher* capability tier, because you can't afford a
+plausible-but-wrong answer you won't notice.
+
+**Trusted** — A per-model flag saying real production data may go there. Deliberately
+**separate from capability**: "good enough" and "allowed to see customer data" are
+different questions, and collapsing them is how a prod-data task ends up on a
+third-party API for being cheap. `--risk prod-data` filters on this *and* a tier floor.
+
 ## Data (what's in the task database — three tables)
 
 **Task** — One unit of work the coordinator tracks (a Jira ticket, a PR review, a
