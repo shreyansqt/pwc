@@ -51,6 +51,7 @@ from __future__ import annotations
 import argparse
 import glob
 import json
+import re
 import sqlite3
 import subprocess
 import sys
@@ -185,6 +186,26 @@ def read_claude(session_id: str) -> dict[str, dict]:
     return by_model
 
 
+def _find_model(obj):
+    """Codex records its model name NESTED at no fixed path (it turns up under
+    `collaboration_mode.settings.model`, among others) and NOT in session_meta — so a
+    fixed lookup returns None, which priced whole codex sessions at $0.00 against 59M
+    real tokens. Search for it instead of guessing its location."""
+    if isinstance(obj, dict):
+        for key, val in obj.items():
+            if key == "model" and isinstance(val, str):
+                return val
+            found = _find_model(val)
+            if found:
+                return found
+    elif isinstance(obj, list):
+        for item in obj:
+            found = _find_model(item)
+            if found:
+                return found
+    return None
+
+
 def read_codex(session_id: str) -> dict[str, dict]:
     """Take the LAST token_count event — codex reports a running cumulative total,
     so summing them would count the whole session once per turn."""
@@ -192,7 +213,7 @@ def read_codex(session_id: str) -> dict[str, dict]:
     if not matches:
         return {}
     latest = None
-    model = "unknown"
+    model = None
     for path in matches:
         try:
             lines = Path(path).read_text(errors="replace").splitlines()
@@ -204,12 +225,13 @@ def read_codex(session_id: str) -> dict[str, dict]:
             except ValueError:
                 continue
             payload = rec.get("payload") or {}
-            if rec.get("type") == "session_meta":
-                model = payload.get("model") or model
+            if model is None:
+                model = _find_model(payload)
             if payload.get("type") == "token_count":
                 total = (payload.get("info") or {}).get("total_token_usage")
                 if total:
                     latest = total
+    model = model or "unknown"
     if not latest:
         return {}
     cached = latest.get("cached_input_tokens") or 0
@@ -239,9 +261,16 @@ def read_opencode(session_id: str) -> tuple[dict[str, dict], float | None]:
         conn.close()
     except sqlite3.Error:
         return {}, None
-    if row is None:
-        return {}, None
-    return {row["model"] or "unknown": {
+    # opencode stores `model` as a JSON OBJECT, not a string:
+    #   {"id": "deepseek/deepseek-v4-pro", "providerID": "openrouter", ...}
+    # Reading it raw put a JSON blob in the model column and made it unpriceable.
+    model = row["model"] or ""
+    if model.startswith("{"):
+        try:
+            model = json.loads(model).get("id") or "unknown"
+        except ValueError:
+            model = "unknown"
+    return {model or "unknown": {
         "tokens_in": row["tokens_input"] or 0,
         "tokens_out": (row["tokens_output"] or 0) + (row["tokens_reasoning"] or 0),
         "cache_read": row["tokens_cache_read"] or 0,
@@ -456,17 +485,124 @@ def cmd_sweep(args):
           "note": "re-read live; run `pwc cost --report` for the rollup"})
 
 
+_SESSION_RE = re.compile(r"\b(?:session\s+)?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-"
+                         r"[0-9a-f]{4}-[0-9a-f]{12}|ses_[A-Za-z0-9]+)\b")
+
+
+def session_owners(workspace=None) -> dict[str, str]:
+    """{session_id: task_id} — mined from the EVENT LOG, not just the task rows.
+
+    A task's `session_id` column is NOT a durable record of what ran it:
+    `clear-session` nulls it out when /pwc-show-work sweeps a dead worker, which is
+    precisely when the task finishes — so the link is erased exactly when you'd want
+    to price the work. (Measured here: 4 links left on task rows, 5 recoverable from
+    events.)
+
+    The append-only `dispatched` events are the durable record — they were written at
+    spawn and are never mutated. Mine them, then let the live task rows override (a
+    currently-running worker is the freshest truth).
+    """
+    owners: dict[str, str] = {}
+    cmd = ["pwc"]
+    if workspace:
+        cmd += ["--workspace", workspace]
+    cmd += ["events"]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        events = json.loads(out.stdout) if out.returncode == 0 else []
+    except (OSError, subprocess.SubprocessError, ValueError):
+        events = []
+    for e in events:
+        if e.get("kind") != "dispatched" or not e.get("task_id"):
+            continue
+        m = _SESSION_RE.search(e.get("detail") or "")
+        if m:
+            owners[m.group(1)] = e["task_id"]
+    # Live rows win — a running worker's current session is the freshest truth.
+    for t in _all_sessions(workspace):
+        owners[t["session_id"]] = t["id"]
+    return owners
+
+
+def cmd_backfill(args):
+    """Ingest EVERY harness session on this machine, not just PWC-dispatched ones.
+
+    `--sweep` only sees sessions the task DB knows about — which on a real machine is
+    a tiny minority. The rest is the coordinator's own sessions, inline tasks, and
+    every ad-hoc `claude`/`codex` run in a repo. Those burned real tokens, and a spend
+    report that omits them understates the bill by an order of magnitude (measured
+    here: the task DB knew 4 sessions; the disk held 104).
+
+    So: walk the harness stores directly, attribute each session to a task where the
+    task DB claims that session id, and record the rest with task_id NULL (the schema
+    allows it precisely for this). Idempotent — re-running re-reads and upserts.
+    """
+    # Which sessions belong to a task? Mined from the append-only event log, because
+    # the task rows' session_id is erased by clear-session when a worker is swept.
+    # Everything with no owner is untracked-but-real spend.
+    owner = session_owners(args.workspace)
+
+    found = []
+    # claude: one transcript per session, named <uuid>.jsonl
+    for path in (_CLAUDE_PROJECTS).glob("*/*.jsonl"):
+        found.append(("claude", path.stem))
+    # codex: rollout-<ts>-<uuid>.jsonl
+    for path in glob.glob(str(_CODEX_SESSIONS / "*/*/*/rollout-*.jsonl")):
+        stem = Path(path).stem
+        found.append(("codex", stem.split("-", 2)[-1][-36:]))
+    # opencode: its own session table
+    if _OPENCODE_DB.exists():
+        try:
+            oc = sqlite3.connect(f"file:{_OPENCODE_DB}?mode=ro", uri=True, timeout=5)
+            for (sid,) in oc.execute("SELECT id FROM session"):
+                found.append(("opencode", sid))
+            oc.close()
+        except sqlite3.Error:
+            pass
+
+    conn = usage_db(args.workspace)
+    measured = attributed = 0
+    empty = 0
+    with conn:
+        for harness, sid in found:
+            written, _ = measure(conn, task_id=owner.get(sid), session_id=sid,
+                                 harness=harness)
+            if not written:
+                empty += 1
+                continue
+            measured += 1
+            if owner.get(sid):
+                attributed += 1
+
+    emit({
+        "sessions_seen": len(found),
+        "sessions_measured": measured,
+        "attributed_to_tasks": attributed,
+        "untracked": measured - attributed,
+        "no_usage_found": empty,
+        "note": ("untracked sessions (coordinator, inline, ad-hoc runs) are recorded "
+                 "with task_id NULL — they are real spend and belong in the rollup. "
+                 "Run `pwc cost --report` to see it."),
+    })
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="cost.py", description=__doc__)
     p.add_argument("--workspace", help="workspace root (default: discover from cwd)")
     p.add_argument("--task", help="measure this task's session(s) and price them")
     p.add_argument("--report", action="store_true", help="roll up recorded usage")
     p.add_argument("--sweep", action="store_true",
-                   help="re-read every known session before reporting")
+                   help="re-read every session the task DB knows about")
+    p.add_argument("--backfill", action="store_true",
+                   help="ingest EVERY harness session on this machine — including "
+                        "coordinator/inline/ad-hoc ones with no task (the bulk of "
+                        "real spend). Attributes to tasks via the dispatch event log.")
     p.add_argument("--since", help="report window, e.g. 30d")
     args = p.parse_args(argv)
     try:
-        if args.sweep:
+        if args.backfill:
+            cmd_backfill(args)
+        elif args.sweep:
             cmd_sweep(args)
         elif args.report:
             cmd_report(args)

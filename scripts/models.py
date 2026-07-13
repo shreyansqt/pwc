@@ -106,6 +106,13 @@ _SEED = [
      {"code-review": 4, "implementation": 4, "research-writing": 4, "ops-comms": 4}),
     ("claude/haiku", "claude", "haiku", "anthropic/claude-haiku-4.5", True,
      {"code-review": 2, "implementation": 2, "research-writing": 2, "ops-comms": 3}),
+    # Not a routing target (superseded by sonnet-5), but real history ran on it and
+    # `pwc cost` must be able to PRICE that history — an unpriceable model silently
+    # reports $0.00 against millions of real tokens, which is worse than no number.
+    # Rows exist to be priced as well as to be picked.
+    ("claude/sonnet-4.6", "claude", "claude-sonnet-4-6", "anthropic/claude-sonnet-4.6",
+     True,
+     {"code-review": 4, "implementation": 4, "research-writing": 4, "ops-comms": 4}),
     ("codex/gpt-5.5", "codex", "gpt-5.5", "openai/gpt-5.5", True,
      {"code-review": 4, "implementation": 5, "research-writing": 4, "ops-comms": 3}),
     ("opencode/glm-5.2", "opencode", "openrouter/z-ai/glm-5.2", "z-ai/glm-5.2", False,
