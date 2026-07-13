@@ -12,6 +12,9 @@ scripts are grouped under a named subcommand:
 
   pwc summary | detail | events | add-task | update-task | ...   -> taskdb.py
   pwc sources show | enabled | set | skill-hints | priority      -> sources.py
+  pwc models show | stale | fetch | seed | set-tier              -> models.py
+  pwc route --domain <d> --reasoning <n> ...                     -> route.py
+  pwc cost --task <id> | --report | --sweep                      -> cost.py
   pwc spawn --task <id> --cwd <dir> ...                          -> spawn.py
   pwc worker-status --session-ids <uuid,...> | --json -          -> worker_status.py
 """
@@ -35,6 +38,11 @@ task database (see `pwc <command> -h` for each):
 
 other:
   pwc sources <show|enabled|set|skill-hints|priority> [args]
+  pwc models <show|stale|fetch|seed|set-tier> [args]
+  pwc route --domain <code-review|implementation|research-writing|ops-comms>
+            --reasoning <1-5> [--verifiability <1-5>] [--risk none|outward|prod-data]
+            [--context-need <tokens>] [--explain]
+  pwc cost --task <id> | --report [--since 30d] | --sweep
   pwc spawn --task <id> --cwd <dir> [--session-id U] [--resume] [--prompt -] [--name N]
   pwc worker-status --session-ids <uuid,...> | --json -
 
@@ -52,6 +60,15 @@ def main(argv):
     if cmd == "sources":
         import sources
         sources.main(rest)
+    elif cmd == "models":
+        import models
+        models.main(rest)
+    elif cmd == "route":
+        import route
+        route.main(rest)
+    elif cmd == "cost":
+        import cost
+        cost.main(rest)
     elif cmd == "spawn":
         import spawn
         spawn.main(rest)

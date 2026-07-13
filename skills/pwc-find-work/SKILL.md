@@ -33,8 +33,33 @@ tracking): find brings new work in; show tells you where existing work stands.
   attach its identity reference, **only after the user confirms**.
 - `pwc log-event --kind new-task --detail "..."` — record the
   promotion.
+- `pwc models stale` / `pwc models fetch [--dry-run]` — the model table's refresh
+  clock and refresher (step 0).
+- `pwc route --domain <d> --reasoning <n> [--verifiability <n>] [--risk <r>]
+  [--context-need <tokens>]` — pick the harness+model for a task (step 5).
 
 ## Steps
+
+0. **Refresh the model table if it's stale — and PROPOSE the changes, never apply
+   them silently.** Run `pwc models stale` (threshold: 7 days). If it reports
+   `stale: false`, skip this step entirely and say nothing.
+
+   If stale, run **`pwc models fetch --dry-run`** — this reads OpenRouter's catalog
+   and reports what WOULD change **without writing**. Present the diff to the user the
+   same way you present task candidates: a short table of `key | field | old → new`,
+   grouped so it's scannable (price moves, context-window changes, models that
+   vanished from the catalog, availability flips). Then ask whether to apply it. On a
+   yes, run `pwc models fetch` (no `--dry-run`) to write it.
+
+   **This is the same "surface, never auto-promote" rule the rest of this skill
+   follows**, and it matters more here than it looks: the table decides where *all*
+   future work gets routed and what it costs, so a silent refresh could quietly move
+   every task onto a different model. The user sees the change before it takes effect.
+
+   Only the **objective** columns are fetched (cost, context window, availability).
+   The capability tiers are the user's own calibration and live in the table's
+   `overlay` — `fetch` cannot touch them, so a refresh never reverts a judgment they
+   made. Say so if they ask.
 
 1. **Read the sources config** with `pwc sources enabled`. If it's empty (no sources
    configured), tell the user to run `/pwc-setup-workspace` first and stop — there's
@@ -200,18 +225,58 @@ tracking): find brings new work in; show tells you where existing work stands.
    then `add-ref --kind identity --ref-type <t> --value <raw-id>` to attach its
    identity reference, then `log-event --kind new-task`. Report back what was queued.
 
-   **Set `--harness` / `--model` (and `--runhost`, if a rule names one) by the
-   workspace's routing policy.** Read it once
-   per run with `pwc sources routing`: apply the first matching rule (by task type /
-   traits), else the `default`. This decides which coding agent (claude, opencode,
-   …), model, and machine `/pwc-start-work` will dispatch the task's worker on — set
-   at queue time so the user can veto it in the same confirmation. Show the choice with each
-   candidate only when it deviates from the default (a non-default harness or model
-   is worth a mention; the default is noise). If routing returns `{}`, omit both
-   flags — everything defaults to claude with its default model, and say nothing.
-   The rules are guidance to apply with judgment (like the priority model), not a
-   mechanical matcher; when a rule's `why` clearly doesn't fit this task, deviate
-   and say so.
+   **Set `--harness` / `--model` by profiling the task and asking `pwc route`.**
+   Routing is no longer a prose rule you apply by judgment — it's a deterministic
+   decision made from a task PROFILE, so the same task always gets the same answer
+   and the reasoning is inspectable. For each task you're about to queue, judge four
+   things from its title, source, and thread:
+
+   - **`--domain`** — `code-review` | `implementation` | `research-writing` | `ops-comms`.
+     What KIND of work is it? (A PR review is `code-review`; a Slack reply is
+     `ops-comms`; a spike or a design memo is `research-writing`.)
+   - **`--reasoning` 1-5** — how much genuine thinking does it need? A typo fix is 1;
+     a tricky concurrency bug or an architecture call is 5. Be honest: inflating this
+     is how you end up paying Opus rates for routine work.
+   - **`--verifiability` 1-5** — how cheaply would a WRONG answer be caught? Code with
+     tests that must pass is high (4-5) — a bad answer fails loudly and costs only a
+     retry. A research memo, an architectural recommendation, anything whose wrongness
+     is *silent*, is low (1-2). Low verifiability makes `route` demand more capability,
+     which is exactly right: you can't afford a plausible-but-wrong answer you won't
+     notice.
+   - **`--risk`** — `none` | `outward` (a human will read the output as-is: a Slack
+     message, a PR comment, a customer email) | `prod-data` (the work touches real
+     production/customer data). `prod-data` is a hard gate, not a hint: it restricts
+     routing to models explicitly marked `trusted` in the table AND raises the
+     capability floor. **Never** pass `prod-data` loosely, and never omit it when it
+     applies.
+   - **`--context-need`** (optional) — tokens of context the work needs held at once.
+     Pass it when a task obviously needs a lot (a big refactor across many files);
+     omit otherwise.
+
+   `route` then hard-filters (harness actually installed+authenticated, context window
+   big enough, prod-data trust + tier floor), keeps only models whose tier in that
+   domain clears the required level, and picks **the cheapest one left**. It returns
+   the harness, the model, and a one-line `why`. Pass them straight through as
+   `--harness` / `--model`.
+
+   **Show the routing decision with each candidate, always** — not just when it
+   deviates from a default. The whole point is that work now flows to cheaper models
+   where they're good enough, and the user is choosing to trust that; hiding the
+   choice would mean they only discover a task ran on DeepSeek after the fact. One
+   line is enough: `→ opencode/deepseek-v4-pro (implementation, tier 3, $0.13/Mtok)`.
+   The user can veto or override it in the same confirmation that queues the task — a
+   plain `--model` override always wins over the router.
+
+   **If `route` REFUSES** (it exits nonzero when nothing qualifies — there are no
+   fallback chains by design), do not silently queue the task unrouted and do not
+   quietly pick something yourself. Surface the refusal and its reason: the profile
+   may be wrong (did you really mean `prod-data`?), or a harness may be unavailable
+   (`opencode` with no credentials), or the context need may exceed every model. Let
+   the user decide.
+
+   **`--runhost`** is unchanged and still comes from the workspace's `pwc sources
+   routing` policy (it's about WHICH MACHINE, not which model) — set it if a rule
+   names one.
 
    **Set `--priority` by the workspace's configured priority model** (lower number =
    higher priority; `pick-work` sorts ascending, null last). The priority model is

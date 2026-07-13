@@ -94,3 +94,47 @@ CREATE TABLE IF NOT EXISTS events (
 
 CREATE INDEX IF NOT EXISTS idx_events_task ON events(task_id, at);
 CREATE INDEX IF NOT EXISTS idx_events_at ON events(at);
+
+-- What a session actually CONSUMED. TOKENS, not dollars — deliberately.
+--
+-- Dollars are a derived view, not the measurement. Prices move constantly (the very
+-- first `models fetch` produced 44 changes), so a stored dollar figure is welded to
+-- whatever the table said the moment it was computed, and history stops being
+-- reproducible: you could never re-ask "what would last month have cost if I'd
+-- routed it to DeepSeek instead?" — the tokens would be gone. Store the tokens and
+-- cost becomes a function you can re-run against ANY price set: today's table, last
+-- month's, or a hypothetical one. That question is the entire point of the routing
+-- engine (is the €180 plan still worth it?), so the data model has to be able to
+-- answer it.
+--
+-- It also outlives the harnesses. Claude transcripts get pruned, opencode's sqlite
+-- gets vacuumed, codex rollouts age out — persisting the counts here means the spend
+-- record survives the storage it was read from.
+--
+-- One row per (task, session, model). Re-measured, not appended: `pwc cost --task X`
+-- re-reads the session live and UPSERTs, because a worker session keeps spending
+-- after its task is marked done (the follow-on skill tweaks, the docs pass), and
+-- that spend is just as real. task_id is NULLABLE on purpose: the coordinator's own
+-- session and inline tasks burn tokens with no task attached, and a spend report
+-- that silently omitted them would understate the bill it exists to measure.
+CREATE TABLE IF NOT EXISTS task_usage (
+  task_id     TEXT REFERENCES tasks(id) ON DELETE CASCADE,  -- NULL = untracked session
+                                                -- (coordinator / inline / ad-hoc)
+  session_id  TEXT NOT NULL,                    -- the harness session these tokens came from
+  harness     TEXT NOT NULL,                    -- claude|opencode|codex — which store was read
+  model       TEXT,                             -- the model that ACTUALLY ran (ground truth from
+                                                -- the transcript), which may differ from the model
+                                                -- the router picked — that gap is worth seeing
+  tokens_in     INTEGER NOT NULL DEFAULT 0,     -- uncached input
+  tokens_out    INTEGER NOT NULL DEFAULT 0,     -- output (incl. reasoning tokens)
+  cache_read    INTEGER NOT NULL DEFAULT 0,     -- DOMINATES agentic sessions — a live PWC worker
+                                                -- logged 32M of these against 30k input, so any
+                                                -- cost model ignoring them is wrong ~250x
+  cache_write   INTEGER NOT NULL DEFAULT 0,
+  measured_at TEXT NOT NULL,                    -- ISO8601 UTC of the last re-read
+  PRIMARY KEY (session_id, model)               -- one row per model used within a session
+                                                -- (a session can switch models mid-flight)
+);
+
+CREATE INDEX IF NOT EXISTS idx_usage_task ON task_usage(task_id);
+CREATE INDEX IF NOT EXISTS idx_usage_measured ON task_usage(measured_at);

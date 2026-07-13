@@ -101,10 +101,67 @@ Start a Claude Code session **in the workspace** and:
   inline. Also resumes a stopped task by reopening its prior session.
 
 Each task carries a **harness** (which coding agent runs its worker) and an
-optional **model**. Both are set at queue time from the workspace's routing policy
-(`"routing"` in `.pwc/sources.json`, read via `pwc sources routing`) and are
-user-overridable; `/pwc-start-work` dispatches accordingly (`pwc spawn --harness …
---model …`). All three harnesses — **claude**, **opencode**, **codex** — are
+optional **model** — chosen automatically, and cost-aware.
+
+## Routing: the cheapest model that can actually do the job
+
+`/pwc-find-work` profiles each task as it queues it — *what kind of work is this
+(code-review / implementation / research-writing / ops-comms), how much reasoning does
+it really need (1-5), how cheaply would a wrong answer be caught (1-5), does it touch
+production data?* — and hands that profile to **`pwc route`**, which picks the
+**cheapest model whose capability clears the bar**. The task states what it needs; the
+table decides who serves it. Adding a new model is a new row, not a code change.
+
+```
+$ pwc route --domain implementation --reasoning 3 --verifiability 4
+→ opencode / openrouter/deepseek/deepseek-v4-pro   ($0.13/Mtok)
+$ pwc route --domain code-review --reasoning 4 --verifiability 2
+→ claude / opus  (raised to tier 5: low verifiability — a wrong answer wouldn't be caught)
+```
+
+The models live in a **global model table** (`~/.config/pwc/model-table.json`): cost,
+context window, and a 1-5 capability tier per domain. `pwc models fetch` refreshes the
+objective columns from OpenRouter's free catalog; `/pwc-find-work` checks staleness
+(>7 days) and **proposes** the diff for confirmation rather than applying it silently.
+Your own tier corrections live in a separate **overlay** that a refresh cannot touch —
+so the table converges on *your* experience, not on vendor benchmarks.
+
+Two deliberate hard edges:
+
+- **No fallback chains.** If nothing qualifies, `route` refuses and says what filtered
+  everything out. Silently downgrading to a model already judged unfit is how a "cheap"
+  run quietly produces garbage on a task that needed care.
+- **`prod-data` filters on trust, not just capability.** "Good enough" and "allowed to
+  see customer data" are different questions; a model must be explicitly `trusted` to
+  receive real data, no matter how capable or cheap it is.
+
+## What it actually cost
+
+**`pwc cost`** measures real spend from each harness's own session store — claude
+transcripts, codex rollouts, opencode's sqlite:
+
+```
+$ pwc cost --task breezemail        → $1.01   (claude/opus)
+$ pwc cost --report                 → per-harness rollup
+```
+
+It stores **tokens, not dollars** — prices move, so a stored dollar figure freezes
+history and makes "what would this have cost on DeepSeek?" unanswerable. Dollars are
+derived at report time against whatever price set you ask about. Cost is also **re-read
+live rather than frozen at close**, because a worker keeps spending after its task is
+done (the follow-up tweak, the docs pass).
+
+Note that **subscription tokens are still priced at rack rate**. Claude and Codex ride
+subscriptions, so their figure is *fair-value* — what those tokens would have cost on
+the open market, not money billed. That is exactly the number that tells you whether a
+cheaper plan would cover your usage; pricing them at zero would make the router
+maximize the spend you're trying to evaluate.
+
+At task close, `/pwc-report-status` measures the cost and asks one question — *was that
+model right?* (too weak / about right / overkill) — and writes the answer into the
+overlay, so routing gets better rather than staying a guess.
+
+All three harnesses — **claude**, **opencode**, **codex** — are
 session-tracked: the session id is known before the worker exists (claude:
 caller-chosen uuid; opencode/codex: pre-created via their server APIs) and sits in
 the worker's argv, so identity, `pgrep` liveness, and resume-by-id all work.

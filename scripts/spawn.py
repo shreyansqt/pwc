@@ -342,6 +342,28 @@ def _tmux_name(task: str) -> str:
     return "pwc-" + re.sub(r"[^A-Za-z0-9_-]", "-", task)
 
 
+def tab_title(*, name, task, harness, model):
+    """The iTerm2 tab title: what the task is, AND what is running it.
+
+    With routing in play, different workers now run on different harnesses and
+    models — and the tab bar is the only place you see them side by side. A title
+    that says only the task leaves you unable to tell the DeepSeek worker from the
+    Opus one, which is exactly the thing you're now making cost/quality tradeoffs
+    about. So the runner is part of the title, not just the JSON result.
+
+        SMT-921 · fix login retry [claude/opus]
+        pwc-routing · deepseek-v4-pro [opencode]
+
+    The model is shown bare (its dispatch id's last segment — the provider prefix is
+    noise in a tab bar); the harness qualifies it. A model-less worker (harness
+    default) shows just the harness.
+    """
+    base = name or task
+    short_model = (model or "").split("/")[-1]
+    runner = f"{harness}/{short_model}" if short_model else (harness or "")
+    return f"{base} [{runner}]" if runner else base
+
+
 def _ssh_run(target, command, *, input_text=None, what=""):
     """Run a non-interactive command on the remote host; fail loudly."""
     import subprocess
@@ -572,9 +594,13 @@ def main(argv=None):
     # `command` actually contains a prompt, so spawn() reports the right seed status.
     seed_in_command = bool(seed_prompt)
 
+    title = tab_title(name=args.name, task=args.task,
+                      harness=args.harness, model=args.model)
+
     result = {
         "harness": args.harness,
         "model": args.model,
+        "tab_title": title,
         # The EFFECTIVE session id — for opencode a fresh spawn mints it here, so
         # the dispatch skill must record THIS value, not an id it generated.
         # None for untracked harnesses (no `pwc set-session` for those).
@@ -600,7 +626,7 @@ def main(argv=None):
         return
 
     placement = spawn(cwd=cwd, command=command, seed_in_command=seed_in_command,
-                      title=args.name or args.task)
+                      title=title)
     result.update(placement)
     emit(result)
 
