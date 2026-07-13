@@ -101,8 +101,9 @@ _STALE_DAYS = 7.0
 #     Max/Pro and ChatGPT Plus do not come with one. That gap applies to the
 #     "data_ok" providers too — it is the real blocker, not the training toggle.
 #   - Codex on ChatGPT Plus TRAINS ON YOUR DATA BY DEFAULT (consumer policy, not the
-#     API policy), and has a second Codex-only toggle the main ChatGPT setting does
-#     not cover.
+#     API policy — the API does not train by default). A SECOND Codex-only toggle is
+#     claimed by OpenAI's help docs but could NOT be confirmed in the live product;
+#     see docs/data-handling.md before relying on it.
 #   - Claude Pro/Max: training is a mandatory choice (5y retention if on, 30d if
 #     off); safety-flagged conversations are retained up to 2 years and feedback
 #     ratings up to 5 years EVEN WITH TRAINING OFF.

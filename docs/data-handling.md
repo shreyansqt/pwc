@@ -39,10 +39,21 @@ it is not a reason to prefer Anthropic/OpenAI over the cheap models, because non
 them clear it. It is a reason to think hard before putting customer data into *any*
 prompt.
 
-**2. Codex on ChatGPT Plus trains on your data by default**, and has a **second,
-Codex-only toggle** that the main ChatGPT setting does not cover — OpenAI's words:
-"adjusting your settings in the ChatGPT interface or privacy portal will *not* affect
-these full-environment Codex settings."
+**2. Codex on ChatGPT Plus trains on your data by default** — this is the *consumer*
+policy, and it differs from the API (platform.openai.com), which does **not** train by
+default. Turn off ChatGPT → Settings → Data Controls → "Improve the model for
+everyone."
+
+> **Unverified:** OpenAI's help article states there is a *second*, Codex-only
+> training setting that the ChatGPT toggle does **not** cover ("adjusting your
+> settings in the ChatGPT interface or privacy portal will not affect these
+> full-environment Codex settings"). That article was read via the Internet Archive
+> (OpenAI blocks automated fetching), and an attempt to confirm the setting in the
+> live product failed — `chatgpt.com/codex/settings` and `.../data-controls` both
+> 404. So: treat the existence of a separate toggle as **claimed but unconfirmed**.
+> Check your own Data Controls page for anything mentioning Codex, cloud tasks, or
+> environments, and if nothing is there, the single ChatGPT toggle is probably the
+> whole story.
 
 **3. Anthropic's opt-out has carve-outs that survive it.** Even with training off:
 safety-flagged conversations are retained up to 2 years (no definition of what
