@@ -20,8 +20,9 @@ Harnesses (`--harness`, default claude):
               POST /session (the id is known before the worker exists), then
               launches `opencode --session <ses_id>` — the id is in the process
               argv, so pgrep liveness works, and resume is the same `--session`
-              attach. Seed via --prompt (auto-submit behavior: verify on first
-              interactive use), model via --model. Note: on a fresh spawn the
+              attach. Seed is TYPED into its TUI by spawn() — `--prompt` does NOT
+              work interactively (verified 2026-07-13: leaves the composer empty
+              and the worker idle at $0.00). Model via --model. Note: on a fresh spawn the
               session id is MINTED HERE (opencode ids aren't chooseable), so the
               caller must record the RETURNED session_id, not one it generated.
   codex     — session-tracked too (verified 2026-07-10 on v0.144.1): a fresh spawn
@@ -204,7 +205,22 @@ def _build_opencode(*, session_id, resume, cwd, seed_prompt, model,
     caller-chosen uuid, opencode mints its own — pre-created here on a fresh
     spawn so it's still known before the worker process exists. Both fresh and
     resume launch `opencode --session <id>`, so the id sits in the process argv
-    (pgrep liveness) either way."""
+    (pgrep liveness) either way.
+
+    SEED DELIVERY DIFFERS FROM CLAUDE, and the difference is not cosmetic.
+    `claude '<prompt>'` AUTO-SUBMITS its positional prompt; interactive
+    `opencode --prompt '<text>'` only PRE-FILLS the input box and waits for the
+    user to hit enter. Verified live 2026-07-13 on v1.17.18: a worker spawned with
+    --prompt sat idle with 0 messages and $0.00 cost — the seed was on screen but
+    never sent. (spawn.py's own docstring had flagged this as "verify on first
+    interactive use"; this was that use, and the assumption was false.)
+
+    So the caller must SUBMIT it. `needs_submit` in the build result tells spawn()
+    to send a bare newline into the tab once the TUI has drawn. We do NOT use
+    `opencode run` (which does auto-submit) because that is the non-interactive
+    one-shot mode — it prints and exits, leaving no live session for the user to
+    take over, which is the entire point of a worker tab.
+    """
     if resume and session_id and _opencode_session_exists(session_id):
         mode = "resume"
     else:
@@ -214,8 +230,14 @@ def _build_opencode(*, session_id, resume, cwd, seed_prompt, model,
     args = ["opencode", "--session", session_id]
     if model:
         args += ["--model", model]
-    if seed_prompt:
-        args += ["--prompt", seed_prompt]
+    # NOTE: the seed is deliberately NOT passed as `--prompt`. Verified live
+    # 2026-07-13 (v1.17.18): interactive `opencode --prompt '<text>'` does not put
+    # the text into the TUI's input box at all — the worker comes up with an EMPTY
+    # composer and sits idle (0 messages, $0.00), while the seed text is left behind
+    # in the shell. Pressing enter afterwards submits nothing. So spawn() TYPES the
+    # seed into the session after the TUI has drawn (see _type_seed) — the same
+    # send-text-to-the-session mechanism the claude path already relies on, and the
+    # only one observed to actually deliver a seed to opencode.
     return mode, args, session_id
 
 
@@ -314,7 +336,12 @@ def _build_codex(*, session_id, resume, cwd, seed_prompt, model,
         mode = "fresh"
         session_id = ("00000000-DRYRUN-not-created" if dry_run
                       else _preallocate_codex_session(cwd, title or "PWC worker"))
-    args = ["codex", "resume", session_id]
+    # Absolute path: `codex` is an npm global under one mise node version, so in
+    # a repo whose .nvmrc pins a different node it vanishes from the worker
+    # shell's PATH ("command not found", kontax-backend/smarta-systems
+    # 2026-07-13). Resolve it on the coordinator's PATH at build time instead.
+    codex_bin = shutil.which("codex") or "codex"
+    args = [codex_bin, "resume", session_id]
     if model:
         args += ["--model", model]
     if seed_prompt:
@@ -326,10 +353,18 @@ def _build_codex(*, session_id, resume, cwd, seed_prompt, model,
 # the worker's argv, so identity (`pwc set-session`), pgrep liveness, and resume
 # all work. claude: caller-chosen uuid. opencode/codex: pre-created via their
 # server APIs (they mint the id — callers record the returned one).
+#
+# needs_submit = the harness PRE-FILLS its seed into the input box but does not send
+# it, so spawn() must type a newline once the TUI has drawn. claude auto-submits a
+# positional prompt; opencode --prompt does NOT (verified live 2026-07-13: a worker
+# spawned without this sat idle at 0 messages / $0.00 — the seed was visible on
+# screen and never sent). codex's `resume <id> '<prompt>'` is the same shape as
+# claude's and is assumed to auto-submit — VERIFY on its first interactive use, and
+# if it too just pre-fills, flip this flag rather than reinventing the delivery.
 _BUILDERS = {
-    "claude": (_build_claude, True),     # (builder, session_tracked)
-    "opencode": (_build_opencode, True),
-    "codex": (_build_codex, True),
+    "claude": (_build_claude, True, False),   # (builder, session_tracked, needs_submit)
+    "opencode": (_build_opencode, True, True),
+    "codex": (_build_codex, True, False),
 }
 
 
@@ -425,22 +460,74 @@ def build_remote_claude_command(*, ssh_target, session_id, resume, cwd,
 
 def build_command(*, harness, session_id, resume, cwd, seed_prompt=None,
                   model=None, title=None, dry_run=False):
-    """Return (mode, launch_command, session_id, session_tracked) for the task's
-    harness. `session_id` in the result is the EFFECTIVE id (opencode mints its
-    own on a fresh spawn — record that one), or None for untracked harnesses."""
+    """Return (mode, launch_command, session_id, session_tracked, needs_submit) for
+    the task's harness. `session_id` in the result is the EFFECTIVE id (opencode mints
+    its own on a fresh spawn — record that one), or None for untracked harnesses.
+    `needs_submit` is True when the harness only PRE-FILLS the seed and spawn() must
+    press enter for it (see _BUILDERS)."""
     if harness not in _BUILDERS:
         fail(f"unknown harness {harness!r} — known: {', '.join(sorted(_BUILDERS))}")
-    builder, session_tracked = _BUILDERS[harness]
+    builder, session_tracked, needs_submit = _BUILDERS[harness]
     kwargs = dict(session_id=session_id, resume=resume, cwd=cwd,
                   seed_prompt=seed_prompt, model=model)
     if harness in ("opencode", "codex"):
         kwargs.update(title=title, dry_run=dry_run)
     mode, args, effective_id = builder(**kwargs)
     inner = f"cd {shlex.quote(cwd)} && {shlex.join(args)}"
-    return mode, inner, effective_id, session_tracked
+    # Only type when there IS a seed and the harness can't carry it on the CLI.
+    return mode, inner, effective_id, session_tracked, bool(seed_prompt) and needs_submit
 
 
-def spawn(*, cwd, command, seed_in_command=False, title=None):
+# Tails that mark "the shell is sitting at an interactive prompt" on the last
+# non-empty screen line — the fallback readiness signal when iTerm2 shell
+# integration isn't installed in the worker's shell.
+_PROMPT_TAILS = ("❯", "➜", "$", "%", ">")
+
+
+async def _wait_for_shell_prompt(iterm2, connection, session, timeout=15.0):
+    """Wait until the tab's shell is at an interactive prompt before typing.
+
+    Typing into the TTY while the shell is still starting up goes through the
+    kernel's canonical-mode line discipline, which caps a single input line at
+    MAX_CANON (1024 bytes on macOS) and silently drops the rest — so a long
+    launch command sent too early arrives truncated, leaving a broken command
+    sitting unexecuted at the prompt (observed 2026-07-13: a ~1.4KB codex seed
+    cut mid-quote). Once the shell's line editor owns the TTY (raw mode), the
+    cap no longer applies.
+
+    Readiness signals, polled together every 200ms:
+    - iTerm2 shell integration's prompt record (exact, when installed);
+    - fallback: the last non-empty screen line looks like a prompt.
+    On timeout, proceed anyway (the pre-guard behavior) and report it.
+    Returns "shell-integration" | "screen" | "timeout" for placement.
+    """
+    import asyncio
+
+    loop = asyncio.get_event_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        try:
+            if await iterm2.async_get_last_prompt(connection, session.session_id):
+                return "shell-integration"
+        except Exception:  # noqa: BLE001 — no integration / transient API error
+            pass
+        try:
+            contents = await session.async_get_screen_contents()
+            last = ""
+            for i in range(contents.number_of_lines):
+                line = contents.line(i).string.rstrip()
+                if line:
+                    last = line
+            if last.endswith(_PROMPT_TAILS):
+                return "screen"
+        except Exception:  # noqa: BLE001 — screen read is best-effort
+            pass
+        await asyncio.sleep(0.2)
+    return "timeout"
+
+
+def spawn(*, cwd, command, seed_in_command=False, title=None, needs_submit=False,
+          typed_seed=None):
     """Open the worker in a new iTerm2 tab in the current window. Returns placement.
 
     Each worker gets its own full-width tab (switchable with Cmd-1/2/...), leaving
@@ -512,11 +599,56 @@ def spawn(*, cwd, command, seed_in_command=False, title=None):
             except Exception:  # noqa: BLE001 — focus restore is best-effort, never fatal
                 placement["focus_restored"] = False
 
+        # Wait for the shell to reach its prompt before typing — sending while
+        # the shell is still starting goes through the TTY's canonical-mode
+        # line buffer, which truncates the command at 1024 bytes (MAX_CANON).
+        # Done after the focus restore so the user isn't parked on the new tab
+        # while we wait. On "timeout" we type anyway (pre-guard behavior).
+        placement["shell_ready"] = await _wait_for_shell_prompt(
+            iterm2, connection, session)
+
         # Launch claude in the new shell. The seed (if any) is already part of
         # `command` as claude's positional prompt, so claude auto-submits it on
         # startup — nothing more to type.
         await session.async_send_text(command + "\r")
         placement["seed"] = "submitted" if seed_in_command else "skipped"
+
+        # Harnesses whose CLI cannot carry the seed (opencode) get it TYPED into
+        # their TUI once it has drawn. `--prompt` does not work for this: verified
+        # live 2026-07-13 that it leaves the composer empty and the worker idle at
+        # $0.00. Typing into the session is the same mechanism the claude path
+        # already trusts, and it is the only one observed to actually land.
+        #
+        # We poll for the TUI's own chrome rather than sleeping a fixed time: the
+        # shell prompt appearing is NOT enough (the harness may still be booting, and
+        # text sent then lands in the shell, not the app — which is exactly the
+        # failure we're fixing).
+        if needs_submit and typed_seed:
+            import asyncio
+            loop = asyncio.get_event_loop()
+            deadline = loop.time() + 45
+            drawn = False
+            while loop.time() < deadline:
+                await asyncio.sleep(0.5)
+                try:
+                    contents = await session.async_get_screen_contents()
+                    screen = "\n".join(
+                        contents.line(i).string
+                        for i in range(contents.number_of_lines))
+                except Exception:  # noqa: BLE001 — screen read is best-effort
+                    continue
+                # opencode's TUI paints its model/agent banner ("Build · <model>")
+                # and a box-drawn composer. Either is proof the app owns the TTY.
+                if "Build ·" in screen or "┃" in screen or "▀▀▀" in screen:
+                    drawn = True
+                    break
+            if drawn:
+                await asyncio.sleep(0.6)  # let the composer take focus
+                await session.async_send_text(typed_seed)
+                await asyncio.sleep(0.3)
+                await session.async_send_text("\r")
+            placement["seed"] = "typed" if drawn else "not-typed"
+            placement["tui_drawn"] = drawn
 
     try:
         iterm2.run_until_complete(_main)
@@ -576,13 +708,14 @@ def main(argv=None):
             task=args.task, dry_run=args.dry_run,
         )
         session_tracked = True
+        needs_submit = False  # remote is claude-only; claude auto-submits
     else:
         cwd = str(Path(args.cwd).expanduser())
         if not os.path.isdir(cwd):
             fail(f"--cwd does not exist: {cwd}")
         if not args.dry_run and shutil.which(args.harness) is None:
             fail(f"harness {args.harness!r} is not installed (not on PATH)")
-        mode, command, session_id, session_tracked = build_command(
+        mode, command, session_id, session_tracked, needs_submit = build_command(
             harness=args.harness, session_id=session_id, resume=args.resume,
             cwd=cwd, seed_prompt=seed_prompt, model=args.model,
             title=args.name or args.task, dry_run=args.dry_run,
@@ -592,7 +725,9 @@ def main(argv=None):
     # difference is meaning (fresh = the task seed; resume = a follow-up ask). A
     # resume with no seed carries no prompt. `seed_in_command` tracks whether
     # `command` actually contains a prompt, so spawn() reports the right seed status.
-    seed_in_command = bool(seed_prompt)
+    # For a typed-seed harness (opencode) the seed is NOT in the launch command —
+    # spawn() types it into the TUI — so it must not be reported as such.
+    seed_in_command = bool(seed_prompt) and not needs_submit
 
     title = tab_title(name=args.name, task=args.task,
                       harness=args.harness, model=args.model)
@@ -626,7 +761,8 @@ def main(argv=None):
         return
 
     placement = spawn(cwd=cwd, command=command, seed_in_command=seed_in_command,
-                      title=title)
+                      title=title, needs_submit=needs_submit,
+                      typed_seed=seed_prompt if needs_submit else None)
     result.update(placement)
     emit(result)
 
