@@ -489,38 +489,71 @@ _SESSION_RE = re.compile(r"\b(?:session\s+)?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}
                          r"[0-9a-f]{4}-[0-9a-f]{12}|ses_[A-Za-z0-9]+)\b")
 
 
-def session_owners(workspace=None) -> dict[str, str]:
+def discover_workspaces() -> list[Path]:
+    """Every PWC workspace on this machine (any dir with a .pwc/).
+
+    Transcripts are MACHINE-wide but a task board is per-workspace, so attribution
+    that only consults the workspace you happen to be standing in will mis-file every
+    session belonging to another one. (Measured: side-projects had 5 dispatches;
+    smarta had 133 — reporting from side-projects alone made it look as though tasks
+    simply weren't being dispatched, when in fact the busier board was never
+    consulted.) So sweep them all.
+
+    Kept shallow (~/work/* and ~/*) rather than a full-disk walk: PWC workspaces are
+    top-level bodies of work by definition, and a deep scan of $HOME is slow and
+    would wander into node_modules.
+    """
+    roots: list[Path] = []
+    home = Path.home()
+    seen = set()
+    for parent in (home / "work", home):
+        try:
+            children = list(parent.iterdir())
+        except OSError:
+            continue
+        for child in children:
+            marker = child / ".pwc"
+            if marker.is_dir() and child not in seen:
+                seen.add(child)
+                roots.append(child)
+    return roots
+
+
+def _events_of(workspace) -> list[dict]:
+    cmd = ["pwc", "--workspace", str(workspace), "events"]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        return json.loads(out.stdout) if out.returncode == 0 else []
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return []
+
+
+def session_owners(workspace=None, *, all_workspaces: bool = False) -> dict[str, str]:
     """{session_id: task_id} — mined from the EVENT LOG, not just the task rows.
 
-    A task's `session_id` column is NOT a durable record of what ran it:
-    `clear-session` nulls it out when /pwc-show-work sweeps a dead worker, which is
-    precisely when the task finishes — so the link is erased exactly when you'd want
-    to price the work. (Measured here: 4 links left on task rows, 5 recoverable from
-    events.)
+    Two reasons the task rows alone are not enough, both measured:
 
-    The append-only `dispatched` events are the durable record — they were written at
-    spawn and are never mutated. Mine them, then let the live task rows override (a
-    currently-running worker is the freshest truth).
+    1. A task's `session_id` column is NOT durable: `clear-session` nulls it when
+       /pwc-show-work sweeps a dead worker — precisely when the task FINISHES, so the
+       link is erased exactly when you'd want to price the work. The append-only
+       `dispatched` events survive that (side-projects: 4 links left on rows, 5
+       recoverable from events).
+    2. Transcripts are machine-wide; boards are per-workspace. Consulting only the
+       current workspace mis-files every session that belongs to another one.
+       `all_workspaces` sweeps every board on the machine.
     """
     owners: dict[str, str] = {}
-    cmd = ["pwc"]
-    if workspace:
-        cmd += ["--workspace", workspace]
-    cmd += ["events"]
-    try:
-        out = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        events = json.loads(out.stdout) if out.returncode == 0 else []
-    except (OSError, subprocess.SubprocessError, ValueError):
-        events = []
-    for e in events:
-        if e.get("kind") != "dispatched" or not e.get("task_id"):
-            continue
-        m = _SESSION_RE.search(e.get("detail") or "")
-        if m:
-            owners[m.group(1)] = e["task_id"]
-    # Live rows win — a running worker's current session is the freshest truth.
-    for t in _all_sessions(workspace):
-        owners[t["session_id"]] = t["id"]
+    spaces = discover_workspaces() if all_workspaces else [workspace]
+    for space in spaces:
+        for e in _events_of(space) if space else []:
+            if e.get("kind") != "dispatched" or not e.get("task_id"):
+                continue
+            m = _SESSION_RE.search(e.get("detail") or "")
+            if m:
+                owners[m.group(1)] = e["task_id"]
+        # Live rows win — a running worker's current session is the freshest truth.
+        for t in _all_sessions(space):
+            owners[t["session_id"]] = t["id"]
     return owners
 
 
@@ -537,10 +570,11 @@ def cmd_backfill(args):
     task DB claims that session id, and record the rest with task_id NULL (the schema
     allows it precisely for this). Idempotent — re-running re-reads and upserts.
     """
-    # Which sessions belong to a task? Mined from the append-only event log, because
-    # the task rows' session_id is erased by clear-session when a worker is swept.
+    # Which sessions belong to a task? Mined from the append-only event log (the task
+    # rows' session_id is erased by clear-session when a worker is swept), across
+    # EVERY workspace on the machine (transcripts are machine-wide; boards are not).
     # Everything with no owner is untracked-but-real spend.
-    owner = session_owners(args.workspace)
+    owner = session_owners(args.workspace, all_workspaces=True)
 
     found = []
     # claude: one transcript per session, named <uuid>.jsonl
