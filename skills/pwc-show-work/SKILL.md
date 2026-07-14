@@ -206,7 +206,7 @@ threads) is `/pwc-find-work`.
 
    Main table columns, in this exact order:
 
-   | # | Status | Pri | ID | Dir | Desc |
+   | # | Status | Pri | ID | Dir | Where | Desc |
 
    - **#** — running number, top to bottom across the whole table, so the user can act
      by number ("start 3").
@@ -238,6 +238,19 @@ threads) is `/pwc-find-work`.
      when it's null/unset (no directory recorded yet — typically a non-code task like a
      Slack reply or a research item). Don't invent a directory the task doesn't carry;
      show `—` rather than guessing.
+   - **Where** — **how and where this task runs**, from the task's `harness`, `model`
+     and `runhost` (all in `summary`). Render as `harness/model@runhost`, collapsing
+     what's absent: `claude/opus`, `opencode/glm-5.2@mini`, `codex` (no model set),
+     `—` when the task has no harness yet (never dispatched). Keep it terse — it's a
+     column, not a sentence; shorten long model ids (`openrouter/z-ai/glm-5.2` →
+     `glm-5.2`).
+
+     Show it because the answer is no longer obvious: tasks now route to different
+     models by cost (a p3 research task on a cheap model, a hard review on a strong
+     one) and can run on a different MACHINE than the one you're sitting at. "Which
+     model is this costing me, and is it running on the mini?" should be answerable
+     from the board, not by opening the task.
+
    - **Desc** — a **short description (≤ ~8 words) that identifies the task**, not a
      restatement of the id. Distil it from the title + latest event so the user can
      recognize the work at a glance (e.g. "mobile OCR fails since 20.05", "review BO
