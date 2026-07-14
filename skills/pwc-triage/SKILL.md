@@ -54,6 +54,29 @@ then ask the user only what genuinely needs a human.
      case: five tasks named "PR 3", "PR 4" … "PR 7" of a planned series. PRs 1 and 2
      merged; 3-7 were never opened, and the repo moved on without them. They weren't
      *blocked* — the plan was simply abandoned.)
+   - **JUDGE A TASK BY ITS TRACKER ITEM, NEVER BY COMMIT VOLUME.** This is the mistake
+     that burned this skill on its very first run, and it is seductive: a task's keyword
+     appears in eighteen commits, so it looks shipped, so you close it. Do not.
+
+     **Read the issue/ticket body and check whether the thing it actually asks for
+     exists.** Two real cases from that run, both closed wrongly:
+     - *Snooze* looked done — eighteen commits mentioned "snooze". But the issue was a
+       snooze **engine** (a schedule encoded in hidden Gmail labels, scanned on each
+       poll, past-due threads returned to the inbox). `grep` for the label prefix found
+       **nothing**. The commits were Android **UI**: a Snoozed screen, a picker, nav
+       routes, a FAB fix. A Snoozed *list* is not a snooze *scheduler*.
+     - *"Android Stage 1"* looked done — two weeks of Android commits. But the issue
+       specified mirroring the Mac **core** in Kotlin. Reality: 86 Kotlin files against
+       4,570 Swift. A UI shell, not a core.
+
+     Commits tell you *something happened near this topic*. Only the issue body tells
+     you *what was being asked for*. Read it.
+
+   - **If the task pairs with a tracker item, BOTH SIDES MUST MOVE.** Closing a PWC task
+     whose GitHub issue / Jira ticket stays open (or vice versa) doesn't tidy the board —
+     it makes one of the two lie, which is precisely the disease triage exists to cure.
+     Close both, or neither, and say which you're doing.
+
    - **Check whether the repo moved on without the board.** `git log` the task's
      `workdir`. If a project has commits from last week but PWC thinks its tasks are a
      month stale, **the work is happening outside PWC** — that's the finding, and it
