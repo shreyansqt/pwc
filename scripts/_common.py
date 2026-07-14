@@ -40,6 +40,88 @@ def find_workspace_root(start: str | os.PathLike[str] | None = None) -> Path:
     return here
 
 
+def discover_workspaces() -> list[Path]:
+    """Every PWC workspace on this machine (any dir with a .pwc/).
+
+    Kept shallow (~/work/* and ~/*) rather than a full-disk walk: PWC workspaces
+    are top-level bodies of work by definition, and a deep scan of $HOME is slow
+    and would wander into node_modules.
+
+    (Lived in cost.py first — cost attribution needed it because transcripts are
+    MACHINE-wide while a board is per-workspace. It turns out the coordinator
+    needs the same primitive, so it moved here; cost.py re-exports it.)
+    """
+    roots: list[Path] = []
+    home = Path.home()
+    seen = set()
+    for parent in (home / "work", home):
+        try:
+            children = list(parent.iterdir())
+        except OSError:
+            continue
+        for child in sorted(children):
+            if (child / ".pwc").is_dir() and child not in seen:
+                seen.add(child)
+                roots.append(child)
+    return roots
+
+
+def is_workspace(root: str | os.PathLike[str]) -> bool:
+    """Is `root` a REAL workspace — i.e. does it have somewhere to keep tasks?
+
+    A bare `.pwc/` directory is not enough. `cost.py` writes its usage.db into
+    `<root>/.pwc/`, so any directory a read op ran in can end up with a `.pwc/`
+    holding nothing but usage.db — no task store at all. (This bit for real: the
+    failing `pwc summary` from ~/work created ~/work/.pwc/, which then made ~/work
+    itself look like a workspace and masked the two real ones below it.)
+
+    A workspace is a place with a TASK STORE: a local taskdb.db, or a store.json
+    pointing at one (e.g. a hub). Nothing else counts.
+    """
+    root = Path(root)
+    pwc = root / ".pwc"
+    if not pwc.is_dir():
+        return False
+    return (pwc / "taskdb.db").exists() or (pwc / "store.json").exists()
+
+
+def workspaces_below(start: str | os.PathLike[str] | None = None) -> list[Path]:
+    """PWC workspaces sitting one level BELOW `start` (default cwd).
+
+    Discovery walks UP to find the workspace you're standing in. But standing in a
+    PARENT of several workspaces (~/work, holding smarta/ and side-projects/) is a
+    real place to be — it's where you coordinate across them — and walking up from
+    there finds nothing at all. So we also look down, one level, to answer "which
+    workspaces does this directory contain?".
+
+    One level only, deliberately: a workspace is a top-level body of work, and an
+    unbounded descent would wander into every repo checkout below it.
+    """
+    here = Path(start or os.getcwd()).resolve()
+    if is_workspace(here):
+        return []  # standing IN a workspace — not a parent of them
+    out: list[Path] = []
+    try:
+        children = sorted(here.iterdir())
+    except OSError:
+        return []
+    for child in children:
+        if child.is_dir() and is_workspace(child):
+            out.append(child)
+    return out
+
+
+def workspace_name(root: str | os.PathLike[str]) -> str:
+    """The workspace's logical name: store.json's `workspace`, else the dir name.
+
+    A hub-backed workspace already declares its name (that's the key its rows are
+    filed under in D1); a local one is just its directory.
+    """
+    root = Path(root)
+    cfg = store_config(root)
+    return cfg.get("workspace") or root.name
+
+
 def db_path(workspace: str | os.PathLike[str] | None = None) -> Path:
     """Resolve <workspace>/.pwc/taskdb.db. `workspace` overrides discovery."""
     root = Path(workspace).resolve() if workspace else find_workspace_root()
@@ -75,6 +157,63 @@ def store_config(workspace: str | os.PathLike[str] | None = None) -> dict:
             if not cfg.get(key):
                 fail(f"store config at {p} is store=hub but missing {key!r}")
     return cfg
+
+
+# Ops that only READ. From a multi-workspace directory these fan out across every
+# workspace and merge; everything else is a write and must land in exactly one.
+READ_OPS = frozenset({"summary", "stale", "parked-aging", "events", "detail",
+                      "find-refs", "find-session", "sessions", "export"})
+
+
+def resolve_task_workspace(task_id: str, roots: list[Path]) -> Path:
+    """Which of `roots` holds `task_id`? Exactly one, or we refuse.
+
+    Task ids are unique WITHIN a workspace, never across them — nothing has ever
+    enforced otherwise, and a collision has actually happened (`pwc-routing-engine`
+    existed on both the smarta and side-projects boards, the same work queued twice
+    because the coordinator was standing in the wrong directory). So a write naming
+    a bare id from a multi-workspace directory is genuinely ambiguous, and guessing
+    is how you silently mutate the wrong board.
+
+    Unique hit -> that workspace. No hit -> a clean "not found" naming where we
+    looked. Several hits -> REFUSE and make the caller disambiguate with
+    --workspace. Never pick one.
+    """
+    import subprocess
+    hits: list[Path] = []
+    for root in roots:
+        try:
+            out = subprocess.run(
+                ["pwc", "--workspace", str(root), "detail", "--task", task_id],
+                capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if out.returncode == 0 and out.stdout.strip():
+            hits.append(root)
+    if len(hits) == 1:
+        return hits[0]
+    names = ", ".join(workspace_name(r) for r in roots)
+    if not hits:
+        fail(f"no task {task_id!r} in any workspace here ({names}). "
+             f"Pass --workspace <dir> if it lives somewhere else.")
+    where = "\n".join(f"  --workspace {r}   ({workspace_name(r)})" for r in hits)
+    fail(f"task {task_id!r} exists in more than one workspace — refusing to guess "
+         f"which one you mean. Disambiguate:\n{where}")
+
+
+def multi_workspace_fail(roots: list[Path], cmd: str) -> None:
+    """The 'you're in a parent, and this op must land in ONE workspace' diagnostic.
+
+    Deliberately names the workspaces it can see and shows the exact flag, because
+    the old message here pointed at a `.pwc/taskdb.db` that (post-hub-migration) no
+    longer exists in any workspace — following it would create a local database PWC
+    does not read.
+    """
+    lines = "\n".join(f"  pwc --workspace {r} {cmd} …   ({workspace_name(r)})"
+                      for r in roots)
+    fail(f"{cmd!r} creates something, so it has to land in ONE workspace — and "
+         f"you're in a directory that holds several, with nothing to infer from. "
+         f"Say which:\n{lines}")
 
 
 def model_table_path() -> Path:

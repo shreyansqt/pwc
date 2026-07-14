@@ -59,7 +59,7 @@ from pathlib import Path
 
 import models as models_mod
 from _common import (days_ago_iso, emit, fail, find_workspace_root, now_iso,
-                     store_config)
+                     store_config, is_workspace)
 
 _CLAUDE_PROJECTS = Path.home() / ".claude" / "projects"
 _CODEX_SESSIONS = Path.home() / ".codex" / "sessions"
@@ -98,6 +98,15 @@ def usage_db(workspace=None) -> sqlite3.Connection:
     the first end-to-end run did before this existed.
     """
     root = Path(workspace).resolve() if workspace else find_workspace_root()
+    if not is_workspace(root):
+        # find_workspace_root() falls back to the CWD when no marker is found, so a
+        # cost read from a non-workspace directory used to CREATE `.pwc/` there just
+        # to hold usage.db. That phantom then looks like a workspace to anything
+        # scanning for one — which is precisely how a failed `pwc summary` in ~/work
+        # minted ~/work/.pwc and masked the two real workspaces beneath it.
+        # Usage is per-workspace; with no workspace there is nothing to record.
+        fail(f"{root} is not a PWC workspace (no task store), so there is no usage "
+             f"to record here. Run this inside a workspace, or pass --workspace.")
     path = root / ".pwc" / "usage.db"
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path), timeout=5)
@@ -535,34 +544,18 @@ _SESSION_RE = re.compile(r"\b(?:session\s+)?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}
 
 
 def discover_workspaces() -> list[Path]:
-    """Every PWC workspace on this machine (any dir with a .pwc/).
+    """Every PWC workspace on this machine — see _common.discover_workspaces.
 
-    Transcripts are MACHINE-wide but a task board is per-workspace, so attribution
-    that only consults the workspace you happen to be standing in will mis-file every
-    session belonging to another one. (Measured: side-projects had 5 dispatches;
-    smarta had 133 — reporting from side-projects alone made it look as though tasks
-    simply weren't being dispatched, when in fact the busier board was never
-    consulted.) So sweep them all.
-
-    Kept shallow (~/work/* and ~/*) rather than a full-disk walk: PWC workspaces are
-    top-level bodies of work by definition, and a deep scan of $HOME is slow and
-    would wander into node_modules.
+    Re-exported here because cost attribution is where the need first showed
+    up: transcripts are MACHINE-wide but a task board is per-workspace, so
+    attribution that only consults the workspace you happen to be standing in
+    mis-files every session belonging to another one. (Measured: side-projects
+    had 5 dispatches; smarta had 133 — reporting from side-projects alone made
+    it look as though tasks simply were not being dispatched, when in fact the
+    busier board was never consulted.) The coordinator needs the same sweep, so
+    the primitive now lives in _common.
     """
-    roots: list[Path] = []
-    home = Path.home()
-    seen = set()
-    for parent in (home / "work", home):
-        try:
-            children = list(parent.iterdir())
-        except OSError:
-            continue
-        for child in children:
-            marker = child / ".pwc"
-            if marker.is_dir() and child not in seen:
-                seen.add(child)
-                roots.append(child)
-    return roots
-
+    return _discover_workspaces()
 
 def _events_of(workspace) -> list[dict]:
     cmd = ["pwc", "--workspace", str(workspace), "events"]

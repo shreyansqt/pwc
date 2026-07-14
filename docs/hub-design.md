@@ -194,6 +194,57 @@ HTTPS.
   account; the hub deploys with a personal-account API token via
   `CLOUDFLARE_API_TOKEN`, never by switching the default login.
 
+## Decision 6: the coordinator can stand ABOVE the workspaces (2026-07-14)
+
+Decision 2 promised "cross-workspace reads are one query — 'everything on my plate,
+all workspaces'". The schema delivered it (`workspace` is a real column, both boards
+already share one D1 database), but nothing ever *called* it that way: every route is
+`POST /w/:workspace/:op`, every op scopes to one workspace, and CLI discovery only ever
+walked UP from the cwd. So standing in `~/work` — the natural place to coordinate
+across `smarta/` and `side-projects/` — resolved to nothing and died with a stale
+"no task database, run init" (stale twice over: post-hub-migration there is no local
+`taskdb.db` in either workspace, so following it would create a database PWC ignores).
+
+**Discovery now also looks DOWN, one level.** A directory holding several workspaces is
+a supported vantage point, not an error.
+
+**Reads fan out and merge; writes pin to one board.** The asymmetry is the whole
+design:
+
+- A **read** from a parent sweeps every workspace and tags each row with its
+  `workspace`. That's the combined board.
+- A **write** belongs to exactly one board. Naming an existing task resolves its
+  workspace automatically. Naming one that exists in **more than one** workspace
+  **refuses** and demands `--workspace`. Creating a task from a parent requires
+  `--workspace` outright — a new id exists nowhere yet, so there is nothing to infer.
+
+The refusal is not defensive programming, it's a bug that happened: task ids are unique
+*within* a workspace and nothing ever enforced uniqueness *across* them.
+`pwc-routing-engine` ended up on **both** boards — the same work queued twice, because
+the coordinator was cd'd into `smarta` when the work was a side-project. Guessing a
+board would silently mutate the wrong one.
+
+**Rendering groups by workspace and never interleaves.** Priority does not mean the
+same thing on every board: smarta runs a strict queue order (1,2,3,4,5, two-way-synced
+to a Jira board rank), side-projects runs tiers (twelve tasks at `p2` across five
+unrelated projects). Sorting the union by priority number would invent a cross-board
+ranking the user never made.
+
+**Client-side fan-out, not a hub route.** `POST /all/summary` (drop the `WHERE
+workspace = ?`) is one query and is what a future phone client wants — but it only
+serves hub-backed workspaces, needs a deploy, and duplicates what the CLI can do for
+free. The client sweep works for local *and* hub workspaces, needed no Worker change,
+and N is 2. The hub route stays available for the mobile surface, where the round-trip
+actually matters.
+
+**Fallout fixed on the way:** `cost.py` resolved its `usage.db` through
+`find_workspace_root()`, which falls back to the CWD when it finds no marker — so a
+cost read from a non-workspace directory *created* `.pwc/` there to hold it. The failed
+`pwc summary` in `~/work` had already minted `~/work/.pwc/`, which then made `~/work`
+look like a workspace and masked the two real ones below it. A workspace is now defined
+as a directory with a **task store** (`taskdb.db` or `store.json`), not merely a
+`.pwc/`; and cost refuses to mint one where no workspace exists.
+
 ## Open questions (still open)
 
 - D1 latency from Europe in practice; batch the briefing reads if it drags.

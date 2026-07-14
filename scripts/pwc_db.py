@@ -10,19 +10,43 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from _common import db_path
+from _common import db_path, workspace_name, workspaces_below
 
 _SCHEMA = Path(__file__).resolve().parent.parent / "schema.sql"
 _BUSY_TIMEOUT_MS = 5000
+
+
+def _no_db_message(path: Path) -> str:
+    """Say what is actually wrong, and never advise creating a database we'd ignore.
+
+    Two ways to land here, and the old message got both wrong by telling you to
+    `init` a local taskdb.db:
+      - You're in a PARENT of workspaces (~/work). Nothing is broken; you just
+        didn't say which board you meant. Name them.
+      - You're in a hub-backed workspace whose store.json moved the database to
+        the cloud. There IS no local taskdb.db and `init` would create a stray one
+        that PWC never reads.
+    """
+    root = path.parent.parent
+    below = workspaces_below(root)
+    if below:
+        names = "\n".join(f"  pwc --workspace {r}   ({workspace_name(r)})"
+                          for r in below)
+        return (f"{root} is not a workspace, but it CONTAINS these — name one, or "
+                f"run a read op here to see them merged:\n{names}")
+    store = root / ".pwc" / "store.json"
+    if store.exists():
+        return (f"no local task database at {path}, but {store} exists — this "
+                f"workspace's store is configured elsewhere (e.g. a hub). Do NOT "
+                f"`init` a local one; fix or remove store.json instead.")
+    return (f"no task database at {path} — run `pwc init` in this workspace first")
 
 
 def connect(workspace=None, *, must_exist: bool = True) -> sqlite3.Connection:
     """Open the workspace task database. Raises if missing unless `must_exist=False`."""
     path = db_path(workspace)
     if must_exist and not path.exists():
-        raise FileNotFoundError(
-            f"no task database at {path} — run `taskdb.py init` in this workspace first"
-        )
+        raise FileNotFoundError(_no_db_message(path))
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path), timeout=_BUSY_TIMEOUT_MS / 1000)
     conn.row_factory = sqlite3.Row

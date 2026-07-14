@@ -24,9 +24,13 @@ threads) is `/pwc-find-work`.
 
 - **CLI**: `pwc` — on PATH (installed by `install.sh` as `~/.local/bin/pwc`). All
   task database access goes through it — never read or write the database directly.
-- **Workspace**: the directory the coordinator is running in. The task database lives at
-  `<workspace>/.pwc/taskdb.db` and `pwc` discovers it automatically from the
-  current working directory, so no `--workspace` flag is normally needed.
+- **Workspace**: the directory the coordinator is running in. `pwc` discovers it from
+  the cwd (the nearest `.pwc/` up the tree), so no `--workspace` flag is normally
+  needed. The task store may be a local SQLite file or a remote hub — the CLI hides
+  which, and skills never touch either directly.
+- **Or a PARENT of several workspaces** (e.g. `~/work`, holding `smarta/` and
+  `side-projects/`): `pwc` sweeps them all and tags each row with its `workspace`.
+  That's the combined board — see the render rules in step 5 and the notes at the end.
 
 ## Tools
 
@@ -64,9 +68,15 @@ threads) is `/pwc-find-work`.
 
 ## Steps
 
-1. **Load all tasks.** Run `pwc summary`. If it errors
-   with "no task database" the workspace isn't initialized — tell the user to run the PWC
-   install/init for this workspace and stop.
+1. **Load all tasks.** Run `pwc summary`. If it errors with "no task database", read
+   the message rather than reflexively suggesting `init`: it distinguishes a genuinely
+   uninitialized workspace (init is right) from a directory whose store lives elsewhere
+   (a hub — init would create a stray local database PWC never reads) and from a parent
+   that *contains* workspaces (nothing is broken; it names them). Follow what it says.
+
+   If `summary` returns rows carrying a `workspace` key, you're coordinating across
+   several workspaces — everything below still applies, but render per step 5's
+   multi-workspace rules.
 
 2. **Worker-status sweep.** Collect every task in the summary that has a non-null
    `session_id` and is `in-progress` (the only status that implies a worker should be
@@ -176,6 +186,24 @@ threads) is `/pwc-find-work`.
      distinct and after the main board — it's a recap of what just closed, not a to-do.
      If there are no recent done tasks, omit the Done table entirely.
 
+   **Multi-workspace — if the `summary` rows carry a `workspace` key**, you are
+   coordinating from a PARENT of several workspaces (e.g. `~/work`, holding `smarta/`
+   and `side-projects/`) and `summary` has swept them all. Render **one block per
+   workspace**, each its own table under a `## <workspace>` heading. Do **not**
+   interleave them into a single ranked list.
+
+   The reason is that priority does not mean the same thing on every board. One
+   workspace may run priorities as a strict **queue order** (1,2,3,4,5 — synced to a
+   Jira board rank, every number distinct); another as **tiers** (a dozen tasks all at
+   `2`, spread across unrelated projects). Merging them by number invents a
+   cross-board ranking the user never made, and quietly asserts that someone's `p1`
+   side-project outranks their `p2` work ticket. Keep each board in its own order and
+   set them side by side; the user does the comparing. **Number the rows continuously
+   across the blocks** so "start 7" stays unambiguous.
+
+   Single-workspace output carries **no** `workspace` key and renders exactly as it
+   always has — one table, no heading. Standing in a workspace changes nothing.
+
    Main table columns, in this exact order:
 
    | # | Status | Pri | ID | Dir | Desc |
@@ -259,6 +287,19 @@ threads) is `/pwc-find-work`.
    in-progress), do not dispatch work or otherwise mutate tasks unless the user asks.
 
 ## Notes
+
+- **Coordinating from a parent of several workspaces.** Standing in `~/work` (which
+  holds `smarta/` and `side-projects/`) is a supported vantage point: `pwc summary`
+  sweeps every workspace below and tags each row with its `workspace`. That's the
+  combined board. Two rules follow, and the CLI enforces both:
+  - **Reads fan out; writes do not.** A write belongs to exactly one board. If it names
+    an existing task, PWC resolves that task's workspace automatically. If the id
+    exists in **more than one** workspace it **refuses** and asks you to pass
+    `--workspace` — it will not guess which board to mutate. (This is not theoretical:
+    `pwc-routing-engine` was once on both boards, the same work queued twice because
+    the coordinator was cd'd into the wrong directory.)
+  - **Creating a task from a parent needs an explicit `--workspace`** — a brand-new id
+    exists nowhere yet, so there is nothing to infer from.
 
 - **The task database is the source of truth, not this conversation.** If something here
   disagrees with what you remember from earlier in the session, the task database wins.

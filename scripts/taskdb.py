@@ -18,7 +18,9 @@ import argparse
 import sys
 
 import pwc_db
-from _common import days_ago_iso, emit, fail, now_iso, read_json_stdin, store_config
+from _common import (READ_OPS, days_ago_iso, emit, fail, multi_workspace_fail,
+                     now_iso, read_json_stdin, resolve_task_workspace,
+                     store_config, workspace_name, workspaces_below)
 
 # Columns surfaced in the always-loaded summary (the index tier). Deliberately
 # small — one status line's worth per task.
@@ -841,8 +843,115 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _run_one(cmd: str, args, workspace) -> None:
+    """Run one op against exactly one workspace (local sqlite or hub)."""
+    args.workspace = str(workspace) if workspace else args.workspace
+    store = store_config(args.workspace)
+    if store.get("store") == "hub":
+        if cmd == "init":
+            emit({"store": "hub", "url": store["url"],
+                  "workspace": store["workspace"],
+                  "note": "hub-backed workspace — no local task database to init"})
+            return
+        import hub_client
+        hub_client.run(cmd, args, store)
+        return
+    args.func(args)
+
+
+# Ops whose --task names a task that does NOT exist yet, so it cannot be used to
+# infer a workspace: they CREATE. The caller must say where it lands.
+_CREATE_OPS = frozenset({"add-task", "init", "import"})
+
+
+def _multi_workspace(args, roots) -> bool:
+    """Handle an op invoked from a PARENT of several workspaces. True if handled.
+
+    Reads fan out across every workspace and merge, each row tagged with the
+    workspace it came from — that's the combined board, the whole point of standing
+    in ~/work. Writes do NOT fan out: a write belongs to exactly one board, so we
+    resolve it to one workspace or refuse (see resolve_task_workspace).
+    """
+    cmd = args.cmd
+
+    # Reads that TARGET one task (detail, find-session) are lookups, not sweeps:
+    # fanning out returns one real hit plus a pile of misses. Resolve, then read
+    # from the single workspace that actually holds it.
+    if cmd in READ_OPS and getattr(args, "task", None):
+        _run_one(cmd, args, resolve_task_workspace(args.task, roots))
+        return True
+
+    if cmd in READ_OPS:
+        merged = []
+        for root in roots:
+            name = workspace_name(root)
+            out = _capture(cmd, args, root)
+            if out is None:
+                continue
+            if isinstance(out, list):
+                for row in out:
+                    if isinstance(row, dict):
+                        row["workspace"] = name
+                    merged.append(row)
+            elif isinstance(out, dict):
+                out["workspace"] = name
+                merged.append(out)
+        emit(merged)
+        return True
+
+    # A write that CREATES has nothing to infer from — its --task is a brand-new id
+    # that by definition exists nowhere yet. Ask.
+    if cmd in _CREATE_OPS:
+        multi_workspace_fail(roots, cmd)
+        return True
+
+    # Any other write names an EXISTING task, and that task's own workspace decides —
+    # uniquely, or we refuse rather than mutate the wrong board.
+    task = getattr(args, "task", None)
+    if task:
+        _run_one(cmd, args, resolve_task_workspace(task, roots))
+        return True
+    multi_workspace_fail(roots, cmd)
+    return True
+
+
+def _capture(cmd: str, args, root):
+    """Run a read op in `root` and parse its JSON, or None if it failed."""
+    import copy
+    import io
+    import json as _json
+    import contextlib
+    sub = copy.copy(args)
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            _run_one(cmd, sub, root)
+    except SystemExit:
+        return None
+    except Exception:  # noqa: BLE001 — one bad workspace must not kill the sweep
+        return None
+    text = buf.getvalue().strip()
+    if not text:
+        return None
+    try:
+        return _json.loads(text)
+    except ValueError:
+        return None
+
+
 def main(argv=None):
     args = build_parser().parse_args(argv)
+
+    # Standing in a PARENT of several workspaces (e.g. ~/work, holding smarta/ and
+    # side-projects/)? Discovery walking UP finds nothing there, which used to be a
+    # dead end. It's actually the coordination vantage point — so fan reads out and
+    # pin writes down.
+    if not args.workspace:
+        roots = workspaces_below()
+        if roots:
+            _multi_workspace(args, roots)
+            return
+
     # Hub-backed workspace? Route the operation over HTTPS instead of local
     # sqlite — the response is byte-compatible, so nothing downstream can tell.
     # `init` stays local-ish: on a hub workspace there is no local db to create.
