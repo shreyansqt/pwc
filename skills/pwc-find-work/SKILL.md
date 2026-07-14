@@ -308,25 +308,16 @@ tracking): find brings new work in; show tells you where existing work stands.
 
 5. **Queue the confirmed ones.**
 
-   **First: read the source's own policy — do NOT assume one.** A source may declare
-   two things that change what queueing means, and both are **workspace policy, read
-   from the config, never hardcoded in this skill**:
+   **First: is this source a BACKLOG?** If its config says `backlog: true` (a Jira
+   refinement column, a repo's open issues), it holds ideas and someday-maybes, and PWC
+   is only the SHORTLIST of work happening soon. **Do not bulk-import it.** Scanning
+   SURFACES candidates; it does not mirror them onto the board. Queue only what the user
+   confirms is imminent — a sweep that queues an entire backlog swamps the board and
+   destroys the signal it exists to give.
 
-   - **`backlog_note`** — the source holds a BACKLOG (ideas, someday-maybes), and PWC is
-     only the SHORTLIST of work happening soon. Where a source says this, **do not
-     bulk-import it**: scanning SURFACES candidates, it does not mirror them onto the
-     board. Queue only what the user confirms is imminent. A sweep that queues an entire
-     backlog swamps the board and destroys the signal it exists to give.
-   - **`pairing_note`** — PWC tasks in this workspace are PAIRED with items in that
-     tracker (the task id derives from the item's id). Where a source says this, a task
-     that *should* have a tracker item but doesn't **needs one filed FIRST**, so the PWC
-     task can be keyed to the real id and carry it as an identity ref. Never invent a
-     slug id for a task the tracker should own. The `pairing_note` says who files it and
-     where — follow it rather than guessing.
-
-   Both are per-workspace by nature: one workspace's tracker items are filed *for* the
-   user by a team, another's the user files themselves. Read the note; don't generalize
-   one workspace's arrangement onto another.
+   (PWC does not AUTHOR work, only tracks it. If a task ought to have a ticket or issue
+   behind it and doesn't, that's a job for the workspace's authoring skill — smarta has
+   `/create-ticket` — not for find-work. Don't file trackers items from here.)
 
    Then **derive its id from the source's `id_convention`** (from the sources config):
    - `jira-key` → use the Jira key verbatim as `--task` (e.g. `SMT-874`).

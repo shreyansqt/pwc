@@ -135,6 +135,28 @@ _SEED = [
     ("claude/sonnet-4.6", "claude", "claude-sonnet-4-6", "anthropic/claude-sonnet-4.6",
      True,
      {"code-review": 4, "implementation": 4, "research-writing": 4, "ops-comms": 4}),
+    # CODEX IS A LADDER, NOT ONE MODEL. The table shipped with only gpt-5.5 — codex's
+    # MOST EXPENSIVE model ($11.25/Mtok blended, dearer than opus at $10) — so codex was
+    # strictly dominated and could never win a routing decision. It only ever ran because
+    # policy force-pinned pr-review to it. That was a table bug masquerading as a
+    # capability verdict.
+    #
+    # Codex here runs on a CHATGPT ACCOUNT, not an API key, and OpenAI restricts which
+    # models that allows: `gpt-5.1-codex` is refused outright ("not supported when using
+    # Codex with a ChatGPT account"). The rows below were each PROBED LIVE against the
+    # real subscription (2026-07-14, `codex exec -m <model>`) — every one completed a
+    # turn. Do not add a codex model you have not run.
+    ("codex/gpt-5.1-codex-max", "codex", "gpt-5.1-codex-max", "openai/gpt-5.1-codex-max",
+     True,
+     {"code-review": 5, "implementation": 5, "research-writing": 4, "ops-comms": 3}),
+    ("codex/gpt-5.3-codex", "codex", "gpt-5.3-codex", "openai/gpt-5.3-codex", True,
+     {"code-review": 5, "implementation": 5, "research-writing": 4, "ops-comms": 3}),
+    ("codex/gpt-5.2-codex", "codex", "gpt-5.2-codex", "openai/gpt-5.2-codex", True,
+     {"code-review": 4, "implementation": 4, "research-writing": 3, "ops-comms": 3}),
+    ("codex/o3", "codex", "o3", "openai/o3", True,
+     {"code-review": 4, "implementation": 4, "research-writing": 4, "ops-comms": 3}),
+    ("codex/codex-mini", "codex", "codex-mini-latest", "openai/gpt-5.1-codex-mini", True,
+     {"code-review": 2, "implementation": 2, "research-writing": 2, "ops-comms": 2}),
     ("codex/gpt-5.5", "codex", "gpt-5.5", "openai/gpt-5.5", True,
      {"code-review": 4, "implementation": 5, "research-writing": 4, "ops-comms": 3}),
     ("opencode/glm-5.2", "opencode", "openrouter/z-ai/glm-5.2", "z-ai/glm-5.2", False,

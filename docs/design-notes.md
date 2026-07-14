@@ -256,6 +256,36 @@ what each harness actually consumed. For subscription harnesses that figure is
 billed) — which is precisely the number that answers "would a cheaper plan cover me?"
 The report says so rather than implying it's an invoice.
 
+**The goal is a PROVIDER PORTFOLIO, not the cheapest task.** This is the strategy the
+router serves, and it is easy to mistake for simple cost-minimization (I have watched an
+agent "helpfully" pin everything to the subscription harness because it felt free —
+which is the exact failure the rack-rate rule above exists to prevent, arrived at from
+the other direction). Two things follow that pure cost-optimization does not give you:
+
+- **Concentration is a risk, not a saving.** Depending on one provider means its price
+  hike, outage, policy change, or model regression is *your* outage. Spreading work
+  across providers is worth paying something for. The router today optimizes cost alone
+  and therefore naturally *concentrates* — it has no notion of diversity. That is a
+  known gap, not a design choice.
+- **The endgame is several CHEAP subscriptions, not one expensive one.** Five small
+  plans across five providers beats a single €200 plan: cheaper in total, and no one
+  vendor can hold the work hostage. The whole measurement apparatus exists to inform
+  that purchasing decision — which plan to buy, which to drop, which workload to move
+  to API pricing.
+
+**The fair-value number is not readable yet, and saying it is would mislead.** `pwc cost`
+will happily report (e.g.) $6,883 of fair-value against a €180 plan and invite the
+conclusion "the subscription earns 38x its price." That conclusion is **worthless
+today**, because the history it is computed from is the *old habit*: reaching for the
+most expensive model by default, because the subscription made it feel free. It measures
+waste, not need.
+
+The number only becomes meaningful after a month or two of **deliberate routing** — once
+each task has actually run on the model it needed. *Then* fair-value says what the work
+genuinely costs, and that is the basis for deciding: upgrade this plan, drop that one,
+move this workload to API pricing. Until then, quote it as "what we have spent so far
+under the old habit", never as a verdict on a plan.
+
 **Store tokens, derive dollars.** The first instinct was to record cost at task close.
 But prices move constantly (the very first `models fetch` produced 44 changes), so a
 stored dollar figure is welded to a stale table and history stops being reproducible —
