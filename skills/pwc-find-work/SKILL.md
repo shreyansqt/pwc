@@ -308,21 +308,25 @@ tracking): find brings new work in; show tells you where existing work stands.
 
 5. **Queue the confirmed ones.**
 
-   **First: does this workspace pair its tasks with a source-of-truth tracker?** Some
-   workspaces hold the BACKLOG in an external system and use PWC only as the SHORTLIST
-   of work happening soon — read the source's `backlog_note` / `pairing_note`. Two
-   consequences, and both are easy to get wrong:
+   **First: read the source's own policy — do NOT assume one.** A source may declare
+   two things that change what queueing means, and both are **workspace policy, read
+   from the config, never hardcoded in this skill**:
 
-   - **Don't bulk-import the backlog.** A source flagged as backlog (a Jira refinement
-     column, a repo's open GitHub issues) is full of ideas and someday-maybes. Scanning
-     it SURFACES candidates; it does not mirror them onto the board. Queue only what the
-     user confirms is next-week work — a sweep that queues every open issue swamps the
-     board and destroys exactly the signal it exists to give.
-   - **A task that SHOULD have a tracker item, but doesn't, needs one FILED — first.**
-     Where a workspace pairs PWC with a tracker (e.g. side-projects: every task is a
-     GitHub issue, and the task id IS the issue number), a new task must get its issue
-     created BEFORE the PWC task, so the task can be keyed to the real number and carry
-     it as an identity ref. Never invent a slug id for a task the tracker should own.
+   - **`backlog_note`** — the source holds a BACKLOG (ideas, someday-maybes), and PWC is
+     only the SHORTLIST of work happening soon. Where a source says this, **do not
+     bulk-import it**: scanning SURFACES candidates, it does not mirror them onto the
+     board. Queue only what the user confirms is imminent. A sweep that queues an entire
+     backlog swamps the board and destroys the signal it exists to give.
+   - **`pairing_note`** — PWC tasks in this workspace are PAIRED with items in that
+     tracker (the task id derives from the item's id). Where a source says this, a task
+     that *should* have a tracker item but doesn't **needs one filed FIRST**, so the PWC
+     task can be keyed to the real id and carry it as an identity ref. Never invent a
+     slug id for a task the tracker should own. The `pairing_note` says who files it and
+     where — follow it rather than guessing.
+
+   Both are per-workspace by nature: one workspace's tracker items are filed *for* the
+   user by a team, another's the user files themselves. Read the note; don't generalize
+   one workspace's arrangement onto another.
 
    Then **derive its id from the source's `id_convention`** (from the sources config):
    - `jira-key` → use the Jira key verbatim as `--task` (e.g. `SMT-874`).
