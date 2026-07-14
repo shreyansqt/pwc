@@ -26,7 +26,10 @@ tracking): find brings new work in; show tells you where existing work stands.
   the config above: Jira (`mcp__atlassian__searchJiraIssuesUsingJql` with the
   configured JQL), GitHub (`gh pr list` / `gh search` scoped to the configured org
   and watch types), Slack (`slack_search_*` in the configured channels), email
-  (Gmail MCP).
+  and calendar (per their `scan_note` — see steps 2a/2b).
+  **Each Slack channel carries an explicit `mode`** (`tasks` or `digest`) that decides
+  which pass reads it and under which rules; a channel with no mode is a config error,
+  not a channel to guess about. See step 2b.
 - `pwc find-refs --ref-type <t> --value <v>` — check whether
   a candidate is already tracked (so a known item isn't proposed again).
 - `pwc add-task ...` and `add-ref ...` — create a task and
@@ -153,7 +156,9 @@ tracking): find brings new work in; show tells you where existing work stands.
      the user "Alison is waiting on your re-approval" when the thread already shows you
      approved it.
 
-   **Surface human posts; do not pre-judge whether they're "for you."** This is the
+   **Surface human posts; do not pre-judge whether they're "for you."** *(This rule
+   governs `mode: tasks` channels. `mode: digest` channels are the deliberate exception
+   — see step 2b.)* This is the
    rule the third pass exists to enforce. The coordinator is allowed to drop **bot
    noise** automatically — Jira/Calendar/Rotation/Slackbot posts have no human in
    them and are never the signal. But a *human* post in a configured channel is
@@ -162,6 +167,93 @@ tracking): find brings new work in; show tells you where existing work stands.
    rule prevents is the coordinator silently filtering out posts addressed to other
    teammates (the "Alison asked Stella for validation, so it's not for Shreyans"
    trap) — which is exactly the kind of work the user wanted to see.
+
+2a. **Email and calendar — the passes that catch what never reaches Slack or Jira.**
+   The skill's frontmatter has always claimed email as a source, but the steps never
+   said how to scan it; the same was true of calendar. Both are driven by their
+   `scan_note` in the sources config (which holds the account and the exact command) —
+   what follows is the *mechanism* the config assumes.
+
+   **Email — two targeted passes, never a blind inbox dump:**
+   1. **Human/external asks addressed to the user** since `last_scanned`.
+   2. **Meeting recaps and action items** (Fathom, Gemini notes, anything titled
+      recap / action items / Aufzeichnung). A recap carrying an action item assigned to
+      the user is a **real task candidate** even when nothing in Jira or Slack reflects
+      it.
+
+   Drop bot noise automatically: GitHub, Jira, CI, Dependabot, and calendar-invite mail
+   itself — all are already covered by their own sources.
+
+   **Calendar — scan BOTH directions. Forward alone is not enough.**
+   - **Forward (today → ~+3d)** — upcoming meetings that imply prep or carry an agenda
+     the user owns (refinements, follow-ups, anything where they are organizer or a
+     required attendee). Ignore pure standups / all-hands / social with no prep.
+   - **Backward (last ~7d) — meetings the user was INVITED TO BUT DID NOT ATTEND.**
+     This is the pass most likely to be missing, and its absence is silent by
+     construction: **a meeting the user skipped produces no recap in their inbox**
+     (Fathom and Gemini only send to attendees), so the email recap pass above cannot
+     see it either. Its decisions and its action items are invisible in *every* source.
+
+     For each past event where the user was an attendee, check their **`responseStatus`**
+     (`declined` / `tentative` / `needsAction` / no response) — those are the skipped
+     ones. For each, **go and find the notes they never received**: the event
+     description and attachments (Fathom / Gemini / Confluence links), a recap posted
+     afterwards in the configured Slack channels (teammates routinely post
+     "<meeting> recap" threads), or meeting notes in Confluence. Surface a short summary
+     of what was decided, and **call out by name any action item assigned to the user** —
+     a task candidate like any other.
+
+     If a skipped meeting's notes cannot be found anywhere, **say so** ("skipped
+     <meeting> on <date> — no recap found") rather than staying silent. Do not assume
+     nothing happened. Recurring meetings the user habitually skips (standups they are
+     not on rotation for, all-hands) can be collapsed to one line or dropped once
+     confirmed empty.
+
+2b. **Digest channels — read for what you'd otherwise MISS, never for tasks.**
+   Every entry in the Slack config's `channels[]` carries an explicit **`mode`**.
+   There is no default: a channel with a missing or unrecognized `mode` is a **config
+   error** — stop and ask which pass it belongs to rather than guessing.
+
+   - **`mode: tasks`** — everything in step 2 applies, including "surface human posts,
+     do not pre-judge." Posts become task candidates.
+   - **`mode: digest`** — an **FYI channel, not a task source.** It never produces a
+     task candidate and never auto-queues. This is the one place the "don't pre-judge"
+     rule is deliberately inverted: **filtering is the entire point.** A digest channel
+     is one the user does not read (too noisy, or not in their language) but which
+     occasionally carries something they must not miss.
+
+   For each `mode: digest` channel:
+   1. Read it since `last_scanned` (`slack_read_channel`; for a private one use
+      `slack_search_public_and_private` — see the blindness warning above).
+   2. Apply **that channel's own `surface` / `drop` lists** from the config. The filter
+      is workspace policy and lives in the config, deliberately written out as data
+      rather than left to judgement — do **not** invent your own criteria, and do not
+      fall back to "surface everything human."
+   3. **Read the thread** under any post you're about to surface (the step-2 rule that
+      a post's root text is not its current state applies here too — an ask may already
+      be resolved in-thread).
+   4. Report the hits in a **separate `📢 Company / FYI` section at the END of the
+      find-work report**, below the task candidates — visually distinct, because these
+      are not work to queue.
+
+   Three hard rules for the digest section:
+   - **Always report the drop count** — `[skipped 14 Tax Ops posts]`. A filter that
+     drops silently is indistinguishable from a broken one, and the user cannot catch a
+     bad filter they cannot see.
+   - **Tag anything that needs an action FROM the user** — a form, an RSVP, a deadline —
+     as **`⚠️ ACTION ON YOU`**, with the deadline. Everything else is plain FYI.
+   - **Translate.** If the channel's `language` is not `en`, give each surfaced item a
+     **one-line English summary plus the permalink**. The user skips these channels
+     *because* of the language, so a same-language digest fixes nothing.
+
+   A digest item becomes a task **only if the user asks for it.**
+
+   (Origin, 2026-07-14: `#stb-all` is smarta's company-wide *and* Tax Ops working
+   channel — ~15 posts/week, in German, the large majority not the user's. He therefore
+   never read it, and missed the Get2Gether 2026 offsite date **and its RSVP deadline**
+   entirely. Scanning it as a `tasks` channel would have buried him in VAT deadlines and
+   "who owns this Mandant"; not scanning it lost him the offsite. The digest mode is the
+   resolution.)
 
 3. **Drop anything already tracked — but only on a `find-refs` *identity* match,
    never on judgement.** For each candidate, run `find-refs` on its identity
