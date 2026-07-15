@@ -52,23 +52,60 @@ pass --workspace to override (before the command for taskdb, after
 """
 
 
+def _extract_workspace(argv):
+    """Pull a `--workspace DIR` / `--workspace=DIR` out of argv from ANY position.
+
+    Returns (ws_or_None, argv_without_it). The scripts want --workspace as a leading
+    global; callers (and the find-work skill) write it after the subcommand too, so we
+    normalize here. First occurrence wins; the flag and its value are removed. A bare
+    trailing `--workspace` with no value is left in place for argparse to complain
+    about in the normal way.
+    """
+    out = []
+    ws = None
+    i = 0
+    while i < len(argv):
+        tok = argv[i]
+        if ws is None and tok == "--workspace" and i + 1 < len(argv):
+            ws = argv[i + 1]
+            i += 2
+            continue
+        if ws is None and tok.startswith("--workspace="):
+            ws = tok.split("=", 1)[1]
+            i += 1
+            continue
+        out.append(tok)
+        i += 1
+    return ws, out
+
+
 def main(argv):
     if not argv or argv[0] in ("-h", "--help", "help"):
         print(USAGE)
         return
 
-    # A leading `--workspace DIR` belongs to whichever subcommand follows it, not
-    # to taskdb specifically. Lift it out and hand it to the right script, so
+    # `--workspace DIR` belongs to whichever subcommand follows it, not to taskdb
+    # specifically. Lift it out and hand it to the right script, so
     # `pwc --workspace X sources runhosts` works exactly like `pwc sources
     # runhosts` does from inside X. (Before this, a leading --workspace shunted
     # EVERYTHING to taskdb, so that invocation died with "invalid choice:
     # 'sources'" — a papercut that only got sharper once coordinating from a
     # parent directory made --workspace routine.)
-    ws = None
-    if argv[0] == "--workspace" and len(argv) >= 2:
-        ws, argv = argv[1], argv[2:]
-    elif argv[0].startswith("--workspace="):
-        ws, argv = argv[0].split("=", 1)[1], argv[1:]
+    #
+    # Accept it ANYWHERE, not just leading. The underlying scripts declare
+    # --workspace as a LEADING global (argparse rejects it after the subcommand), but
+    # a human — and the find-work skill, which documents `pwc sources priority
+    # --workspace <root>` — naturally writes it AFTER the subcommand. So pull it out
+    # of any position here and re-inject it where the scripts expect it, rather than
+    # dying with a cryptic "unrecognized arguments: --workspace …". (This bit for
+    # real the first time find-work ran from ~/work across two boards.)
+    # spawn takes --cwd, not --workspace, and just forwards the rest to a worker —
+    # so never rewrite ITS args. For everything else, lift --workspace from anywhere.
+    _first = argv[1] if argv[0] == "--workspace" and len(argv) > 1 else argv[0]
+    if _first == "spawn":
+        ws = None
+    else:
+        ws, argv = _extract_workspace(argv)
     if not argv:
         print(USAGE)
         return
