@@ -28,9 +28,8 @@ of the way.
 
 - `pwc detail --task <id>` — the task's fields, refs, and
   event timeline; the basis for the cwd, the resume decision, the seed prompt, and
-  the dispatch target (`harness` + `model` + `runhost`, set at queue time by the
-  routing policy; NULL harness = claude, NULL model = the harness's default,
-  NULL runhost = this machine).
+  the dispatch target (`harness` + `model` + `runhost`, set at queue time by
+  `pwc route`). Spawn reads these from the task record; NULL means unrouted.
 - `pwc sources runhosts` — the named remote machines workers can run on
   (`{name: {ssh, workspace_root, …}}`, or `{}`). Resolve a task's `runhost` here
   to get the `--ssh` target and to map the task's `workdir` onto the REMOTE
@@ -42,10 +41,14 @@ of the way.
   the substance.
 - `pwc worker-status --session-ids <uuid>` — whether the task's existing
   session (if any) is currently running.
-- `pwc spawn --task <id> --cwd <dir> [--harness <h>] [--model <m>] [--ssh <target> --runhost <name>] --session-id <uuid> [--resume] [--prompt -] [--name "<id> · <gist>"]`
-  — open the worker tab and launch the task's harness (default claude) with the seed
-  as its prompt, so it **auto-submits the seed on startup** (the worker starts working
-  immediately; there is no review-then-Enter step). Prints
+- `pwc spawn --task <id> --cwd <dir> [--ssh <target> --runhost <name>] --session-id <uuid> [--resume] [--prompt -] [--name "<id> · <gist>"]`
+  — open the worker tab and launch the task's harness. Harness/model are READ from
+  the task record (set by `pwc route` at queue time); do NOT pass `--harness` or
+  `--model` in normal use. For a re-scoped task with stale routing, run `pwc
+  reroute --task <id>` first (clears the fields so the next spawn refuses and tells
+  you to re-route). The locked-down override (rare, logged): `--force-model
+  --force-reason "<why>" --harness <h> --model <m>`. The seed is passed as the
+  harness's prompt, so it **auto-submits on startup**. Prints
   `{harness, model, session_id, session_tracked, cwd, mode, transcript_expected, seed}`
   where `session_tracked` says whether this harness pre-allocates session ids (claude:
   true — it gates `set-session` and everything session-based; see the **Non-claude
@@ -58,6 +61,10 @@ of the way.
   nothing for the user to paste by hand.
 - `pwc set-session --task <id> --session-id <uuid> --workdir <dir>`
   — record the pre-allocated session id at spawn (atomic with a `dispatched` event).
+- `pwc reroute --task <id> [--reason "..."]` — clear a task's
+  stored harness/model (for a re-scoped task whose routing is stale from a different
+  chapter). The next `pwc spawn` will refuse and hand over a `pwc route` template.
+  Does NOT clear the session; those concerns are separate.
 - `pwc clear-session --task <id>` — the inverse: NULL the
   session_id (logs a neutral note, not a dispatch; status untouched). Use to back out
   a session recorded by mistake, or to detach a finished/abandoned one so the task
@@ -194,14 +201,14 @@ of the way.
    from the coordinator at any time.
 
 5. **Pre-allocate and dispatch.** For a claude task, generate a UUID and pass it as
-   `--session-id` (so the id is known before any process exists). For an opencode or
-   codex task, pass no `--session-id` on a fresh spawn — `pwc spawn` pre-creates the
-   session itself (via the harness's server API) and returns the minted id; **record
-   the result's `session_id`, never one you generated**. Pass the task's
-   `--harness` and `--model` when set (from `detail`; omit when NULL — claude with
-   its default model). Pipe the seed via `--prompt -`. Pass a
-   scannable `--name "<id> · <short gist>"` — the id plus a 3–5 word gist from the
-   title (e.g. `SMT-677 · BO auth review`, `slack-ocr · OCR income prefill`).
+    `--session-id` (so the id is known before any process exists). For an opencode or
+    codex task, pass no `--session-id` on a fresh spawn — `pwc spawn` pre-creates the
+    session itself (via the harness's server API) and returns the minted id; **record
+    the result's `session_id`, never one you generated**. Do NOT pass `--harness` or
+    `--model` — spawn reads them from the task record. Pipe the seed via `--prompt
+    -`. Pass a scannable `--name "<id> · <short gist>"` — the id plus a 3–5 word gist
+    from the title (e.g. `SMT-677 · BO auth review`, `slack-ocr · OCR income
+    prefill`).
 
    `pwc spawn` opens the worker tab and launches claude with the
    seed as its positional prompt, so claude **auto-submits the seed on startup** — the
@@ -304,7 +311,8 @@ of the way.
     VPN-gated prod DB, or a browser — route repo-centric work there, keep
     prod-data investigation local.
 - **Non-claude harnesses (task `harness` = opencode, codex, …).** Dispatch works the
-  same — build the seed, `pwc spawn --harness <h> [--model <m>]` — with these deltas:
+  same — build the seed, `pwc spawn` (harness/model come from the task record, not
+  CLI flags) — with these deltas:
   - **opencode and codex are session-tracked like claude** (both verified
     2026-07-10): fresh spawns pre-create the session via the harness's own server
     API (**record the returned `session_id`** — these harnesses mint their own ids),

@@ -171,7 +171,8 @@ def route(profile: dict, table: dict) -> dict:
                                  "why": f"outward-facing: ops-comms tier {ops} < "
                                         f"{_OUTWARD_MIN_OPS_TIER}"})
                 continue
-        candidates.append({**row, "tier": tier, "blended": _blended_cost(row)})
+        candidates.append({**row, "tier": tier, "blended": _blended_cost(row),
+                           "cost_weight": row.get("cost_weight", 1.0)})
 
     if not candidates:
         fail("no model qualifies for this task profile "
@@ -181,9 +182,9 @@ def route(profile: dict, table: dict) -> dict:
              + ". There is no fallback chain by design: widen the profile, fix "
                "harness availability, or lower the requirement deliberately.")
 
-    # Cheapest that clears the bar. Tie-break toward the lower tier (don't
-    # over-serve), then the key, so the result is fully deterministic.
-    candidates.sort(key=lambda c: (c["blended"], c["tier"], c["key"]))
+    # Cheapest that clears the bar, after cost_weight. Tie-break toward the lower
+    # tier (don't over-serve), then the key, so the result is fully deterministic.
+    candidates.sort(key=lambda c: (c["blended"] * c["cost_weight"], c["tier"], c["key"]))
     pick = candidates[0]
 
     bits = [f"cheapest {domain} model at tier >= {need}"]
@@ -191,11 +192,20 @@ def route(profile: dict, table: dict) -> dict:
         bits.append(raised_why)
     if context_need:
         bits.append(f"{pick['context']:,} ctx covers the {context_need:,} needed")
-    runners = [c["key"] for c in candidates[1:3]]
+    runners = [c for c in candidates[1:3]]
     if runners:
-        bits.append(f"beat {', '.join(runners)} on cost")
+        parts = []
+        for c in runners:
+            w = c["cost_weight"]
+            parts.append(f"{c['key']}" + (f" (eff ×{w})" if w != 1.0 else ""))
+        bits.append(f"beat {', '.join(parts)} on effective cost")
+    weighted = {c["key"]: c["cost_weight"] for c in candidates
+                if c["cost_weight"] != 1.0}
+    if weighted:
+        bits.append("cost weights: " + ", ".join(
+            f"{k} ×{w}" for k, w in weighted.items()))
 
-    return {
+    result = {
         "key": pick["key"],
         "harness": pick["harness"],
         "model": pick["model"],
@@ -212,6 +222,9 @@ def route(profile: dict, table: dict) -> dict:
         ],
         "rejected": rejected,
     }
+    if pick["cost_weight"] != 1.0:
+        result["cost_weight_applied"] = pick["cost_weight"]
+    return result
 
 
 def main(argv=None):

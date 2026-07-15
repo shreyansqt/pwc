@@ -483,6 +483,35 @@ def cmd_clear_session(args):
     emit(pwc_db.row_to_dict(row))
 
 
+def cmd_reroute(args):
+    """Clear a task's stored harness/model so the next spawn forces a fresh route.
+
+    For re-scoped tasks whose routing is stale (a task picked up for a different
+    chapter than it was last dispatched for). This does NOT clear the session —
+    those concerns are separate and explicit. After reroute, `pwc spawn` will refuse
+    with a route template, and the coordinator runs `pwc route` to re-profile it.
+    """
+    conn = pwc_db.connect(args.workspace)
+    with conn:
+        row = _require_task(conn, args.task)
+        tid = row["id"]
+        ts = now_iso()
+        reason = args.reason or "task re-scoped; routing invalidated"
+        conn.execute(
+            "UPDATE tasks SET harness = NULL, model = NULL, updated_at = ? WHERE id = ?",
+            (ts, tid),
+        )
+        _insert_event(conn, task_id=tid, source="coordinator", kind="note",
+                      detail=f"routing cleared: {reason}")
+        out = conn.execute("SELECT * FROM tasks WHERE id = ?", (tid,)).fetchone()
+    result = pwc_db.row_to_dict(out)
+    # The caller needs a hint because the next spawn WILL refuse.
+    result["_hint"] = ("routing cleared — run `pwc route` to re-profile this task, "
+                       f"then `pwc update-task --task {tid} --harness <h> --model <m>` "
+                       "to store the result")
+    emit(result)
+
+
 def cmd_archive(args):
     """Remove a task from the board WITHOUT marking it done.
 
@@ -810,6 +839,14 @@ def build_parser() -> argparse.ArgumentParser:
              "MISTAKE — never to mean 'the worker stopped' (that breaks resume + cost)")
     s.add_argument("--task", required=True)
     s.set_defaults(func=cmd_clear_session)
+
+    s = sub.add_parser(
+        "reroute",
+        help="clear a task's harness/model so the next spawn forces a fresh pwc route "
+             "(for re-scoped tasks whose routing is stale)")
+    s.add_argument("--task", required=True)
+    s.add_argument("--reason", help="why the routing is being cleared")
+    s.set_defaults(func=cmd_reroute)
 
     s = sub.add_parser(
         "archive",

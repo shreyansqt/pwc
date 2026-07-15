@@ -5,8 +5,9 @@ DOMAIN = "implementation"
 
 
 def _model(key, *, available=True, data_ok=True, context=200_000, tiers=None,
-           cost_in=1.0, cost_out=5.0, cache_read=1.0, cache_write=1.0):
-    return {
+           cost_in=1.0, cost_out=5.0, cache_read=1.0, cache_write=1.0,
+           cost_weight=None):
+    row = {
         "key": key,
         "harness": "test",
         "model": f"test/{key}",
@@ -20,6 +21,9 @@ def _model(key, *, available=True, data_ok=True, context=200_000, tiers=None,
         "cache_write": cache_write,
         "tiers": tiers or {DOMAIN: 3},
     }
+    if cost_weight is not None:
+        row["cost_weight"] = cost_weight
+    return row
 
 
 def _table(*models):
@@ -109,3 +113,40 @@ def test_no_qualifying_model_exits():
     bad = _model("bad", available=False)
     with pytest.raises(SystemExit):
         route(_profile(), _table(bad))
+
+
+# ── 7. cost_weight ranks weighted models as more expensive ─────────────────────
+def test_cost_weight_loses_to_cheaper_peer():
+    glm = _model("glm", cost_in=1.0, cost_out=3.0, cache_read=1.0, cache_write=1.0,
+                 cost_weight=1.5)
+    ds = _model("deepseek", cost_in=0.5, cost_out=1.0, cache_read=0.5, cache_write=0.5,
+                cost_weight=1.0)
+    result = route(_profile(), _table(glm, ds))
+    assert result["key"] == "deepseek"
+
+
+def test_cost_weight_still_wins_when_only_qualified():
+    weighted = _model("weighted", cost_in=1.0, cost_out=3.0, cache_read=1.0, cache_write=1.0,
+                      cost_weight=1.5, tiers={DOMAIN: 4})
+    lo = _model("lo", cost_in=0.5, cost_out=1.0, cache_read=0.5, cache_write=0.5,
+                tiers={DOMAIN: 2})
+    result = route(_profile(reasoning=4), _table(weighted, lo))
+    assert result["key"] == "weighted"
+    assert result["cost_weight_applied"] == 1.5
+
+
+def test_cost_weight_winner_output():
+    weighted = _model("glm", cost_in=1.0, cost_out=3.0, cache_read=1.0, cache_write=1.0,
+                      cost_weight=1.5)
+    ds = _model("deepseek", cost_in=1.5, cost_out=4.0, cache_read=1.5, cache_write=1.5)
+    result = route(_profile(), _table(weighted, ds))
+    # glm list price is cheaper but effective cost (×1.5) pushes it above deepseek
+    assert result["key"] == "deepseek"
+    assert "cost weights" in result["why"]
+
+
+def test_cost_weight_unweighted_default():
+    m = _model("cheap", cost_in=1.0, cost_out=5.0, cache_read=1.0, cache_write=1.0)
+    result = route(_profile(), _table(m))
+    assert result["key"] == "cheap"
+    assert "cost_weight_applied" not in result

@@ -52,10 +52,18 @@ works: the pre-allocated uuid is in the remote claude's argv, and worker_status.
 greps it over ssh.
 
 Usage:
-  spawn.py --task <id> --cwd <dir> [--harness claude|opencode|codex] [--model M]
+  spawn.py --task <id> --cwd <dir>
            [--ssh <target>] [--runhost <name>]
            [--session-id <uuid>] [--resume]
            [--prompt-file <path> | --prompt -] [--name <display-name>]
+
+  spawn.py --task <id> --cwd <dir>
+           --force-model --force-reason "<why>" --harness <h> --model <m>
+           [--session-id <uuid>] [--resume] ...
+
+Harness/model are read from the task record (set by `pwc route`). The
+--harness/--model flags require --force-model + --force-reason and log an
+audit event — they are the locked-down override, not everyday flags.
 """
 
 from __future__ import annotations
@@ -68,7 +76,7 @@ import sys
 import uuid
 from pathlib import Path
 
-from _common import emit, fail
+from _common import emit, fail, find_workspace_root, now_iso
 
 
 def session_slug(cwd: str) -> str:
@@ -478,6 +486,87 @@ def build_command(*, harness, session_id, resume, cwd, seed_prompt=None,
     return mode, inner, effective_id, session_tracked, bool(seed_prompt) and needs_submit
 
 
+_TYPE_DOMAIN = {
+    "pr-review": "code-review",
+    "jira": "implementation",
+    "build-or-feature-work": "implementation",
+    "slack": "ops-comms",
+    "research": "research-writing",
+    "investigation": "research-writing",
+}
+
+
+def _unrouted_error(task_type: str, task_id: str) -> None:
+    """Emit the route template and exit nonzero — the unfilled template the
+    coordinator pastes, fills in the judgment flags, and runs."""
+    domain = _TYPE_DOMAIN.get(task_type, "implementation")
+    fail(
+        f"task {task_id!r} has no routing — harness/model not set.\n"
+        f"\n"
+        f"  pwc route --domain {domain} --reasoning <1-5>"
+        f" --verifiability <1-5> --risk none\n"
+        f"\n"
+        f"then store the result:\n"
+        f"\n"
+        f"  pwc update-task --task {task_id} --harness <h> --model <m>\n"
+        f"\n"
+        f"and re-run this spawn command.\n"
+        f"\n"
+        f"to override routing manually (rare): "
+        f"pass --force-model --force-reason \"<why>\" --harness <h> --model <m>"
+    )
+
+
+def resolve_routing(args, task_row, workspace_root):
+    """Return (harness, model) for the worker, or fail with an actionable error.
+
+    Normal path: the task's stored harness/model (set by pwc route). Force path:
+    explicit --force-model + --force-reason + --harness + --model, logged as an
+    audit event. Error path: --harness/--model without --force-model, or no
+    routing on the task.
+    """
+    import pwc_db
+
+    task_harness = task_row["harness"]
+    task_model = task_row["model"]
+    task_type = task_row["type"]
+    task_id = task_row["id"]
+
+    if args.force_model:
+        if not args.force_reason:
+            fail("--force-reason is required with --force-model "
+                 "(explain why the override is necessary)")
+        if not args.harness or not args.model:
+            fail("--harness AND --model are both required with --force-model")
+
+        conn = pwc_db.connect(workspace_root)
+        with conn:
+            ts = now_iso()
+            detail = (
+                f"FORCED model {args.harness}/{args.model} "
+                f"over routed {task_harness}/{task_model}: {args.force_reason}"
+            )
+            conn.execute(
+                "INSERT INTO events (task_id, at, source, kind, detail) "
+                "VALUES (?,?,?,?,?)",
+                (task_id, ts, "coordinator", "note", detail),
+            )
+            conn.execute(
+                "UPDATE tasks SET last_event_at = ? WHERE id = ?", (ts, task_id),
+            )
+        return args.harness, args.model
+
+    if args.harness or args.model:
+        fail("--harness and --model require --force-model + --force-reason "
+             "to override routing. Run `pwc route` to set routing normally, "
+             "or add --force-model --force-reason \"<why>\" to override.")
+
+    if not task_harness or not task_model:
+        _unrouted_error(task_type, task_id)
+
+    return task_harness, task_model
+
+
 # Tails that mark "the shell is sitting at an interactive prompt" on the last
 # non-empty screen line — the fallback readiness signal when iTerm2 shell
 # integration isn't installed in the worker's shell.
@@ -665,9 +754,12 @@ def main(argv=None):
     p = argparse.ArgumentParser(prog="spawn.py", description=__doc__)
     p.add_argument("--task", required=True)
     p.add_argument("--cwd", required=True)
-    p.add_argument("--harness", default="claude",
-                   help="coding agent to launch (claude|opencode|codex); default claude")
-    p.add_argument("--model", help="model override for the harness")
+    p.add_argument("--force-model", action="store_true",
+                   help="override the task's routed harness/model "
+                        "(requires --force-reason, --harness, --model)")
+    p.add_argument("--force-reason", help="why the override is necessary")
+    p.add_argument("--harness", help="harness override (requires --force-model)")
+    p.add_argument("--model", help="model override (requires --force-model)")
     p.add_argument("--ssh", help="run the worker on this remote host (ssh target) "
                                  "inside tmux; --cwd must be the REMOTE path. "
                                  "claude harness only for now.")
@@ -682,6 +774,22 @@ def main(argv=None):
                    help="print the command without opening a tab (for testing)")
     args = p.parse_args(argv)
 
+    cwd = str(Path(args.cwd).expanduser())
+    if not args.dry_run and not os.path.isdir(cwd):
+        fail(f"--cwd does not exist: {cwd}")
+
+    workspace_root = str(find_workspace_root(cwd))
+    import pwc_db as _pwc_db
+    task_conn = _pwc_db.connect(workspace_root)
+    task_row = task_conn.execute(
+        "SELECT * FROM tasks WHERE id = ?", (args.task,)
+    ).fetchone()
+    if task_row is None:
+        fail(f"no task {args.task!r} in workspace {workspace_root}")
+    task_row = dict(task_row)
+
+    harness, model = resolve_routing(args, task_row, workspace_root)
+
     session_id = args.session_id or str(uuid.uuid4())
 
     seed_prompt = None
@@ -694,9 +802,9 @@ def main(argv=None):
 
     if args.ssh:
         # Remote worker: cwd is a REMOTE path — validate remotely, build ssh+tmux.
-        if args.harness != "claude":
+        if harness != "claude":
             fail(f"remote workers support only the claude harness for now "
-                 f"(got {args.harness!r}) — opencode/codex pre-allocation would "
+                 f"(got {harness!r}) — opencode/codex pre-allocation would "
                  f"need their server APIs run on the remote host")
         cwd = args.cwd
         if not args.dry_run:
@@ -704,20 +812,17 @@ def main(argv=None):
                      what=f"remote cwd check: {cwd}")
         mode, command = build_remote_claude_command(
             ssh_target=args.ssh, session_id=session_id, resume=args.resume,
-            cwd=cwd, seed_prompt=seed_prompt, model=args.model,
+            cwd=cwd, seed_prompt=seed_prompt, model=model,
             task=args.task, dry_run=args.dry_run,
         )
         session_tracked = True
         needs_submit = False  # remote is claude-only; claude auto-submits
     else:
-        cwd = str(Path(args.cwd).expanduser())
-        if not os.path.isdir(cwd):
-            fail(f"--cwd does not exist: {cwd}")
-        if not args.dry_run and shutil.which(args.harness) is None:
-            fail(f"harness {args.harness!r} is not installed (not on PATH)")
+        if not args.dry_run and shutil.which(harness) is None:
+            fail(f"harness {harness!r} is not installed (not on PATH)")
         mode, command, session_id, session_tracked, needs_submit = build_command(
-            harness=args.harness, session_id=session_id, resume=args.resume,
-            cwd=cwd, seed_prompt=seed_prompt, model=args.model,
+            harness=harness, session_id=session_id, resume=args.resume,
+            cwd=cwd, seed_prompt=seed_prompt, model=model,
             title=args.name or args.task, dry_run=args.dry_run,
         )
     # The seed rides in the launch command as the harness's prompt argument
@@ -730,11 +835,11 @@ def main(argv=None):
     seed_in_command = bool(seed_prompt) and not needs_submit
 
     title = tab_title(name=args.name, task=args.task,
-                      harness=args.harness, model=args.model)
+                      harness=harness, model=model)
 
     result = {
-        "harness": args.harness,
-        "model": args.model,
+        "harness": harness,
+        "model": model,
         "tab_title": title,
         # The EFFECTIVE session id — for opencode a fresh spawn mints it here, so
         # the dispatch skill must record THIS value, not an id it generated.
@@ -752,7 +857,7 @@ def main(argv=None):
         # How to reopen the viewport if the tab is closed (worker keeps running).
         result["attach_command"] = (
             f"ssh -t {shlex.quote(args.ssh)} tmux attach -t {_tmux_name(args.task)}")
-    elif args.harness == "claude":
+    elif harness == "claude":
         result["transcript_expected"] = str(transcript_path(cwd, session_id))
 
     if args.dry_run:

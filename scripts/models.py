@@ -181,7 +181,9 @@ def _seed_table() -> dict:
              "tiers": dict(tiers)}
             for key, harness, model, catalog, data_ok, tiers in _SEED
         ],
-        "overlay": {},
+        "overlay": {
+            "opencode/glm-5.2": {"cost_weight": 1.5},
+        },
     }
 
 
@@ -225,10 +227,11 @@ def merged_models(data: dict) -> list[dict]:
             row.setdefault("tiers", {}).update(ov["tiers"])
         if ov.get("note"):
             row["note"] = ov["note"]
-        if ov.get("available") is not None:  # a manual "don't route here" veto
+        if ov.get("available") is not None:
             row["available"] = ov["available"]
-        if ov.get("data_ok") is not None:  # "I'm fine sending real data here" (or not)
+        if ov.get("data_ok") is not None:
             row["data_ok"] = ov["data_ok"]
+        row["cost_weight"] = float(ov.get("cost_weight", 1.0))
         out.append(row)
     return out
 
@@ -458,6 +461,27 @@ def cmd_set_tier(args):
           "note": ov.get("note"), "overlay": ov})
 
 
+def cmd_set_weight(args):
+    """Write a per-model cost_weight into the overlay.
+
+    A cost_weight > 1.0 makes the router rank this model as MORE expensive than its
+    list price; < 1.0 makes it cheaper. The tier floor is unaffected — a weighted
+    model still wins when it's the only qualified option. This is a cost lever, not a
+    capability demotion.
+    """
+    if args.weight <= 0:
+        fail(f"cost_weight must be > 0 (got {args.weight})")
+    data = load_raw()
+    if not any(m.get("key") == args.key for m in data["models"]):
+        known = ", ".join(m.get("key", "?") for m in data["models"])
+        fail(f"unknown model key {args.key!r} — known: {known}")
+    ov = data.setdefault("overlay", {}).setdefault(args.key, {})
+    ov["cost_weight"] = args.weight
+    ov["updated_at"] = now_iso()
+    save(data)
+    emit({"key": args.key, "cost_weight": args.weight, "overlay": ov})
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="models.py", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -486,6 +510,11 @@ def main(argv=None):
     s.add_argument("--tier", required=True, type=int)
     s.add_argument("--note")
     s.set_defaults(func=cmd_set_tier)
+
+    s = sub.add_parser("set-weight", help="write a cost weight into the overlay")
+    s.add_argument("--key", required=True)
+    s.add_argument("--weight", required=True, type=float)
+    s.set_defaults(func=cmd_set_weight)
 
     args = p.parse_args(argv)
     try:
