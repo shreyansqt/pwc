@@ -269,6 +269,28 @@ def harness_available(harness: str) -> bool:
     return True  # claude/codex authenticate out-of-band (subscription login)
 
 
+# ── codex model catalog ─────────────────────────────────────────────────────────
+def _codex_model_slugs() -> set[str] | None:
+    """Query codex for its currently usable model slugs.
+
+    Returns a set of slug names codex lists as runnable, or None if the
+    query fails (binary missing, not installed, or unexpected output).
+    """
+    if shutil.which("codex") is None:
+        return None
+    try:
+        out = subprocess.run(
+            ["codex", "debug", "models"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if out.returncode != 0:
+            return None
+        data = json.loads(out.stdout)
+        return {m["slug"] for m in data.get("models", []) if m.get("slug")}
+    except (OSError, ValueError, subprocess.SubprocessError, KeyError):
+        return None
+
+
 # ── fetch: refresh the objective columns ──────────────────────────────────────
 def _openrouter_catalog() -> dict[str, dict]:
     """{catalog_id: {cost_in, cost_out, cache_read, cache_write, context}} from
@@ -310,10 +332,12 @@ def compute_fetch(data: dict) -> tuple[dict, list[dict]]:
     the user. Nothing is written here; the caller decides.
     """
     catalog = _openrouter_catalog()
+    codex_slugs = _codex_model_slugs()  # None if query failed or codex not installed
     new = copy.deepcopy(data)
     changes = []
     for row in new["models"]:
         key = row.get("key")
+        harness = row.get("harness", "")
 
         # objective columns from the catalog
         entry = catalog.get(row.get("catalog_id"))
@@ -328,8 +352,15 @@ def compute_fetch(data: dict) -> tuple[dict, list[dict]]:
                     changes.append({"key": key, "field": field, "old": old, "new": fresh})
                     row[field] = fresh
 
-        # availability is probed locally, not fetched
-        avail = harness_available(row.get("harness", ""))
+        # availability is probed locally, not fetched.
+        # codex: the binary check alone is insufficient — ChatGPT-account codex
+        # silently rejects certain models the API-key variant supports. Cross-
+        # reference against codex's own model catalog (the authoritative list).
+        if harness == "codex" and codex_slugs is not None:
+            avail = (shutil.which("codex") is not None
+                     and row.get("model") in codex_slugs)
+        else:
+            avail = harness_available(harness)
         if row.get("available") != avail:
             changes.append({"key": key, "field": "available",
                             "old": row.get("available"), "new": avail})
