@@ -292,7 +292,25 @@ of the way.
    (<model>) worker in <dir>"`). Either way, **move the task to `in-progress`**
    (`pwc update-task --task <id> --status in-progress`) — dispatching a worker is
    what flips a task from `pending` to `in-progress`. (On a resume of an already-started
-   task it's already in-progress; setting it again is harmless.) Then, in your reply:
+   task it's already in-progress; setting it again is harmless.)
+
+   **Then mark the task's Slack thread(s) as picked-up — add 👀.** For each Slack ref
+   on the task (identity AND working `slack` refs from `detail`), react to the thread's
+   root message with **`eyes`** (`slack_add_reaction`), so the teammate who posted the
+   review/ask sees it's been picked up without anyone typing a reply. Get `channel_id`
+   and `message_ts` by parsing the stored permalink — `/archives/<channel_id>/p<digits>`
+   → `channel_id` is the `C…` segment, `message_ts` is the digits with a `.` inserted
+   6 from the end (`p1783622525430479` → `1783622525.430479`). **Best-effort:** a
+   reaction that fails (thread gone, bad ref) is logged and skipped, never a reason to
+   fail the dispatch. **Additive only:** Slack has no remove-reaction API, so 👀 is
+   *added*, never later swapped — the worker adds an *outcome* emoji next to it at the
+   end (see report-status), and 👀 simply stays. **Known limitation (deliberate):** a
+   task later paused/killed keeps its 👀 — there's no removal API and this is
+   best-effort by design; don't try to build teardown. Only react at all when the task
+   actually carries Slack refs (smarta tasks do; a GitHub-only side-projects task has
+   none — skip silently).
+
+   Then, in your reply:
    tell the user the worker tab is open and the seed was **auto-submitted**, so the
    worker is already **getting oriented** — it'll investigate the task and then come
    back to *them* in that tab with its understanding, options, and a recommendation

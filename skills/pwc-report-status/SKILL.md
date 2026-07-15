@@ -107,6 +107,27 @@ worker to.
    **parent** message's ts (not a reply's), so the ref covers the whole thread. If a
    thread for this task is already attached, you don't need to re-add it.
 
+4a. **On `done` — mark the outcome on the task's Slack thread(s) with a reaction.**
+   The coordinator added 👀 (`eyes`) when it dispatched this task (see
+   `/pwc-start-work`), signalling "picked up." Now that you're finished, add the
+   **outcome** emoji to the same thread root(s) so the teammate who posted the ask sees
+   how it landed, without reading a reply. Pick the emoji from what actually happened:
+   - **`white_check_mark`** (✅) — approved / done cleanly / ask satisfied.
+   - **`speech_balloon`** (💬) — changes requested / you left review comments to address.
+   - **`warning`** (⚠️) — blocked or a problem the teammate needs to act on.
+
+   Choose by the *real* verdict — ✅ on a changes-requested review is a lie; use 💬.
+   React on every `slack` ref the task carries (identity + working), parsing
+   `channel_id`/`message_ts` from each stored permalink (`/archives/<channel_id>/p<digits>`
+   → ts is the digits with a `.` 6 from the end). Use `slack_add_reaction`.
+
+   **Additive, not a swap:** Slack has no remove-reaction API, so the 👀 stays and your
+   outcome emoji sits *next to* it — "👀 + ✅" reads correctly as "picked up, then
+   approved." Don't try to remove the 👀. **Best-effort:** a failed reaction is skipped,
+   not a reason to fail the report. Only applies when the task has Slack refs (skip
+   silently otherwise). This step is `done`-only — on `blocked`/`note` you may add ⚠️ if
+   it genuinely helps the teammate, but don't mark ✅ on unfinished work.
+
 5. **Attach any playground/investigation artifact you created for this task.** When
    the work produced a dump, CSV, or scratch dir under `_playground/` (see the
    workspace convention), attach its path as a working ref so it's findable from the
