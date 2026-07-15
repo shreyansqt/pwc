@@ -61,7 +61,8 @@ import argparse
 import json
 import sys
 
-from _common import config_path, emit, fail, read_json_stdin
+from _common import (config_path, emit, fail, multi_workspace_fail,
+                     read_json_stdin, workspace_name, workspaces_below)
 
 # Known source kinds and which fields each expects. Validation is advisory — unknown
 # keys are allowed (forward-compatible), but a known source missing required fields
@@ -220,6 +221,64 @@ def cmd_set(args):
     emit({"written": str(p), "sources": list(data["sources"].keys())})
 
 
+# Every sources subcommand READS the config except `set`, which rewrites it. Reads
+# fan out across the workspaces below a parent directory; a write must pin to one.
+_WRITE_OPS = frozenset({"set"})
+
+
+def _capture(func, args, root):
+    """Run a sources read op against `root` and parse its JSON, or None if it failed.
+
+    Mirrors taskdb.py's `_capture`: the cmd_* handlers all `emit()` to stdout, so we
+    redirect stdout, run the handler with `--workspace root`, and parse what it wrote.
+    One bad workspace must not kill the sweep.
+    """
+    import contextlib
+    import copy
+    import io
+
+    sub = copy.copy(args)
+    sub.workspace = str(root)
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            func(sub)
+    except SystemExit:
+        return None
+    except Exception:  # noqa: BLE001 — one bad workspace must not kill the sweep
+        return None
+    text = buf.getvalue().strip()
+    if not text:
+        return None
+    try:
+        return json.loads(text)
+    except ValueError:
+        return None
+
+
+def _multi_workspace(args, roots) -> bool:
+    """Handle a sources op invoked from a PARENT of several workspaces. True if handled.
+
+    Sources config is per-workspace, so a read from the coordination vantage point
+    (~/work, holding smarta/ and side-projects/) fans out and returns a dict keyed by
+    workspace name — each value is that workspace's normal payload. /find-work iterates
+    the keys, scanning each workspace's own sources and queueing into that same board.
+
+    A write (`set`) belongs to exactly ONE workspace's config, so it never fans out:
+    from a parent we refuse and demand --workspace, matching taskdb's write-pins rule.
+    """
+    if args.cmd in _WRITE_OPS:
+        multi_workspace_fail(roots, f"sources {args.cmd}")
+        return True
+    per_workspace = {}
+    for root in roots:
+        out = _capture(args.func, args, root)
+        if out is not None:
+            per_workspace[workspace_name(root)] = out
+    emit({"workspaces": per_workspace})
+    return True
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="sources.py", description=__doc__)
     p.add_argument("--workspace", help="workspace root (default: discover from cwd)")
@@ -236,6 +295,16 @@ def main(argv=None):
     sub.add_parser("routing").set_defaults(func=cmd_routing)
     sub.add_parser("runhosts").set_defaults(func=cmd_runhosts)
     args = p.parse_args(argv)
+
+    # Standing in a PARENT of several workspaces (~/work), with no --workspace? Discovery
+    # walking UP finds nothing there — but it's the coordination vantage point. Fan reads
+    # out (keyed by workspace) and pin writes down, exactly as taskdb.py does.
+    if not args.workspace:
+        roots = workspaces_below()
+        if roots:
+            _multi_workspace(args, roots)
+            return
+
     try:
         args.func(args)
     except Exception as e:  # noqa: BLE001

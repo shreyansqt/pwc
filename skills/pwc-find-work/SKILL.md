@@ -14,8 +14,53 @@ tracking): find brings new work in; show tells you where existing work stands.
 ## Configuration
 
 - **CLI**: `pwc` — on PATH (installed by `install.sh` as `~/.local/bin/pwc`). All task-database access goes through it; never read or write the database directly.
-- **Workspace**: the current directory; task database auto-discovered at
-  `<workspace>/.pwc/taskdb.db`.
+- **Workspace**: normally the current directory; task database auto-discovered at
+  `<workspace>/.pwc/taskdb.db`. **But find-work also runs from a PARENT of several
+  workspaces** — standing in `~/work` (which holds `smarta/` and `side-projects/`) is
+  the coordination vantage point, and a scan there covers *every* workspace below it.
+  See "Multi-workspace scans" below; it changes step 1 and step 5.
+
+## Multi-workspace scans
+
+**`pwc` discovers every workspace one level below the current directory.** Standing in
+a directory that *is* a workspace (it has `.pwc/taskdb.db` or `.pwc/store.json`), a scan
+behaves exactly as it always has — one workspace, single-workspace output shapes,
+nothing here applies. But standing in a **parent** of several workspaces (the natural
+coordination spot, `~/work`), `pwc` fans reads out across all of them. This is the same
+"reads fan out, writes pin to one board" design `/pwc-show-work` already uses.
+
+Concretely, from a parent:
+
+- **`pwc sources enabled` returns `{"workspaces": {"<name>": {"sources": {…}}, …}}`** —
+  each workspace's enabled sources under its name — instead of the bare
+  `{"sources": {…}}` you get inside a single workspace. **Detect which shape you got:**
+  a top-level `workspaces` key means multi-workspace; its absence means single. Do not
+  assume — a workspace configured with no children, or a run from inside one workspace,
+  gives the bare shape.
+- **Scan each workspace's sources against that workspace's own config**, in turn. The
+  workspaces are independent bodies of work with different sources (smarta = Jira +
+  Slack + email + calendar; side-projects = GitHub issues). Treat each as its own
+  find-work pass — its own JQL, its own channels, its own `last_scanned`, its own
+  digest filters. Do NOT merge candidates across workspaces into one pool; they belong
+  to different boards.
+- **Every write PINS to one workspace — pass `--workspace <root>` on every mutating
+  call** (`add-task`, `add-ref`, `log-event`, `update-task`, `find-refs`, `detail`).
+  A task found while scanning smarta's sources is queued into the smarta board; a
+  GitHub issue in side-projects goes to that board. `pwc` REFUSES a bare-id write from
+  a parent (it can't tell which board you mean), so the `--workspace` is not optional
+  here. Use the workspace ROOT path (the value `workspaces_below` reports, e.g.
+  `/Users/shreyans/work/smarta`), not the short name.
+- **Read each workspace's own policy** — `pwc sources priority --workspace <root>`,
+  `pwc sources routing --workspace <root>` — when queueing into it. Priority and
+  routing are per-workspace (smarta ranks against a Jira order; side-projects uses
+  tiers), so a task's priority/model must come from ITS board's policy, never the
+  other's.
+
+**Report and render grouped by workspace, never interleaved.** Present candidates,
+the coverage ledger (step 7), and the final board (step 8) in a per-workspace section
+each — because priority means different things on different boards, so a single merged
+ranking would invent an order the user never made. This mirrors `/pwc-show-work`'s
+grouped rendering.
 
 ## Tools
 
@@ -64,9 +109,20 @@ tracking): find brings new work in; show tells you where existing work stands.
    `overlay` — `fetch` cannot touch them, so a refresh never reverts a judgment they
    made. Say so if they ask.
 
-1. **Read the sources config** with `pwc sources enabled`. If it's empty (no sources
-   configured), tell the user to run `/pwc-setup-workspace` first and stop — there's
-   nothing to scan until sources are set up.
+1. **Read the sources config** with `pwc sources enabled`.
+
+   **First, determine single- vs multi-workspace from the output shape** (see
+   "Multi-workspace scans"):
+   - **Bare `{"sources": {…}}`** — one workspace. If `sources` is empty (no sources
+     configured), tell the user to run `/pwc-setup-workspace` first and stop — there's
+     nothing to scan until sources are set up. Otherwise proceed through steps 2–8 once.
+   - **`{"workspaces": {"<name>": {"sources": {…}}, …}}`** — you're in a parent of
+     several workspaces. Run steps 2–8 **once per workspace**, each against its own
+     config and pinning every write to that workspace's root with `--workspace`. Skip
+     (with a one-line note) any workspace whose `sources` came back empty rather than
+     stopping the whole run — the other workspaces still have work to find. If the
+     `workspaces` object itself is empty, there are no configured workspaces below here;
+     tell the user and stop.
 
 2. **Scan each enabled source** using its configured parameters: run the configured
    Jira JQL, list GitHub items for the configured org/watch-types, search the
@@ -329,6 +385,15 @@ tracking): find brings new work in; show tells you where existing work stands.
    then `add-ref --kind identity --ref-type <t> --value <raw-id>` to attach its
    identity reference, then `log-event --kind new-task`. Report back what was queued.
 
+   **Multi-workspace: pin every write with `--workspace <root>`.** When scanning from a
+   parent (step 1), each of these commands — `add-task`, `add-ref`, `log-event`, and the
+   `update-task` / `find-refs` / `detail` used in steps 3 and 6 — MUST carry
+   `--workspace <root>` naming the board the candidate belongs to (the workspace whose
+   sources surfaced it). `pwc` refuses a bare-id write from a parent rather than guess a
+   board, so this is required, not optional. Read that workspace's own priority/routing
+   policy too — `pwc sources priority --workspace <root>` and `… routing --workspace
+   <root>` — since those differ per board.
+
    **Set `--harness` / `--model` by profiling the task and asking `pwc route`.**
    Routing is no longer a prose rule you apply by judgment — it's a deterministic
    decision made from a task PROFILE, so the same task always gets the same answer
@@ -465,6 +530,10 @@ tracking): find brings new work in; show tells you where existing work stands.
    backstop for the whole skill: even if an earlier step mis-judged something, the
    ledger forces it back into view.
 
+   **Multi-workspace:** give each workspace its own ledger section (one sub-table per
+   board), so a scanned item is reconciled against the board it belongs to — don't
+   pool them.
+
 8. **Render the full board at the end.** After queuing (and after reporting what was
    found / linked), always finish by rendering the board exactly as `/pwc-show-work`
    does — run `pwc summary` and present it in that format: a **main table**
@@ -479,6 +548,12 @@ tracking): find brings new work in; show tells you where existing work stands.
    stands without running `/pwc-show-work` separately. This is a *render only* — do not
    re-run find-work's scans or show-work's worker-status/staleness sweeps; just read
    `summary` and display it.
+
+   **Multi-workspace:** from a parent, `pwc summary` already fans out and tags each row
+   with its `workspace`. Render one board section PER workspace (a heading, then that
+   workspace's main + recently-finished tables) — never interleaved into a single
+   ranking, since priority means different things on different boards. This is exactly
+   how `/pwc-show-work` renders the combined board.
 
 ## Notes
 
