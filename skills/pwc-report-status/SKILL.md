@@ -13,11 +13,8 @@ fields the coordinator owns.
 Run this **from the coordinator** to record where a task stands (after checking in
 on a worker, or to log the outcome of an inline task you handled). A **worker can
 also run it** — PWC's skills are installed globally, so `/pwc-report-status` resolves
-in any session — but only once it's warmed up and *you've asked it to*; a fresh
-worker correctly won't run a reporting command just because its opening message
-said so, and the `/pwc-start-work` seed deliberately doesn't ask. So in practice
-reporting is human-initiated: you run it from the coordinator, or you tell the
-worker to.
+in any session. `/pwc-start-work` tells workers to run it only as a closing step, once
+they have finished or hit a blocker they cannot clear.
 
 ## Configuration
 
@@ -139,7 +136,14 @@ worker to.
    Prefer the investigation's directory (the `_playground/<YYYY-MM>/<key>-<slug>/`
    leaf) over each file. If it's already attached, don't re-add it.
 
-6. **On `done` only — measure what it cost, and rate the model that ran it.** This is
+6. **If this task used the no-skill fallback gate, propose the skill gap at wrap-up.**
+   When `/pwc-start-work` said no skill was configured for this task type, include a
+   short skill/instruction review before you finish reporting: say whether the workflow
+   looks repeatable and should become a reusable PWC skill or instruction, or whether it
+   was a one-off. Do not edit or publish skills from here; surface the recommendation
+   for the user to decide.
+
+7. **On `done` only — measure what it cost, and rate the model that ran it.** This is
    the feedback loop that makes routing get *better* instead of staying a guess.
 
    **a. Measure.** Run `pwc cost --task <id>`. This re-reads the worker session's

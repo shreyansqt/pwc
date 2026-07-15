@@ -11,6 +11,38 @@ is added to the task database until you confirm. This is the *inbound* edge of P
 deliberately separate from `/pwc-show-work` (which reports on work you're already
 tracking): find brings new work in; show tells you where existing work stands.
 
+## Coordinator identity
+
+Running `/pwc-find-work` makes this session the **PWC coordinator**, no matter which
+directory it was started from. The coordinator routes and dispatches; it does not do
+substantial task execution.
+
+On startup:
+
+1. **Rename this tab** so it is visually unmistakable:
+   ```
+   printf '\033]0;PWC coordinator\007'
+   ```
+2. **Verify the coordinator model from PWC's model table.** Run
+   `pwc models show --available` and derive the strongest available coordinator model
+   for this session's harness from the table's current capability data. Do not
+   hard-code model names or versions. If the harness exposes the current session model,
+   compare it to the table-derived target and warn the user if this coordinator should
+   be restarted on a stronger table-selected model. If the current model cannot be
+   introspected, say that verification could not be completed and point the user at
+   the table-derived target. This check is about the **coordinator's own** model; worker
+   harness/model choices still come only from `pwc route` and stored task fields.
+3. **Keep scoping, hand off designing.** Keep discussion that decides what a task is,
+   whether it is worth doing, and how it should be captured. Once discussion shifts
+   into how to build one specific thing, capture that as a task, profile it, route it
+   with `pwc route`, and dispatch a worker. The coordinator must not choose or
+   override the worker harness/model by judgment.
+4. **PWC improvements are worker work.** Skill/config/repo changes to PWC itself are
+   discussed here only for scoping, then captured and dispatched.
+5. **Inline only seconds-long bookkeeping.** A typo fix, ref correction, or status flip
+   can be inline. Implementation, redesign, config changes, or anything likely to grow
+   gets a worker.
+
 ## Configuration
 
 - **CLI**: `pwc` — on PATH (installed by `install.sh` as `~/.local/bin/pwc`). All task-database access goes through it; never read or write the database directly.
@@ -50,11 +82,12 @@ Concretely, from a parent:
   a parent (it can't tell which board you mean), so the `--workspace` is not optional
   here. Use the workspace ROOT path (the value `workspaces_below` reports, e.g.
   `/Users/shreyans/work/smarta`), not the short name.
-- **Read each workspace's own policy** — `pwc sources priority --workspace <root>`,
-  `pwc sources routing --workspace <root>` — when queueing into it. Priority and
-  routing are per-workspace (smarta ranks against a Jira order; side-projects uses
-  tiers), so a task's priority/model must come from ITS board's policy, never the
-  other's.
+- **Read each workspace's own policy** — `pwc sources priority --workspace <root>` and
+  any runhost policy from `pwc sources routing --workspace <root>` — when queueing into
+  it. Priority and runhost placement are per-workspace (smarta ranks against a Jira
+  order; side-projects uses tiers), so those fields must come from the candidate's own
+  board. Harness/model choice is not hand-picked from workspace prose; profile the task
+  and run `pwc route`.
 
 **Report and render grouped by workspace, never interleaved.** Present candidates,
 the coverage ledger (step 7), and the final board (step 8) in a per-workspace section
@@ -405,7 +438,7 @@ grouped rendering.
      `ops-comms`; a spike or a design memo is `research-writing`.)
    - **`--reasoning` 1-5** — how much genuine thinking does it need? A typo fix is 1;
      a tricky concurrency bug or an architecture call is 5. Be honest: inflating this
-     is how you end up paying Opus rates for routine work.
+     is how you end up routing routine work to a model tier it does not need.
    - **`--verifiability` 1-5** — how cheaply would a WRONG answer be caught? Code with
      tests that must pass is high (4-5) — a bad answer fails loudly and costs only a
      retry. A research memo, an architectural recommendation, anything whose wrongness
@@ -445,12 +478,12 @@ grouped rendering.
    `--harness` / `--model`.
 
    **Show the routing decision with each candidate, always** — not just when it
-   deviates from a default. The whole point is that work now flows to cheaper models
-   where they're good enough, and the user is choosing to trust that; hiding the
-   choice would mean they only discover a task ran on DeepSeek after the fact. One
-   line is enough: `→ opencode/deepseek-v4-pro (implementation, tier 3, $0.13/Mtok)`.
-   The user can veto or override it in the same confirmation that queues the task — a
-   plain `--model` override always wins over the router.
+   deviates from a default. The whole point is that work now flows to the cheapest
+   table-approved model where it's good enough, and the user is choosing to trust that;
+   hiding the choice would mean they only discover the selected model after the fact.
+   Use the concrete harness/model/cost returned by `pwc route` in that run. If the user
+   disagrees, adjust the task profile and rerun `pwc route`; do not hand-pick or
+   manually override the worker harness/model.
 
    **If `route` REFUSES** (it exits nonzero when nothing qualifies — there are no
    fallback chains by design), do not silently queue the task unrouted and do not

@@ -64,11 +64,13 @@ of the way.
   reads as not-dispatched.
 - `pwc sources skill-hints [--type <type>]` — the configured
   task-type → skill(s) map. **Run it with `--type <task-type>` while building every
-  fresh seed** (step 4): if it returns skills for the type, the seed must strongly
-  recommend them. This is the workspace's deliberate routing — e.g. `pr-review` →
-  `code-review` — so a PR-review worker always starts from `/code-review`, not from
-  whatever tool the coordinator happens to think of. The map is the source of truth
-  for "which skill runs this kind of work," not the coordinator's judgement.
+  fresh seed** (step 4): if it returns skills for the type, the seed tells the worker
+  to run the configured skill immediately as step 1. This is the workspace's deliberate
+  process routing — e.g. `pr-review` → `code-review` — so a PR-review worker starts
+  from `/code-review`, not from whatever tool the coordinator happens to think of. The
+  map is the source of truth for "which skill owns this kind of work." If it returns
+  no skills, the seed names that as a visible process gap and uses the generic
+  fallback gate.
 - `pwc update-task` / `log-event` — for inline outcomes.
 
 ## Steps
@@ -134,125 +136,55 @@ of the way.
      fresh on an unblocked task whose original session is still resumable is a real
      defect — it throws away the exact context the task needs.
 
-4. **For a fresh session, build a *minimal* seed that hands the worker the task and
-   tells it to investigate and come back with a plan — NOT how to do the work.** This
-   is the core rule: the coordinator's seed says *what* the task is and points at how
-   to load context; deciding *how* to do the work is for the worker and the user to
-   settle together, not for the coordinator to bake in. Do **not** write seeds like
-   "read the two epics, pick a shortlist, then move them to Ready-for-Dev" or "start
-   the ticket with `/start-ticket` and scope it to smarta-accounts" — that front-runs
-   the user's call and sends the worker executing on the coordinator's plan. Instead
-   the worker should: load its context, investigate enough to understand the task,
-   then **stop and present its understanding plus proposed approaches/options and its
-   own recommendation, and ask the user how to proceed** — and only start executing
-   once the user has chosen a direction.
+4. **For a fresh session, build a thin seed that routes to the task-type skill.** The
+   coordinator's seed says what task this is, points at durable context, and hands off
+   process ownership. It does **not** claim tickets, design an approach, list
+   implementation steps, or choose a different harness/model. The worker's harness and
+   model are the task's stored `harness`/`model` from `pwc detail`, which were set by
+   `pwc route` when the task was queued; `/pwc-start-work` dispatches those stored
+   values and does not override them by judgment.
 
-   The seed is passed as claude's positional prompt and **auto-submitted on startup**
-   (see step 5) — so the worker's first action *is* the seed, run as soon as it boots.
-   That auto-start is exactly why the seed must steer toward *investigate-then-ask*,
-   not *do*: an auto-submitted "do X" prompt means the worker starts changing things
-   before the user has weighed in. An auto-submitted "understand X, then propose
-   options and ask me" prompt is safe — it spends the head start on reading, not on
-   acting. It also makes it doubly important that the seed points at **named, installed
-   skills** the worker can trust and run (like `/pwc-show-task`), not opaque shell like
-   a raw `pwc …` line it can't verify and shouldn't auto-run.
+   Run `pwc sources skill-hints --type <task-type>` before writing every fresh seed.
 
-   **The hard gate: investigate freely, change nothing until the user picks an
-   approach.** The worker may read/search/inspect anything — repo, Jira, PR diff,
-   Slack threads, logs — to understand the work. But it must **not take any
-   state-changing or outward action** until the user has agreed an approach: no writing
-   or editing code, no creating branches or PRs, no editing Jira ticket *content*, no
-   posting to Slack, no running mutating jobs. Reaching the point where it *could* act
-   is the cue to stop and ask, not to proceed. (This gate applies to **all task
-   types** — jira, pr-review, slack, project alike.)
+   **If a skill is configured, the seed tells the worker to run it immediately as step
+   1.** The skill owns the process and its gates: `/start-ticket` owns claiming,
+   research, and plan approval; `/code-review` owns review context, Slack signaling, and
+   sign-off; any future skill owns its own workflow. Do not duplicate those steps in
+   the seed and do not insert a generic investigate-then-propose gate before the skill.
+   The worker should trust the configured skill's stop-and-ask points.
 
-   **The one exception — claiming the ticket on pickup.** Moving the linked Jira
-   ticket to *In Progress* and assigning it to the user is **bookkeeping that says "I've
-   picked this up," not work on the task**, so it is *exempt from the gate* and is the
-   worker's **first step**, done *before* any investigation — see the claim-step seed
-   part below. The gate still covers every *substantive* Jira edit (changing the
-   description, scope, acceptance criteria, status beyond the In-Progress claim, etc.) —
-   only the pickup transition + assignment are pre-cleared. **Reviews are the
-   counter-exception: a review task must NOT be claimed** (don't transition it, don't
-   reassign it) — see the claim-step part for why.
-
-   Build the seed from these parts:
+   Build the configured-skill seed from these parts:
 
    - **The PWC task id, stated first as the handle** — e.g. *"Your PWC task is
-     `SMT-921`."* This is the durable key to everything else.
-   - **An instruction to load its own context via `/pwc-show-task <id>`** — e.g. *"Run
-     `/pwc-show-task SMT-921` to pull your full context (fields, refs, event timeline)
-     from the task DB."* Pass the id with the skill so resolution is trivial (the
-     skill's session-inference fallback is for when the id is lost — don't rely on it).
-     The worker pulls the *current* fields/refs/timeline itself — no stale snapshot
-     baked into the seed, and nothing for the coordinator to transcribe.
-   - **The claim step (jira-linked own-work tasks only) — the worker's FIRST action,
-     before investigating.** When the task has a linked Jira ticket *and is the user's
-     own work to do* (a `jira`-type task — implement / fix / build), instruct the worker
-     to **claim the ticket as its very first step**: move it to *In Progress* and assign
-     it to the user (Shreyans). Make it **idempotent** — skip the transition if it's
-     already In Progress, skip the assignment if it's already assigned to the user; only
-     change what isn't already right, and don't reassign away from the user. This is the
-     pickup-bookkeeping carve-out from the gate (above), so it happens up front, *not*
-     gated behind the approve-the-approach step. Phrase it like: *"First, before
-     investigating: claim this ticket — move SMT-921 to In Progress and assign it to me
-     if it isn't already (skip whichever is already correct). Then get oriented."*
-     - **Do NOT add the claim step for review tasks.** If the task is a *review*
-       (reviewing someone else's PR/work — typically a `pr-review` task, or any task
-       whose point is to review rather than implement), the worker must **not** claim
-       the ticket: don't transition it and don't reassign it. A review ticket is
-       normally already assigned to the user *as the reviewer* (see the team's
-       "assignee = reviewer when In Review" convention), and claiming it would
-       misrepresent who did the work and could steal it from the author. For a review,
-       omit the claim part entirely; if a review ticket ever looks like it needs a
-       transition/assignment, that's a "stop and ask the user" — never auto-claim.
-   - **A one-line statement of the task's goal/intent** — *what* outcome the task is
-     after, drawn from the title/notes, so the worker knows the target. This is the
-     *only* substantive content the seed carries, and it describes the destination, not
-     the route. Do not spell out steps, tools, or sequencing to get there.
-   - **The plain-language summary first — the opening move of the report-back.** Before
-     any options or recommendation, the worker's first output after investigating must
-     be a short **plain-language summary that rebuilds the context**: what the problem
-     is, what the idea/task is, what *this specific ticket* is asking for, and the key
-     decision(s) at stake — in simple words, no jargon, no code detail. It's a
-     *reminder* that re-establishes the shared picture (the user has many tasks in
-     flight and may be cold on this one), not a status report. Only after that summary
-     come the options and the recommendation. Phrase it in the seed as: *"When you come
-     back, lead with a plain-language summary that reminds me what this task is — the
-     problem, the idea, what this ticket asks for, and the key decisions — in simple
-     words. Then give your options and recommendation."*
-   - **The investigate-then-propose-then-ask directive** — phrase it as: *"Investigate
-     enough to understand this task, then STOP and come back to me: first the
-     plain-language summary above, then your understanding, the approaches you see (with
-     trade-offs) and your recommendation, and ask how I'd like to proceed. Don't make
-     any change — no code, no branch, no ticket move, no Slack post, no job — until
-     we've agreed an approach."* This is the part that puts the *how* decision back with
-     the worker + user.
-   - **The skill pointer, framed as the tool to use *once an approach is agreed*** — run
-     `skill-hints --type <task-type>` and, if it returns any skills, mention them as the
-     likely tool for *carrying out* the work after the user has chosen a direction — NOT
-     as a "do this now" directive. Phrase it as *"Once we've agreed how to proceed,
-     `/code-review` is likely the right way to carry it out"* / *"…`/start-ticket` is
-     how you'll set up the implementation"* — never *"Review this with /code-review"* as
-     the worker's opening move. The workspace's configured routing (e.g. `pr-review` →
-     `code-review`) still names the right tool; the change is purely *when* — after the
-     plan is agreed, not before. (A pure-research/review task whose whole point is
-     "investigate and report" naturally satisfies the gate, since reporting IS the
-     deliverable — there the skill and the propose-back step coincide.)
+     `SMT-921`."*
+   - **The immediate skill handoff** — e.g. *"Run `/start-ticket` for this task now; it
+     owns the process."* If multiple skills are returned, name them in the returned
+     order and tell the worker to start with the first unless that skill explicitly
+     routes onward.
+   - **The durable context pointer** — for Claude Code workers, *"Run
+     `/pwc-show-task SMT-921` when you need the task fields, refs, and event timeline."*
+     For non-Claude harnesses, use the CLI form from the notes below.
+   - **A one-line goal/intent** from the task title/notes, describing the desired
+     outcome without prescribing how to get there.
    - **The closing-report step** — *"When you've finished or hit a blocker you can't
      clear, run `/pwc-report-status` for this task."*
-   - **The attach-threads step** — *"If you post to or read any Slack thread about
-     this task, attach it to the task as a working ref (via `/pwc-report-status` /
-     `add-ref`, using the message's real `thread_ts`) so replies get noticed later."*
-     This is what keeps a teammate's later answer from being silently missed: the
-     find-work sweep can only check threads that are attached to the task.
+   - **The attach-threads step** — *"If you post to or meaningfully read any Slack
+     thread about this task, attach it to the task as a working ref (via
+     `/pwc-report-status` / `add-ref`, using the message's real `thread_ts`) so replies
+     get noticed later."*
 
-   Keep it to a few lines. End with something like *"Start by getting oriented, then
-   come back to me before doing anything."* so the worker settles into investigate mode
-   rather than execution. (This whole part builds the *fresh-spawn* seed. For a
-   resumed session you don't rebuild the task seed — you either pass a short follow-up
-   via `--prompt -` (the new ask; auto-submits) or omit `--prompt` entirely; see
-   step 3.)
+   **If no skill is configured, say so explicitly and use the generic fallback gate.**
+   Phrase it plainly: *"No skill is configured for task type `<type>` — using the
+   generic fallback gate; this is a process gap."* Then tell the worker to load
+   context, investigate freely, and stop before any state-changing or outward action
+   until the user agrees an approach: no code edits, branch, PR, substantive Jira
+   change, Slack post, or mutating job. Since there is no skill for this type, also
+   tell the worker to propose at wrap-up whether the repeated workflow should become a
+   new skill or instruction.
+
+   Keep either seed to a few lines. For a resumed session, don't rebuild the task seed;
+   pass only the new follow-up via `--prompt -`, or omit `--prompt` for a bare resume
+   (see step 3).
 
    **Reporting: at completion, not on startup.** The `/pwc-report-status` ask is
    strictly the *closing* step ("when you're done or blocked") — never "report now" or
@@ -311,11 +243,11 @@ of the way.
    none — skip silently).
 
    Then, in your reply:
-   tell the user the worker tab is open and the seed was **auto-submitted**, so the
-   worker is already **getting oriented** — it'll investigate the task and then come
-   back to *them* in that tab with its understanding, options, and a recommendation
-   before changing anything. So point them at the tab to expect that proposal (and
-   steer it), not to watch it execute. (No review-then-Enter step anymore.) If `seed`
+   tell the user the worker tab is open and the seed was **auto-submitted**. If a
+   task-type skill was configured, the worker is already running that skill; its own
+   gates govern when it stops for approval or sign-off. If no skill was configured,
+   the worker is using the visible generic fallback gate and will investigate, then ask
+   before changing anything. (No review-then-Enter step anymore.) If `seed`
    came back `"skipped"` on what should have been a fresh spawn, something is off —
    flag it rather than claiming the worker started. **On a resume:** if you piped a
    follow-up (`seed: "submitted"`), tell the user the worker resumed with its full
@@ -394,8 +326,7 @@ of the way.
     *"Run `pwc detail --task <id>` for your full context"* replaces
     `/pwc-show-task`, and *"record the outcome with `pwc log-event --task <id>
     --source worker --kind note --detail …`"* replaces `/pwc-report-status`.
-    Everything else in the seed (the gate, the investigate-then-ask directive) is
-    harness-neutral.
+    The configured-skill vs. fallback-gate split is harness-neutral.
 - **Never resume a session that's still alive** — that's what the worker-status check in
   step 3 guards against (claude-harness tasks only).
 - /start does not auto-pick tasks; it acts on a task the user chose (often via

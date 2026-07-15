@@ -20,6 +20,38 @@ touches the outside world. `show-work` reports on work you're *already tracking*
 bringing in *new* work (and the source-reading that sets priorities and links
 threads) is `/pwc-find-work`.
 
+## Coordinator identity
+
+Running `/pwc-show-work` makes this session the **PWC coordinator**, no matter which
+directory it was started from. The coordinator routes and dispatches; it does not do
+substantial task execution.
+
+On startup:
+
+1. **Rename this tab** so it is visually unmistakable:
+   ```
+   printf '\033]0;PWC coordinator\007'
+   ```
+2. **Verify the coordinator model from PWC's model table.** Run
+   `pwc models show --available` and derive the strongest available coordinator model
+   for this session's harness from the table's current capability data. Do not
+   hard-code model names or versions. If the harness exposes the current session model,
+   compare it to the table-derived target and warn the user if this coordinator should
+   be restarted on a stronger table-selected model. If the current model cannot be
+   introspected, say that verification could not be completed and point the user at
+   the table-derived target. This check is about the **coordinator's own** model; worker
+   harness/model choices still come only from `pwc route` and stored task fields.
+3. **Keep scoping, hand off designing.** Keep discussion that decides what a task is,
+   whether it is worth doing, and how it should be captured. Once discussion shifts
+   into how to build one specific thing, capture that as a task, profile it, route it
+   with `pwc route`, and dispatch a worker. The coordinator must not choose or
+   override the worker harness/model by judgment.
+4. **PWC improvements are worker work.** Skill/config/repo changes to PWC itself are
+   discussed here only for scoping, then captured and dispatched.
+5. **Inline only seconds-long bookkeeping.** A typo fix, ref correction, or status flip
+   can be inline. Implementation, redesign, config changes, or anything likely to grow
+   gets a worker.
+
 ## Configuration
 
 - **CLI**: `pwc` — on PATH (installed by `install.sh` as `~/.local/bin/pwc`). All
@@ -240,10 +272,11 @@ threads) is `/pwc-find-work`.
      show `—` rather than guessing.
    - **Where** — **how and where this task runs**, from the task's `harness`, `model`
      and `runhost` (all in `summary`). Render as `harness/model@runhost`, collapsing
-     what's absent: `claude/opus`, `opencode/glm-5.2@mini`, `codex` (no model set),
-     `—` when the task has no harness yet (never dispatched). Keep it terse — it's a
-     column, not a sentence; shorten long model ids (`openrouter/z-ai/glm-5.2` →
-     `glm-5.2`).
+     what's absent: `harness/model`, `harness/model@runhost`, `harness` when no model is
+     set, and `—` when the task has no harness yet (never dispatched). Keep it terse —
+     it's a column, not a sentence; shorten provider-qualified model ids to their final
+     path segment. Do not hard-code model names in this skill; render the values carried
+     by `summary`.
 
      Show it because the answer is no longer obvious: tasks now route to different
      models by cost (a p3 research task on a cheap model, a hard review on a strong
