@@ -227,6 +227,36 @@ def route(profile: dict, table: dict) -> dict:
     return result
 
 
+def load_table_for_routing(no_fetch: bool = False):
+    """The decision table, auto-refreshed if stale. Written as a separate function so
+    it's testable without launching the whole CLI.
+
+    Never hard-fails: if the table is stale and the refresh fails (offline, etc.), it
+    prints a loud warning and proceeds with the stale table — a routing decision that
+    might fail at dispatch is better than refusing to route at all.
+    """
+    raw = models_mod.load_raw()
+    freshness = models_mod.table_freshness(raw)
+    if freshness["stale"]:
+        if no_fetch:
+            print(f"pwc: WARNING — model table is stale ({freshness['why']}); "
+                  f"routing may pick non-existent models", file=sys.stderr)
+        else:
+            print(f"pwc: model table is stale ({freshness['why']}); refreshing...",
+                  file=sys.stderr)
+            try:
+                new, changes = models_mod.compute_fetch(raw)
+                models_mod.save(new)
+                print(f"pwc: refreshed — {len(changes)} change(s) applied",
+                      file=sys.stderr)
+                raw = new
+            except SystemExit:
+                print(f"pwc: WARNING — refresh failed; proceeding with stale table",
+                      file=sys.stderr)
+    merged = models_mod.merged_models(raw)
+    return {**raw, "models": merged}
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="route.py", description=__doc__)
     p.add_argument("--domain", choices=models_mod.DOMAINS,
@@ -242,6 +272,8 @@ def main(argv=None):
                    help="tokens of context the task needs the model to hold")
     p.add_argument("--explain", action="store_true",
                    help="include the full candidate/rejection list")
+    p.add_argument("--no-fetch", action="store_true",
+                   help="skip the automatic table refresh when stale (offline mode)")
     p.add_argument("--json", metavar="-", help="read the profile as JSON on stdin")
     args = p.parse_args(argv)
 
@@ -255,7 +287,8 @@ def main(argv=None):
                    "verifiability": args.verifiability, "risk": args.risk,
                    "context_need": args.context_need}
 
-    decision = route(profile, models_mod.table())
+    table = load_table_for_routing(no_fetch=args.no_fetch)
+    decision = route(profile, table)
     if not args.explain:
         decision.pop("candidates", None)
         decision.pop("rejected", None)

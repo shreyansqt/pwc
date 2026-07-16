@@ -1,7 +1,9 @@
 import pytest
+import datetime as _dt
 from unittest import mock
 
 import models
+from _common import now_iso
 
 SEED_DATA = {
     "version": 1,
@@ -84,3 +86,50 @@ def test_codex_not_installed_marks_all_unavailable():
 
     assert gpt55["available"] is False
     assert codex3["available"] is False
+
+
+# ── table_freshness ─────────────────────────────────────────────────────────
+def _data_with_fetched_at(ts: str | None) -> dict:
+    return {"version": 1, "fetched_at": ts, "models": [], "overlay": {}}
+
+
+def test_freshness_recent_table():
+    data = _data_with_fetched_at(now_iso())
+    result = models.table_freshness(data)
+    assert result["stale"] is False
+    assert result["age_hours"] is not None
+    assert result["age_hours"] < 1.0
+
+
+def test_freshness_stale_table():
+    stale_ts = (_dt.datetime.now(_dt.timezone.utc)
+                - _dt.timedelta(hours=models._STALE_HOURS + 1)
+                ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    data = _data_with_fetched_at(stale_ts)
+    result = models.table_freshness(data)
+    assert result["stale"] is True
+    assert result["age_hours"] > models._STALE_HOURS
+
+
+def test_freshness_never_fetched():
+    data = _data_with_fetched_at(None)
+    result = models.table_freshness(data)
+    assert result["stale"] is True
+    assert result["age_hours"] is None
+    assert "never fetched" in result["why"]
+
+
+def test_freshness_custom_threshold():
+    data = _data_with_fetched_at(now_iso())
+    result = models.table_freshness(data, threshold_hours=0.0)
+    assert result["stale"] is True
+    assert result["threshold_hours"] == 0.0
+
+
+def test_freshness_just_under_threshold():
+    ts = (_dt.datetime.now(_dt.timezone.utc)
+          - _dt.timedelta(hours=models._STALE_HOURS - 0.5)
+          ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    data = _data_with_fetched_at(ts)
+    result = models.table_freshness(data)
+    assert result["stale"] is False

@@ -1,5 +1,8 @@
 import pytest
-from route import route, required_tier
+from unittest import mock
+
+import route as route_mod
+from route import route, required_tier, load_table_for_routing
 
 DOMAIN = "implementation"
 
@@ -150,3 +153,70 @@ def test_cost_weight_unweighted_default():
     result = route(_profile(), _table(m))
     assert result["key"] == "cheap"
     assert "cost_weight_applied" not in result
+
+
+# ── staleness guard ─────────────────────────────────────────────────────────
+
+RAW = {"version": 1, "fetched_at": "2026-07-14T00:00:00Z", "models": [], "overlay": {}}
+MERGED = [{"key": "m", "harness": "test", "model": "test/m", "available": True,
+           "data_ok": True, "context": 200_000, "cost_in": 1.0, "cost_out": 5.0,
+           "cache_read": 1.0, "cache_write": 1.0, "tiers": {"implementation": 3},
+           "cost_weight": 1.0}]
+FRESH = {"stale": True, "age_hours": 48.0, "fetched_at": RAW["fetched_at"],
+         "threshold_hours": 6.0, "why": "last refreshed 48.0h ago (over threshold)"}
+
+
+def test_fresh_table_no_fetch():
+    with mock.patch.object(route_mod.models_mod, "load_raw", return_value=RAW), \
+         mock.patch.object(route_mod.models_mod, "table_freshness",
+                           return_value={**FRESH, "stale": False}), \
+         mock.patch.object(route_mod.models_mod, "merged_models",
+                           return_value=MERGED), \
+         mock.patch.object(route_mod.models_mod, "compute_fetch") as m_fetch, \
+         mock.patch.object(route_mod.models_mod, "save") as m_save:
+        result = load_table_for_routing()
+        m_fetch.assert_not_called()
+        m_save.assert_not_called()
+        assert "models" in result
+
+
+def test_stale_table_auto_refresh():
+    with mock.patch.object(route_mod.models_mod, "load_raw", return_value=RAW), \
+         mock.patch.object(route_mod.models_mod, "table_freshness",
+                           return_value=FRESH), \
+         mock.patch.object(route_mod.models_mod, "merged_models",
+                           return_value=MERGED), \
+         mock.patch.object(route_mod.models_mod, "compute_fetch",
+                           return_value=(RAW, [])), \
+         mock.patch.object(route_mod.models_mod, "save") as m_save:
+        result = load_table_for_routing()
+        m_save.assert_called_once()
+        assert "models" in result
+
+
+def test_stale_table_no_fetch_flag_skips_refresh():
+    with mock.patch.object(route_mod.models_mod, "load_raw", return_value=RAW), \
+         mock.patch.object(route_mod.models_mod, "table_freshness",
+                           return_value=FRESH), \
+         mock.patch.object(route_mod.models_mod, "merged_models",
+                           return_value=MERGED), \
+         mock.patch.object(route_mod.models_mod, "compute_fetch") as m_fetch, \
+         mock.patch.object(route_mod.models_mod, "save") as m_save:
+        result = load_table_for_routing(no_fetch=True)
+        m_fetch.assert_not_called()
+        m_save.assert_not_called()
+        assert "models" in result
+
+
+def test_stale_table_refresh_fails_proceeds():
+    with mock.patch.object(route_mod.models_mod, "load_raw", return_value=RAW), \
+         mock.patch.object(route_mod.models_mod, "table_freshness",
+                           return_value=FRESH), \
+         mock.patch.object(route_mod.models_mod, "merged_models",
+                           return_value=MERGED), \
+         mock.patch.object(route_mod.models_mod, "compute_fetch",
+                           side_effect=SystemExit()), \
+         mock.patch.object(route_mod.models_mod, "save") as m_save:
+        result = load_table_for_routing()
+        m_save.assert_not_called()
+        assert "models" in result

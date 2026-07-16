@@ -80,6 +80,11 @@ _FETCHED_FIELDS = (*PRICE_FIELDS, "context")
 
 _STALE_DAYS = 7.0
 
+# A routing decision off a stale table can pick a model the harness no longer
+# supports — happened 07-16: a 2-day-old table listed gpt-5.1-codex-max as available;
+# the coordinator routed to it; the worker died on dispatch. Hours, not days.
+_STALE_HOURS = 6.0
+
 
 # ── the seed table ────────────────────────────────────────────────────────────
 # Costs/context are filled in by `fetch` from OpenRouter; the values here are a
@@ -240,6 +245,23 @@ def table(*, must_exist: bool = True) -> dict:
     """The merged table — the reader's entry point (route.py, cost.py)."""
     data = load_raw(must_exist=must_exist)
     return {**data, "models": merged_models(data)}
+
+
+def table_freshness(data: dict, threshold_hours: float | None = None) -> dict:
+    """{stale, age_hours, fetched_at, why} — the staleness clock, no network.
+
+    Put the check here (not route.py) so cost.py and any future reader can reuse it.
+    """
+    threshold = threshold_hours if threshold_hours is not None else _STALE_HOURS
+    fetched = data.get("fetched_at")
+    age_days_val = age_days(fetched or "")
+    stale = age_days_val is None or age_days_val * 24 > threshold
+    age_hours = round(age_days_val * 24, 1) if age_days_val is not None else None
+    why = ("never fetched — costs are seed guesses" if fetched is None else
+           f"last refreshed {age_hours:.1f}h ago"
+           f"{' (over threshold)' if stale else ''}")
+    return {"stale": stale, "age_hours": age_hours, "fetched_at": fetched,
+            "threshold_hours": threshold, "why": why}
 
 
 def price_of(row: dict) -> dict:
