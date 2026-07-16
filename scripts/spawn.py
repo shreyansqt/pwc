@@ -517,6 +517,54 @@ def _unrouted_error(task_type: str, task_id: str) -> None:
     )
 
 
+def _load_task_row(workspace_root, task_id):
+    """Fetch one task row through the workspace's configured store.
+
+    Local store: direct sqlite read (as before). Hub store: `detail` via
+    hub_client — spawn must work identically against both backends
+    (regression 2026-07-16: hub-backed workspaces made every spawn crash).
+    Returns a plain dict, or None if the task doesn't exist.
+    """
+    from _common import store_config
+    store = store_config(workspace_root)
+    if store.get("store") == "hub":
+        import hub_client
+        detail = hub_client.call("detail", {"task": task_id}, store)
+        return detail.get("task") if isinstance(detail, dict) else None
+    import pwc_db
+    conn = pwc_db.connect(workspace_root)
+    row = conn.execute(
+        "SELECT * FROM tasks WHERE id = ?", (task_id,)
+    ).fetchone()
+    return dict(row) if row is not None else None
+
+
+def _log_task_event(workspace_root, task_id, kind, detail_text,
+                    source="coordinator"):
+    """Append an event to a task through the workspace's configured store."""
+    from _common import store_config
+    store = store_config(workspace_root)
+    if store.get("store") == "hub":
+        import hub_client
+        hub_client.call("log-event", {
+            "task": task_id, "source": source,
+            "kind": kind, "detail": detail_text,
+        }, store)
+        return
+    import pwc_db
+    conn = pwc_db.connect(workspace_root)
+    with conn:
+        ts = now_iso()
+        conn.execute(
+            "INSERT INTO events (task_id, at, source, kind, detail) "
+            "VALUES (?,?,?,?,?)",
+            (task_id, ts, source, kind, detail_text),
+        )
+        conn.execute(
+            "UPDATE tasks SET last_event_at = ? WHERE id = ?", (ts, task_id),
+        )
+
+
 def resolve_routing(args, task_row, workspace_root):
     """Return (harness, model) for the worker, or fail with an actionable error.
 
@@ -525,8 +573,6 @@ def resolve_routing(args, task_row, workspace_root):
     audit event. Error path: --harness/--model without --force-model, or no
     routing on the task.
     """
-    import pwc_db
-
     task_harness = task_row["harness"]
     task_model = task_row["model"]
     task_type = task_row["type"]
@@ -539,21 +585,11 @@ def resolve_routing(args, task_row, workspace_root):
         if not args.harness or not args.model:
             fail("--harness AND --model are both required with --force-model")
 
-        conn = pwc_db.connect(workspace_root)
-        with conn:
-            ts = now_iso()
-            detail = (
-                f"FORCED model {args.harness}/{args.model} "
-                f"over routed {task_harness}/{task_model}: {args.force_reason}"
-            )
-            conn.execute(
-                "INSERT INTO events (task_id, at, source, kind, detail) "
-                "VALUES (?,?,?,?,?)",
-                (task_id, ts, "coordinator", "note", detail),
-            )
-            conn.execute(
-                "UPDATE tasks SET last_event_at = ? WHERE id = ?", (ts, task_id),
-            )
+        _log_task_event(
+            workspace_root, task_id, "note",
+            f"FORCED model {args.harness}/{args.model} "
+            f"over routed {task_harness}/{task_model}: {args.force_reason}",
+        )
         return args.harness, args.model
 
     if args.harness or args.model:
@@ -779,14 +815,9 @@ def main(argv=None):
         fail(f"--cwd does not exist: {cwd}")
 
     workspace_root = str(find_workspace_root(cwd))
-    import pwc_db as _pwc_db
-    task_conn = _pwc_db.connect(workspace_root)
-    task_row = task_conn.execute(
-        "SELECT * FROM tasks WHERE id = ?", (args.task,)
-    ).fetchone()
+    task_row = _load_task_row(workspace_root, args.task)
     if task_row is None:
         fail(f"no task {args.task!r} in workspace {workspace_root}")
-    task_row = dict(task_row)
 
     harness, model = resolve_routing(args, task_row, workspace_root)
 

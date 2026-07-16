@@ -41,10 +41,13 @@ def _token(store: dict) -> str:
     return token
 
 
-def run(op: str, args, store: dict) -> None:
-    """Execute one taskdb subcommand against the hub and print its response."""
+def call(op: str, payload: dict, store: dict):
+    """POST one taskdb op to the hub and RETURN the parsed JSON response.
+
+    The programmatic counterpart to run(): same endpoint, same auth, but for
+    callers (e.g. spawn.py) that need the value instead of printed output.
+    """
     url = store["url"].rstrip("/") + f"/w/{store['workspace']}/{op}"
-    payload = {k: v for k, v in vars(args).items() if k not in _SKIP}
     req = urllib.request.Request(
         url,
         data=json.dumps(payload).encode(),
@@ -59,9 +62,7 @@ def run(op: str, args, store: dict) -> None:
     )
     try:
         with urllib.request.urlopen(req, timeout=30, context=_ssl_context()) as resp:
-            # Re-emit through the same formatter local mode uses, so output is
-            # byte-identical between backends (the hub sends compact JSON).
-            emit(json.loads(resp.read().decode()))
+            return json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
         body = e.read().decode()
         try:
@@ -72,3 +73,11 @@ def run(op: str, args, store: dict) -> None:
     except urllib.error.URLError as e:
         fail(f"hub unreachable ({store['url']}): {e.reason} — this workspace is "
              f"hub-backed and needs network for task-database operations")
+
+
+def run(op: str, args, store: dict) -> None:
+    """Execute one taskdb subcommand against the hub and print its response."""
+    payload = {k: v for k, v in vars(args).items() if k not in _SKIP}
+    # Re-emit through the same formatter local mode uses, so output is
+    # byte-identical between backends (the hub sends compact JSON).
+    emit(call(op, payload, store))
