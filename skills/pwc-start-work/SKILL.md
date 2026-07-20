@@ -321,10 +321,12 @@ of the way.
     --resume` (spawn verifies the session still exists in the harness's store; if
     it's gone it mints a fresh one — check the result's `session_id` and mode).
     Skip only the *transcript-path* check in step 3 — that file layout is claude's;
-    spawn handles the other harnesses' existence checks itself. One unverified
-    detail per harness: whether the seed **auto-submits** in their TUIs — on the
-    first spawn of each, ask the user to confirm the seed actually ran, and note
-    the answer in the task.
+    spawn handles the other harnesses' existence checks itself. Seed auto-submit:
+    **opencode's TUI auto-submits the typed seed** (spawn result `seed: "typed"`
+    still runs with no manual Enter — verified by Shreyans 2026-07-20), so treat
+    `typed` as submitted for opencode. For codex this is still unverified — on its
+    first spawn, ask the user to confirm the seed actually ran, and note the
+    answer in the task.
   - **A future untracked harness** (spawn result `session_tracked: false`): skip
     step 3's liveness/resume logic, and in step 6 log the `dispatched` event
     instead of `set-session`; the worker's status is then only what gets reported —
