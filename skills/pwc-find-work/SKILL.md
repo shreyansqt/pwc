@@ -114,33 +114,32 @@ grouped rendering.
   attach its identity reference, **only after the user confirms**.
 - `pwc log-event --kind new-task --detail "..."` — record the
   promotion.
-- `pwc models stale` / `pwc models fetch [--dry-run]` — the model table's refresh
-  clock and refresher (step 0).
+- `pwc models stale` / `pwc models fetch [--dry-run]` — manual freshness check and
+  refresher for the model table; the objective columns also auto-refresh during
+  `pwc route` (step 0).
 - `pwc route --domain <d> --reasoning <n> [--verifiability <n>] [--risk <r>]
   [--context-need <tokens>]` — pick the harness+model for a task (step 5).
 
 ## Steps
 
-0. **Refresh the model table if it's stale — and PROPOSE the changes, never apply
-   them silently.** Run `pwc models stale` (threshold: 7 days). If it reports
-   `stale: false`, skip this step entirely and say nothing.
+0. **Model table freshness is automatic — report refreshes, don't run the propose
+   dance.** `pwc route` auto-refreshes the table's **objective** columns (cost,
+   context window, availability) from OpenRouter's catalog whenever the table is
+   older than its own guard threshold (6h — deliberately tighter than the 7-day
+   `pwc models stale` clock, so routing always prices against current catalog data;
+   accepted behavior, Shreyans 2026-07-20). Do not pre-emptively run
+   `pwc models fetch --dry-run` and ask before applying — the refresh is by design
+   and will happen inside `route` regardless. `pwc models stale` /
+   `pwc models fetch [--dry-run]` remain available for a manual check or preview.
 
-   If stale, run **`pwc models fetch --dry-run`** — this reads OpenRouter's catalog
-   and reports what WOULD change **without writing**. Present the diff to the user the
-   same way you present task candidates: a short table of `key | field | old → new`,
-   grouped so it's scannable (price moves, context-window changes, models that
-   vanished from the catalog, availability flips). Then ask whether to apply it. On a
-   yes, run `pwc models fetch` (no `--dry-run`) to write it.
+   When a run does trigger a refresh (`route` prints "refreshing… N change(s)
+   applied"), **tell the user it happened and summarize anything notable**:
+   availability flips, models vanished from the catalog, or price moves large
+   enough to change a routing outcome. Plain price drift is a one-line mention.
 
-   **This is the same "surface, never auto-promote" rule the rest of this skill
-   follows**, and it matters more here than it looks: the table decides where *all*
-   future work gets routed and what it costs, so a silent refresh could quietly move
-   every task onto a different model. The user sees the change before it takes effect.
-
-   Only the **objective** columns are fetched (cost, context window, availability).
-   The capability tiers are the user's own calibration and live in the table's
-   `overlay` — `fetch` cannot touch them, so a refresh never reverts a judgment they
-   made. Say so if they ask.
+   Only the objective columns are ever fetched. The capability tiers are the
+   user's own calibration and live in the table's `overlay` — a fetch cannot touch
+   them, so a refresh never reverts a judgment they made. Say so if they ask.
 
 1. **Read the sources config** with `pwc sources enabled`.
 
