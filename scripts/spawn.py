@@ -32,8 +32,12 @@ Harnesses (`--harness`, default claude):
               terminate()), then launches `codex resume <uuid> '<seed>'` — resume
               accepts a positional prompt and -m/--model, and the uuid in argv
               gives pgrep liveness. Auto-submit behavior of that prompt: verify on
-              first interactive use. Like opencode, the id is MINTED HERE on a
-              fresh spawn — record the RETURNED session_id.
+              first interactive use. PWC workers also pass
+              `-c sandbox_workspace_write.network_access=true` (supported by
+              codex-cli 0.145.0) so hub-backed workspace calls can reach their
+              task store without changing the user's global Codex sandbox policy.
+              Like opencode, the id is MINTED HERE on a fresh spawn — record the
+              RETURNED session_id.
 Verify a new harness's flags on first real use and update its builder here.
 
 Requires iTerm2 running with the Python API enabled
@@ -349,7 +353,11 @@ def _build_codex(*, session_id, resume, cwd, seed_prompt, model,
     # shell's PATH ("command not found", kontax-backend/smarta-systems
     # 2026-07-13). Resolve it on the coordinator's PATH at build time instead.
     codex_bin = shutil.which("codex") or "codex"
-    args = [codex_bin, "resume", session_id]
+    # PWC workers in hub-backed workspaces need to reach the hub. Scope this to
+    # spawned workers rather than requiring users to loosen ~/.codex/config.toml.
+    # codex-cli 0.145.0 supports config overrides via -c.
+    args = [codex_bin, "-c", "sandbox_workspace_write.network_access=true",
+            "resume", session_id]
     if model:
         args += ["--model", model]
     if seed_prompt:

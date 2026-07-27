@@ -101,6 +101,14 @@ def test_spawn_uses_stored_routing(ws):
     assert '"openrouter/test/model"' in out
 
 
+def test_codex_spawn_enables_network_only_for_worker_sandbox(ws):
+    ws.add_task("codex-route", harness="codex", model="gpt-5")
+    rc, out, err = _run(str(SPAWN), "--task", "codex-route",
+                        "--cwd", str(ws.root / "workdir"), "--dry-run")
+    assert rc == 0, err
+    assert "-c sandbox_workspace_write.network_access=true resume" in out
+
+
 # ── --force-model requires --force-reason ──────────────────────────────────────
 def test_force_model_requires_reason(ws):
     ws.add_task("routed", harness="opencode", model="openrouter/test/model")
