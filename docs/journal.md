@@ -3,6 +3,42 @@
 Running log as I build and dogfood PWC. What I tried, what surprised me, what
 I'd do differently. Newest entries at the top.
 
+## 2026-08-05 — `cost` goes null when the model table is a generation behind
+
+Closing out SMT-1201 (a two-session task: codex/gpt-5.6-terra, then re-routed to
+claude/opus). `pwc cost --task SMT-1201` priced the codex half at $1.55 and
+returned `cost_usd: null` overall, with `unpriced_models: ["claude-opus-5"]`.
+
+The cause is not a missing model. `claude/opus` **is** in the table. Its
+`catalog_id` is `anthropic/claude-opus-4.8`, and the session actually ran
+`claude-opus-5`, so the lookup misses. `pwc models fetch` then reported
+`change_count: 0`, because OpenRouter's catalog has no entry that maps onto that
+key, so the refresh path does not self-heal either.
+
+Three things worth fixing, in rough order of value:
+
+1. **The failure is silent in the wrong way.** The output distinguishes "priced"
+   from "unpriced" but not *why* a model is unpriced. "This key is unknown to the
+   table" and "this key is known but its catalog id no longer resolves" are
+   different problems with different fixes, and only the second one means the
+   table has drifted behind a model release. Saying which would have made this a
+   ten-second diagnosis instead of a dig through `models show`.
+2. **Nothing surfaces the drift.** A table pinned to a superseded generation keeps
+   working for routing (the tiers are still there) while quietly losing its cost
+   half. `models stale` exists; it did not flag this. Worth checking whether it
+   only considers fetch age rather than whether the ids still resolve against
+   sessions actually observed in the db.
+3. **`fetch` reporting `change_count: 0` reads as "you are up to date"** when the
+   real meaning was "I could not find anything to map". Those should not look the
+   same.
+
+The report skill's own guidance is what caught it: it says to report null with the
+reason rather than a fabricated zero, because "a fabricated zero is worse than a
+missing number". That held up, and the loop still lost its measurement half for
+this task, which is the actual cost of the bug: routing calibration is supposed to
+be measure-then-rate, and the measuring silently stopped working for the model
+that ran most of the work.
+
 ## 2026-05-28 — idea: a PWC-native terminal (parked, not started)
 
 Captured in mid-coordinator session, not built yet. The motivating need: the
