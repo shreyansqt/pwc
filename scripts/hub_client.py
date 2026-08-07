@@ -21,7 +21,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from _common import emit, fail, ssl_context as _ssl_context
+from _common import emit, fail, read_json_stdin, ssl_context as _ssl_context
 
 # argparse Namespace fields that are routing, not operation arguments.
 _SKIP = {"workspace", "func", "cmd"}
@@ -78,6 +78,15 @@ def call(op: str, payload: dict, store: dict):
 def run(op: str, args, store: dict) -> None:
     """Execute one taskdb subcommand against the hub and print its response."""
     payload = {k: v for k, v in vars(args).items() if k not in _SKIP}
+    # `import` carries its payload on STDIN, not in argparse: the local driver
+    # reads it via read_json_stdin(), and a dumb field passthrough would post
+    # {"json": "-"} instead. The hub then finds no `tasks` key, imports zero
+    # rows, and still answers 200 with a success-shaped body: a silent no-op
+    # in the one command whose whole job is moving a board. Send the dump.
+    if op == "import":
+        if payload.get("json") != "-":
+            fail("import: only --json - (read from stdin) is supported")
+        payload = read_json_stdin()
     # Re-emit through the same formatter local mode uses, so output is
     # byte-identical between backends (the hub sends compact JSON).
     emit(call(op, payload, store))
