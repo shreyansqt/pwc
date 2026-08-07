@@ -98,6 +98,14 @@ of the way.
    ask the user. This exact cwd must be reused verbatim on any later resume — the
    session transcript is keyed by it.
 
+   If a `--resume` fails with *"no transcript for session …"*, that keying is why:
+   the session ran under a different cwd (a renamed workspace, or a task whose
+   board and transcript disagree). Find the slug that actually holds
+   `<session-id>.jsonl` under `~/.claude/projects/` and spawn with a matching
+   `--cwd`, or move the transcript to this cwd's slug. **Do not "fix" it by
+   dropping `--resume`** — that starts cold and silently abandons the context you
+   were trying to keep.
+
    **While you have `detail` open, canonicalize the id to its Jira key if needed.**
    If the task has a Jira key as an identity ref but its canonical `id` is still a
    generated slug (e.g. a `slack-…` task that gained a ticket), `pwc promote
@@ -295,6 +303,11 @@ of the way.
     `--runhost <name>` to spawn, and pass `--cwd` as the **remote** path
     (`<workspace_root>/<task workdir>`). Run any `pre` step the runhost config
     names (e.g. checking Tailscale is up) before spawning.
+  - Because `--cwd` names a directory on the *other* machine, it cannot locate
+    the task's store. Spawn resolves that from the local invocation directory,
+    so either run it from inside the task's workspace or pass
+    **`--local-root <local workspace dir>`**. Dispatching from a PARENT of
+    several workspaces, always pass it — the parent is not the task's workspace.
   - **claude harness only for now** — spawn rejects opencode/codex remotely
     (their session pre-allocation would have to run on the remote host).
   - Everything session-based works: same pre-allocated uuid, liveness via
