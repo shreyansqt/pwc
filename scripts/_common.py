@@ -1,6 +1,6 @@
 """Shared helpers: workspace-root discovery, db path resolution, time, output.
 
-A PWC installation lives in a workspace directory (e.g. ~/work/acme).
+A PWC installation lives in a workspace directory (e.g. ~/workspaces/acme).
 The task database is at <workspace>/.pwc/taskdb.db. The workspace root is found by
 walking up from a starting directory until a marker (.pwc/ or .claude/) is seen — so
 any script run from anywhere inside the workspace resolves the same db.
@@ -43,7 +43,7 @@ def find_workspace_root(start: str | os.PathLike[str] | None = None) -> Path:
 def discover_workspaces() -> list[Path]:
     """Every PWC workspace on this machine (any dir with a .pwc/).
 
-    Kept shallow (~/work/* and ~/*) rather than a full-disk walk: PWC workspaces
+    Kept shallow (~/workspaces/* and ~/*) rather than a full-disk walk: PWC workspaces
     are top-level bodies of work by definition, and a deep scan of $HOME is slow
     and would wander into node_modules.
 
@@ -54,7 +54,7 @@ def discover_workspaces() -> list[Path]:
     roots: list[Path] = []
     home = Path.home()
     seen = set()
-    for parent in (home / "work", home):
+    for parent in (home / "workspaces", home):
         try:
             children = list(parent.iterdir())
         except OSError:
@@ -72,8 +72,9 @@ def is_workspace(root: str | os.PathLike[str]) -> bool:
     A bare `.pwc/` directory is not enough. `cost.py` writes its usage.db into
     `<root>/.pwc/`, so any directory a read op ran in can end up with a `.pwc/`
     holding nothing but usage.db — no task store at all. (This bit for real: the
-    failing `pwc summary` from ~/work created ~/work/.pwc/, which then made ~/work
-    itself look like a workspace and masked the two real ones below it.)
+    failing `pwc summary` from ~/workspaces created ~/workspaces/.pwc/, which
+    then made ~/workspaces itself look like a workspace and masked the real
+    ones below it.)
 
     A workspace is a place with a TASK STORE: a local taskdb.db, or a store.json
     pointing at one (e.g. a hub). Nothing else counts.
@@ -89,7 +90,7 @@ def workspaces_below(start: str | os.PathLike[str] | None = None) -> list[Path]:
     """PWC workspaces sitting one level BELOW `start` (default cwd).
 
     Discovery walks UP to find the workspace you're standing in. But standing in a
-    PARENT of several workspaces (~/work, holding smarta/ and side-projects/) is a
+    PARENT of several workspaces (~/workspaces, holding smarta/ and side-projects/) is a
     real place to be — it's where you coordinate across them — and walking up from
     there finds nothing at all. So we also look down, one level, to answer "which
     workspaces does this directory contain?".

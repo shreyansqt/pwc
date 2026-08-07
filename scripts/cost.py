@@ -103,7 +103,7 @@ def usage_db(workspace=None) -> sqlite3.Connection:
         # cost read from a non-workspace directory used to CREATE `.pwc/` there just
         # to hold usage.db. That phantom then looks like a workspace to anything
         # scanning for one — which is precisely how a failed `pwc summary` in ~/work
-        # minted ~/work/.pwc and masked the two real workspaces beneath it.
+        # minted ~/workspaces/.pwc and masked the real workspaces beneath it.
         # Usage is per-workspace; with no workspace there is nothing to record.
         fail(f"{root} is not a PWC workspace (no task store), so there is no usage "
              f"to record here. Run this inside a workspace, or pass --workspace.")

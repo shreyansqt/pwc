@@ -6,7 +6,7 @@
 #   2. The task database is per-workspace at <workspace>/.pwc/taskdb.db.
 #
 # Usage:
-#   ./install.sh [workspace-dir]      # default: ~/work/acme
+#   ./install.sh [workspace-dir]      # default: ~/workspaces/acme
 #
 # Re-running is safe (idempotent): symlinks are refreshed; the DB is created only if
 # absent. PWC source stays here; the skill symlinks point back at it, so `git pull`
@@ -15,7 +15,7 @@
 set -euo pipefail
 
 PWC_SRC="$(cd "$(dirname "$0")" && pwd)"
-WS="${1:-~/work/acme}"
+WS="${1:-~/workspaces/acme}"
 
 if [[ ! -d "$WS" ]]; then
   echo "pwc: workspace does not exist: $WS" >&2
