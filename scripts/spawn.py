@@ -51,13 +51,21 @@ new-session -A -s pwc-<task> …`; reattach anytime with the same command). The 
 is STAGED to a file on the remote host first (`~/.pwc/seeds/<uuid>.txt` via ssh
 stdin) and the launch reads it with `$(cat …)` — long multiline seeds never pass
 through nested shell quoting. `--cwd` must be the REMOTE path (the dispatch skill
-maps the task's workdir through the runhost's `workspace_root`). Liveness still
-works: the pre-allocated uuid is in the remote claude's argv, and worker_status.py
-greps it over ssh.
+maps the task's workdir through the runhost's `workspace_root`). Because that path
+is remote, it CANNOT locate the local task store: the workspace is resolved from
+`--local-root` (default: the invocation directory) instead. Liveness still works:
+the pre-allocated uuid is in the remote claude's argv, and worker_status.py greps
+it over ssh.
+
+`--resume` is STRICT: if the named session's transcript can't be found (locally,
+or over ssh for a remote worker) the spawn FAILS rather than silently starting a
+fresh session. Resuming is asked for exactly when the prior context matters, and
+a silent downgrade is indistinguishable from success until the worker turns out
+to have forgotten everything.
 
 Usage:
   spawn.py --task <id> --cwd <dir>
-           [--ssh <target>] [--runhost <name>]
+           [--ssh <target>] [--runhost <name>] [--local-root <dir>]
            [--session-id <uuid>] [--resume]
            [--prompt-file <path> | --prompt -] [--name <display-name>]
 
@@ -124,13 +132,32 @@ def _build_claude(*, session_id, resume, cwd, seed_prompt, model):
     if model:
         args += ["--model", model]
     mode = "fresh"
-    if resume and transcript_path(cwd, session_id).exists():
+    if resume:
+        # An explicit --resume that cannot find its transcript must FAIL, not
+        # quietly become a fresh session. Resuming is asked for precisely when
+        # the prior context is the point; silently discarding it looks identical
+        # to success at the call site and only shows up later as a worker that
+        # has forgotten everything. The usual cause is a cwd/slug mismatch —
+        # transcripts are keyed by the cwd they ran in, so a moved workspace (or
+        # a task whose board and transcript disagree) sends the lookup to a slug
+        # that was never written.
+        tp = transcript_path(cwd, session_id)
+        if not tp.exists():
+            fail(f"--resume: no transcript for session {session_id} at {tp}\n"
+                 f"\n"
+                 f"claude keys transcripts by the cwd they ran in, so this "
+                 f"usually means the session ran somewhere else — check "
+                 f"{Path.home() / '.claude' / 'projects'} for the slug that "
+                 f"actually holds {session_id}.jsonl, and spawn with a --cwd "
+                 f"that matches it (or move the transcript to this cwd's slug).\n"
+                 f"\n"
+                 f"to start a NEW session instead, drop --resume.")
         args += ["--resume", session_id]
         mode = "resume"
         if seed_prompt:
             args.append(seed_prompt)  # follow-up on resume -> claude auto-submits it
     else:
-        args += ["--session-id", session_id]  # fresh / resume-fallback
+        args += ["--session-id", session_id]
         if seed_prompt:
             args.append(seed_prompt)  # positional prompt -> claude auto-submits it
     return mode, args, session_id
@@ -443,11 +470,26 @@ def build_remote_claude_command(*, ssh_target, session_id, resume, cwd,
     remote_transcript = (f"$HOME/.claude/projects/"
                          f"{cwd.replace('/', '-')}/{session_id}.jsonl")
     mode = "fresh"
-    if resume and not dry_run:
-        exists = _ssh_run(
-            ssh_target, f'test -f "{remote_transcript}" && echo yes || echo no',
-            what="remote transcript check").strip() == "yes"
-        if exists:
+    if resume:
+        # Same rule as the local builder: an explicit --resume that can't find
+        # its transcript FAILS rather than silently starting a fresh session.
+        # A dry run can't ssh out to check, so it takes --resume at its word and
+        # reports mode=resume — the real spawn is what verifies.
+        if dry_run:
+            mode = "resume"
+        else:
+            exists = _ssh_run(
+                ssh_target, f'test -f "{remote_transcript}" && echo yes || echo no',
+                what="remote transcript check").strip() == "yes"
+            if not exists:
+                fail(f"--resume: no transcript for session {session_id} on "
+                     f"{ssh_target} at {remote_transcript}\n"
+                     f"\n"
+                     f"claude keys transcripts by the cwd they ran in, so this "
+                     f"usually means the session ran under a different --cwd on "
+                     f"that host.\n"
+                     f"\n"
+                     f"to start a NEW session instead, drop --resume.")
             mode = "resume"
 
     inner_parts = ['export PATH="$HOME/.local/bin:$PATH"',
@@ -809,6 +851,11 @@ def main(argv=None):
                                  "claude harness only for now.")
     p.add_argument("--runhost", help="display name of the remote host (recorded in "
                                      "the result; the task's runhost field)")
+    p.add_argument("--local-root",
+                   help="with --ssh: the LOCAL directory identifying the "
+                        "workspace whose task store holds --task (defaults to "
+                        "the current directory). --cwd is the REMOTE path and "
+                        "cannot locate a local store.")
     p.add_argument("--session-id")
     p.add_argument("--resume", action="store_true")
     p.add_argument("--prompt-file")
@@ -819,10 +866,30 @@ def main(argv=None):
     args = p.parse_args(argv)
 
     cwd = str(Path(args.cwd).expanduser())
-    if not args.dry_run and not os.path.isdir(cwd):
+    if not args.ssh and not args.dry_run and not os.path.isdir(cwd):
         fail(f"--cwd does not exist: {cwd}")
 
-    workspace_root = str(find_workspace_root(cwd))
+    # Which directory identifies the workspace whose task store we read/write?
+    #
+    # For a LOCAL worker that is --cwd itself. For a REMOTE one it must NOT be:
+    # --cwd is by design a path on the REMOTE host (see this module's docstring),
+    # and remote paths are perfectly valid local path *shapes*, so resolving the
+    # store from it fails in the worst possible way — find_workspace_root() finds
+    # no .pwc up a tree that doesn't exist locally, falls back to the path itself,
+    # store_config() then sees no store.json there and defaults to {"store":
+    # "local"}, and a HUB-backed workspace is silently read as a local sqlite file
+    # that isn't there. That is the 2026-08-07 bug: hub + --ssh, the exact combo
+    # the Mac mini runs on, could not spawn at all.
+    #
+    # So for a remote worker the store is resolved from the LOCAL invocation
+    # directory (--local-root to be explicit, else the cwd we were run from). The
+    # coordinator always runs inside the workspace it is dispatching for.
+    if args.ssh:
+        root_hint = str(Path(args.local_root).expanduser()) if args.local_root \
+            else os.getcwd()
+    else:
+        root_hint = cwd
+    workspace_root = str(find_workspace_root(root_hint))
     task_row = _load_task_row(workspace_root, args.task)
     if task_row is None:
         fail(f"no task {args.task!r} in workspace {workspace_root}")

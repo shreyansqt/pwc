@@ -233,3 +233,77 @@ def test_cost_weight_from_overlay_merged():
     assert by_key["opencode/deepseek-v4-pro"]["cost_weight"] == 0.8
     # A model without overlay entry defaults to 1.0
     assert by_key["claude/sonnet"]["cost_weight"] == 1.0
+
+
+# ── --resume is strict: no transcript => fail, never a silent fresh session ────
+def test_resume_without_transcript_fails_loudly(ws):
+    """A --resume whose transcript can't be found must FAIL.
+
+    Regression 2026-08-07: it silently fell through to a fresh session, so a
+    resume of a real session (whose transcript lived under a different cwd slug,
+    e.g. after a workspace rename) reported mode=fresh and threw the context
+    away. Resuming is asked for exactly when that context is the point.
+    """
+    ws.add_task("resume-me", harness="claude", model="opus")
+    rc, out, err = _run(str(SPAWN), "--task", "resume-me",
+                        "--cwd", str(ws.root / "workdir"), "--dry-run",
+                        "--session-id", "00000000-dead-beef-0000-000000000000",
+                        "--resume")
+    assert rc != 0, f"expected failure, got success with: {out}"
+    assert "no transcript" in err
+    assert "drop --resume" in err
+    assert '"mode": "fresh"' not in out
+
+
+def test_no_resume_flag_still_starts_fresh(ws):
+    """Without --resume a missing transcript is normal — that's a fresh spawn."""
+    ws.add_task("fresh-one", harness="claude", model="opus")
+    rc, out, _ = _run(str(SPAWN), "--task", "fresh-one",
+                      "--cwd", str(ws.root / "workdir"), "--dry-run",
+                      "--session-id", "00000000-dead-beef-0000-000000000001")
+    assert rc == 0
+    assert '"mode": "fresh"' in out
+
+
+# ── remote (--ssh) resolves the task store LOCALLY, not from the remote --cwd ──
+def test_remote_spawn_resolves_store_from_local_root(ws):
+    """--cwd is a REMOTE path and must not be used to find the local task store.
+
+    Regression 2026-08-07: find_workspace_root(--cwd) walked a path that doesn't
+    exist locally, fell back to it, store_config() then defaulted to
+    {"store": "local"} and a hub-backed workspace died on a missing sqlite file.
+    hub + --ssh — the Mac mini's exact setup — could not spawn at all.
+    """
+    ws.add_task("remote-task", harness="claude", model="opus")
+    rc, out, err = _run(str(SPAWN), "--task", "remote-task",
+                        "--ssh", "somehost",
+                        "--cwd", "/Users/someoneelse/on/the/remote/host",
+                        "--local-root", str(ws.root / "workdir"),
+                        "--dry-run")
+    assert rc == 0, f"remote dry-run failed: {err}"
+    assert '"harness": "claude"' in out
+    # the launch targets the REMOTE path, even though the store was local
+    assert "/Users/someoneelse/on/the/remote/host" in out
+
+
+def test_remote_spawn_defaults_local_root_to_cwd(ws):
+    """Without --local-root the workspace comes from the invocation directory."""
+    ws.add_task("remote-task-2", harness="claude", model="opus")
+    rc, out, err = _run(str(SPAWN), "--task", "remote-task-2",
+                        "--ssh", "somehost",
+                        "--cwd", "/Users/someoneelse/elsewhere",
+                        "--dry-run", cwd=str(ws.root / "workdir"))
+    assert rc == 0, f"remote dry-run failed: {err}"
+    assert '"harness": "claude"' in out
+
+
+def test_remote_spawn_does_not_require_cwd_to_exist_locally(ws):
+    """A remote --cwd is a path on the OTHER machine; local existence is irrelevant."""
+    ws.add_task("remote-task-3", harness="claude", model="opus")
+    rc, out, err = _run(str(SPAWN), "--task", "remote-task-3",
+                        "--ssh", "somehost",
+                        "--cwd", "/definitely/not/here/locally",
+                        "--local-root", str(ws.root / "workdir"),
+                        "--dry-run")
+    assert rc == 0, f"remote dry-run failed: {err}"
+    assert "does not exist" not in err
