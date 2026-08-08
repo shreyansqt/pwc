@@ -15,6 +15,7 @@ scripts are grouped under a named subcommand:
   pwc models show | stale | fetch | seed | set-tier              -> models.py
   pwc route --domain <d> --reasoning <n> ...                     -> route.py
   pwc cost --task <id> | --report | --sweep                      -> cost.py
+  pwc coord [claude|codex|opencode] ...                          -> coord.py
   pwc spawn --task <id> --cwd <dir> ...                          -> spawn.py
   pwc worker-status --session-ids <uuid,...> | --json -          -> worker_status.py
 """
@@ -43,6 +44,7 @@ other:
             --reasoning <1-5> [--verifiability <1-5>] [--risk none|outward|prod-data]
             [--context-need <tokens>] [--explain]
   pwc cost --task <id> | --report [--since 30d] | --sweep
+  pwc coord [claude|codex|opencode] [--model M] [--workspace DIR] [--name N]
   pwc spawn --task <id> --cwd <dir> [--session-id U] [--resume] [--prompt -] [--name N]
   pwc worker-status --session-ids <uuid,...> | --json -
 
@@ -102,7 +104,7 @@ def main(argv):
     # spawn takes --cwd, not --workspace, and just forwards the rest to a worker —
     # so never rewrite ITS args. For everything else, lift --workspace from anywhere.
     _first = argv[1] if argv[0] == "--workspace" and len(argv) > 1 else argv[0]
-    if _first == "spawn":
+    if _first in ("spawn", "coord"):
         ws = None
     else:
         ws, argv = _extract_workspace(argv)
@@ -117,8 +119,8 @@ def main(argv):
     if ws is not None:
         if cmd in ("sources", "cost"):
             rest = ["--workspace", ws, *rest]
-        elif cmd == "spawn":
-            pass  # no --workspace flag; spawn is located by --cwd
+        elif cmd in ("spawn", "coord"):
+            pass  # spawn is located by --cwd; coord declares its own --workspace
         else:
             argv = ["--workspace", ws, *argv]
 
@@ -134,6 +136,9 @@ def main(argv):
     elif cmd == "cost":
         import cost
         cost.main(rest)
+    elif cmd == "coord":
+        import coord
+        raise SystemExit(coord.main(rest))
     elif cmd == "spawn":
         import spawn
         spawn.main(rest)

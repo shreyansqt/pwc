@@ -178,6 +178,31 @@ pre-allocated session id on the same host.
 - **`/pwc-report-status`** — used *by a worker* to report status (blocked / awaiting-review
   / done / note) back to the task database.
 
+## Starting a coordinator
+
+```bash
+pwc coord                  # claude (default), model derived from the models table
+pwc coord codex            # same, on a different harness
+pwc coord claude --model sonnet
+```
+
+Run it from wherever you want the coordinator to sit — usually a workspace root, or
+a PARENT of several workspaces (`pwc` sweeps them all and tags each row).
+
+`pwc coord` **replaces the current shell** (`os.execvp`): the tab you typed in
+becomes the coordinator. That is deliberate, and it is also what makes the tab title
+work. An OSC title sequence only reaches the terminal from a process that owns the
+tty, and a coordinator cannot title its own tab — harness tool subprocesses run
+detached, so a `printf` from inside a session goes into a pipe and is silently
+swallowed. `pwc coord` sets the title from the interactive shell, before exec, and
+passes the same name to the harness.
+
+The model is derived from the models table (strongest available for that harness,
+scored across the coordinator's `research-writing`+`ops-comms` domains, ties broken
+toward the cheaper model), so a coordinator cannot start on a weak model by
+accident. `pwc models set-tier` retunes that without touching code. It seeds
+`/pwc-show-work`, so the briefing is already running when the session opens.
+
 ## Inspecting the task database directly
 
 All access normally goes through the coordinator, but the CLI is available for

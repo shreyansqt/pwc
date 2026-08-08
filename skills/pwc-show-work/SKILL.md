@@ -28,11 +28,19 @@ substantial task execution.
 
 On startup:
 
-1. **Rename this tab** so it is visually unmistakable:
-   ```
-   printf '\033]0;PWC coordinator\007'
-   ```
-2. **Verify the coordinator model from PWC's model table.** Run
+1. **The tab title is already set — do nothing.** `pwc coord` titles the tab at
+   launch, from the interactive shell, and passes the same name to the harness
+   (`--name`). Do **not** try to retitle the tab from inside this session: a
+   session cannot title its own tab. Tool subprocesses run detached (controlling
+   tty `??`, `/dev/tty` unconfigured), so a `printf '\033]0;…\007'` here goes into
+   the pipe back to the harness and is captured as tool output — swallowed, never
+   rendered. It silently no-ops and leaves a stray escape sequence in the
+   transcript. If the title is wrong or missing, this session was started by hand;
+   relaunch it with `pwc coord [claude|codex|opencode]`.
+2. **Verify the coordinator model from PWC's model table.** Launching via
+   `pwc coord` already derives this (strongest available model for the harness,
+   scored across the coordinator's domains), so this check is a safety net for a
+   hand-started session — not a step that should normally find anything. Run
    `pwc models show --available` and derive the strongest available coordinator model
    for this session's harness from the table's current capability data. Do not
    hard-code model names or versions. If the harness exposes the current session model,
