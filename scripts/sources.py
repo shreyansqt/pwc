@@ -122,18 +122,32 @@ def cmd_enabled(args):
     emit({"sources": enabled})
 
 
+def skill_hints_for_type(workspace, task_type: str) -> list[str]:
+    """Return the configured skill names for one task type.
+
+    Older hand-written configs occasionally used a single string even though the
+    documented shape is a list. Preserve that input while keeping callers on a
+    consistently list-shaped API.
+    """
+    hints = (_load(workspace).get("skill_hints", {}) or {}).get(task_type, [])
+    if isinstance(hints, str):
+        hints = [hints]
+    if not isinstance(hints, list) or not all(isinstance(h, str) for h in hints):
+        fail(f"malformed skill_hints entry for task type {task_type!r}: "
+             "expected a string or list of strings")
+    return [hint.strip().lstrip("/") for hint in hints if hint.strip().lstrip("/")]
+
+
 def cmd_skill_hints(args):
     """The task-type -> skill(s) map (empty object if none configured).
 
     /start-work reads this to suggest the relevant skill in a worker's seed. If
     `--type` is given, return just that type's hints (a list, possibly empty).
     """
-    data = _load(args.workspace)
-    hints = data.get("skill_hints", {}) or {}
     if args.type:
-        emit(hints.get(args.type, []))
+        emit(skill_hints_for_type(args.workspace, args.type))
     else:
-        emit(hints)
+        emit(_load(args.workspace).get("skill_hints", {}) or {})
 
 
 def cmd_priority(args):

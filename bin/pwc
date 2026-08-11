@@ -46,6 +46,7 @@ other:
   pwc cost --task <id> | --report [--since 30d] | --sweep
   pwc coord [claude|codex|opencode] [--model M] [--workspace DIR] [--name N]
   pwc spawn --task <id> --cwd <dir> [--session-id U] [--resume] [--prompt -] [--name N]
+            [--skip-skill-hint --skip-skill-reason WHY]
   pwc worker-status --session-ids <uuid,...> | --json -
 
 The workspace is discovered from the cwd (nearest .pwc/ up the tree);
