@@ -8,9 +8,9 @@ tab (Cmd-1/2/... to switch); the coordinator's tab is untouched. The new tab ope
 **in the background** — iTerm2 always switches focus to a newly-created tab (its
 API has no background-create flag), so we remember the active tab beforehand and
 re-activate it immediately after the new tab is created. Brief flicker; user stays
-where they were. Prints session id, mode, and placement as JSON. Does NOT touch
-the task DB — the dispatch skill calls `pwc set-session` so all DB writes funnel
-through one path.
+where they were. Prints session id, mode, and placement as JSON. It does not record
+the worker session — the dispatch skill calls `pwc set-session` for that — but
+explicit routing and skill-hint overrides append audit events to the task timeline.
 
 Harnesses (`--harness`, default claude):
   claude    — fully supported: pre-allocated session id (identity, liveness via
@@ -73,15 +73,23 @@ Usage:
            --force-model --force-reason "<why>" --harness <h> --model <m>
            [--session-id <uuid>] [--resume] ...
 
+  spawn.py --task <id> --cwd <dir>
+           --skip-skill-hint --skip-skill-reason "<why>" ...
+
 Harness/model are read from the task record (set by `pwc route`). The
 --harness/--model flags require --force-model + --force-reason and log an
 audit event — they are the locked-down override, not everyday flags.
+On a fresh spawn, every skill configured for the task type must be named in the
+seed. Omitting one requires --skip-skill-hint + --skip-skill-reason and records
+the deviation on the task timeline. Resumes are exempt because the worker already
+has its process context.
 """
 
 from __future__ import annotations
 
 import argparse
 import os
+import re
 import shlex
 import shutil
 import sys
@@ -653,6 +661,46 @@ def resolve_routing(args, task_row, workspace_root):
     return task_harness, task_model
 
 
+def _seed_mentions_skill(seed_prompt: str | None, skill: str) -> bool:
+    """Match a standalone skill name, with or without its command slash."""
+    name = skill.lstrip("/")
+    pattern = rf"(?<![\w-])/?{re.escape(name)}(?![\w-])"
+    return re.search(pattern, seed_prompt or "", flags=re.IGNORECASE) is not None
+
+
+def enforce_skill_hints(args, task_row, workspace_root, seed_prompt) -> None:
+    """Refuse a fresh seed that silently omits a configured skill handoff."""
+    if args.resume:
+        return
+
+    import sources
+    skills = sources.skill_hints_for_type(workspace_root, task_row["type"])
+    missing = [skill for skill in skills
+               if not _seed_mentions_skill(seed_prompt, skill)]
+    if not missing:
+        return
+
+    missing_text = ", ".join(missing)
+    if args.skip_skill_hint:
+        if not args.skip_skill_reason:
+            fail("--skip-skill-reason is required with --skip-skill-hint "
+                 "(explain why the configured skill handoff is being skipped)")
+        _log_task_event(
+            workspace_root, task_row["id"], "note",
+            f"SKIPPED configured skill hint(s) {missing_text} in fresh seed: "
+            f"{args.skip_skill_reason}",
+        )
+        return
+
+    fail(
+        f"fresh seed for task {task_row['id']!r} omits configured skill "
+        f"hint(s): {missing_text}.\n"
+        "Include each skill in the seed (with or without a leading `/`) and "
+        "re-run, or pass --skip-skill-hint --skip-skill-reason \"<why>\" "
+        "to override."
+    )
+
+
 # Tails that mark "the shell is sitting at an interactive prompt" on the last
 # non-empty screen line — the fallback readiness signal when iTerm2 shell
 # integration isn't installed in the worker's shell.
@@ -846,6 +894,11 @@ def main(argv=None):
     p.add_argument("--force-reason", help="why the override is necessary")
     p.add_argument("--harness", help="harness override (requires --force-model)")
     p.add_argument("--model", help="model override (requires --force-model)")
+    p.add_argument("--skip-skill-hint", action="store_true",
+                   help="allow a fresh seed to omit configured skill hints "
+                        "(requires --skip-skill-reason and logs an audit event)")
+    p.add_argument("--skip-skill-reason",
+                   help="why configured skill hints are omitted from the seed")
     p.add_argument("--ssh", help="run the worker on this remote host (ssh target) "
                                  "inside tmux; --cwd must be the REMOTE path. "
                                  "claude harness only for now.")
@@ -894,10 +947,6 @@ def main(argv=None):
     if task_row is None:
         fail(f"no task {args.task!r} in workspace {workspace_root}")
 
-    harness, model = resolve_routing(args, task_row, workspace_root)
-
-    session_id = args.session_id or str(uuid.uuid4())
-
     seed_prompt = None
     if args.prompt_file:
         seed_prompt = Path(args.prompt_file).read_text()
@@ -905,6 +954,11 @@ def main(argv=None):
         seed_prompt = sys.stdin.read()
     elif args.prompt:
         seed_prompt = args.prompt
+
+    enforce_skill_hints(args, task_row, workspace_root, seed_prompt)
+    harness, model = resolve_routing(args, task_row, workspace_root)
+
+    session_id = args.session_id or str(uuid.uuid4())
 
     if args.ssh:
         # Remote worker: cwd is a REMOTE path — validate remotely, build ssh+tmux.

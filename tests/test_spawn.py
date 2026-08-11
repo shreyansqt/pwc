@@ -3,6 +3,7 @@ force-model override with audit log, reroute clears fields."""
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -56,6 +57,12 @@ class _Workspace:
     def set_routing(self, task_id, harness, model):
         _run_taskdb(str(self.root), "update-task", "--task", task_id,
                     "--harness", harness, "--model", model)
+
+    def set_skill_hints(self, hints):
+        config = {"sources": {}, "skill_hints": hints}
+        pwc_dir = self.root / ".pwc"
+        pwc_dir.mkdir(exist_ok=True)
+        (pwc_dir / "sources.json").write_text(json.dumps(config))
 
     def reroute(self, task_id, reason=None):
         args = ["reroute", "--task", task_id]
@@ -177,6 +184,108 @@ def test_bare_model_without_force_errors(ws):
                       "--model", "opus", "--dry-run")
     assert rc != 0
     assert "force-model" in err.lower()
+
+
+# ── fresh seeds enforce configured skill hints ────────────────────────────────
+def test_fresh_spawn_refuses_seed_missing_configured_skill(ws):
+    ws.set_skill_hints({"jira": ["start-ticket"]})
+    ws.add_task("jira-task", type="jira", harness="opencode", model="test/model")
+
+    rc, _, err = _run(str(SPAWN), "--task", "jira-task",
+                      "--cwd", str(ws.root / "workdir"), "--dry-run",
+                      "--prompt", "Implement the ticket from its plan.")
+
+    assert rc != 0
+    assert "omits configured skill hint(s): start-ticket" in err
+    assert "--skip-skill-hint --skip-skill-reason" in err
+
+
+@pytest.mark.parametrize("mention", ["/start-ticket", "start-ticket"])
+def test_fresh_spawn_accepts_skill_with_or_without_slash(ws, mention):
+    ws.set_skill_hints({"jira": ["start-ticket"]})
+    ws.add_task("jira-task", type="jira", harness="opencode", model="test/model")
+
+    rc, _, err = _run(str(SPAWN), "--task", "jira-task",
+                      "--cwd", str(ws.root / "workdir"), "--dry-run",
+                      "--prompt", f"Run {mention} first.")
+
+    assert rc == 0, err
+
+
+def test_skill_name_must_be_a_standalone_mention(ws):
+    ws.set_skill_hints({"jira": ["start-ticket"]})
+    ws.add_task("jira-task", type="jira", harness="opencode", model="test/model")
+
+    rc, _, err = _run(str(SPAWN), "--task", "jira-task",
+                      "--cwd", str(ws.root / "workdir"), "--dry-run",
+                      "--prompt", "Run start-ticket-extra first.")
+
+    assert rc != 0
+    assert "start-ticket" in err
+
+
+def test_fresh_spawn_requires_every_configured_skill(ws):
+    ws.set_skill_hints({"pr-review": ["code-review", "request-review"]})
+    ws.add_task("review", type="pr-review", harness="opencode", model="test/model")
+
+    rc, _, err = _run(str(SPAWN), "--task", "review",
+                      "--cwd", str(ws.root / "workdir"), "--dry-run",
+                      "--prompt", "Run /code-review first.")
+
+    assert rc != 0
+    assert "request-review" in err
+    assert "code-review" not in err
+
+
+def test_task_type_without_skill_hint_is_not_blocked(ws):
+    ws.set_skill_hints({"jira": ["start-ticket"]})
+    ws.add_task("plain-task", type="task", harness="opencode", model="test/model")
+
+    rc, _, err = _run(str(SPAWN), "--task", "plain-task",
+                      "--cwd", str(ws.root / "workdir"), "--dry-run",
+                      "--prompt", "Handle this task.")
+
+    assert rc == 0, err
+
+
+def test_resume_does_not_enforce_skill_hint(ws):
+    ws.set_skill_hints({"jira": ["start-ticket"]})
+    ws.add_task("jira-task", type="jira", harness="opencode", model="test/model")
+
+    rc, _, err = _run(str(SPAWN), "--task", "jira-task",
+                      "--cwd", str(ws.root / "workdir"), "--dry-run", "--resume",
+                      "--session-id", "ses_existing", "--prompt", "Continue.")
+
+    assert rc == 0, err
+    assert "skill hint" not in err.lower()
+
+
+def test_skip_skill_hint_requires_reason(ws):
+    ws.set_skill_hints({"jira": ["start-ticket"]})
+    ws.add_task("jira-task", type="jira", harness="opencode", model="test/model")
+
+    rc, _, err = _run(str(SPAWN), "--task", "jira-task",
+                      "--cwd", str(ws.root / "workdir"), "--dry-run",
+                      "--prompt", "Use a different process.", "--skip-skill-hint")
+
+    assert rc != 0
+    assert "--skip-skill-reason is required" in err
+
+
+def test_skip_skill_hint_logs_missing_skills_and_reason(ws):
+    ws.set_skill_hints({"jira": ["start-ticket"]})
+    ws.add_task("jira-task", type="jira", harness="opencode", model="test/model")
+
+    rc, _, err = _run(str(SPAWN), "--task", "jira-task",
+                      "--cwd", str(ws.root / "workdir"), "--dry-run",
+                      "--prompt", "Use a different process.",
+                      "--skip-skill-hint", "--skip-skill-reason",
+                      "incident recovery requires the existing branch")
+
+    assert rc == 0, err
+    events = ws.events("jira-task")
+    assert "SKIPPED configured skill hint(s) start-ticket" in events
+    assert "incident recovery requires the existing branch" in events
 
 
 # ── reroute clears harness/model ──────────────────────────────────────────────
