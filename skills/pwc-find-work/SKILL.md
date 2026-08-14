@@ -117,7 +117,7 @@ grouped rendering.
 - `pwc models stale` / `pwc models fetch [--dry-run]` — manual freshness check and
   refresher for the model table; the objective columns also auto-refresh during
   `pwc route` (step 0).
-- `pwc route --domain <d> --reasoning <n> [--verifiability <n>] [--risk <r>]
+- `pwc route --task <derived-id> --domain <d> --reasoning <n> [--verifiability <n>] [--risk <r>]
   [--context-need <tokens>]` — pick the harness+model for a task (step 5).
 
 ## Steps
@@ -426,7 +426,8 @@ grouped rendering.
    policy too — `pwc sources priority --workspace <root>` and `… routing --workspace
    <root>` — since those differ per board.
 
-   **Set `--harness` / `--model` by profiling the task and asking `pwc route`.**
+   **Set `--harness` / `--model` by profiling the task and asking `pwc route`.** Pass
+   the derived ID as `--task`; preference uses it for a stable target-share decision.
    Routing is no longer a prose rule you apply by judgment — it's a deterministic
    decision made from a task PROFILE, so the same task always gets the same answer
    and the reasoning is inspectable. For each task you're about to queue, judge four

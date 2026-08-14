@@ -12,8 +12,8 @@ scripts are grouped under a named subcommand:
 
   pwc summary | detail | events | add-task | update-task | ...   -> taskdb.py
   pwc sources show | enabled | set | skill-hints | priority      -> sources.py
-  pwc models show | stale | fetch | seed | set-tier              -> models.py
-  pwc route --domain <d> --reasoning <n> ...                     -> route.py
+  pwc models show | stale | fetch | seed | set-tier | set-preference -> models.py
+  pwc route --task <id> --domain <d> --reasoning <n> ...         -> route.py
   pwc cost --task <id> | --report | --sweep                      -> cost.py
   pwc coord [claude|codex|opencode] ...                          -> coord.py
   pwc spawn --task <id> --cwd <dir> ...                          -> spawn.py
@@ -39,8 +39,9 @@ task database (see `pwc <command> -h` for each):
 
 other:
   pwc sources <show|enabled|set|skill-hints|priority> [args]
-  pwc models <show|stale|fetch|seed|set-tier> [args]
-  pwc route --domain <code-review|implementation|research-writing|ops-comms>
+  pwc models <show|stale|fetch|seed|set-tier|set-preference> [args]
+  pwc route --task <id>
+            --domain <code-review|implementation|research-writing|ops-comms>
             --reasoning <1-5> [--verifiability <1-5>] [--risk none|outward|prod-data]
             [--context-need <tokens>] [--explain]
   pwc cost --task <id> | --report [--since 30d] | --sweep

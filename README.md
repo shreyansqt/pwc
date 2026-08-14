@@ -103,19 +103,20 @@ Start a Claude Code session **in the workspace** and:
 Each task carries a **harness** (which coding agent runs its worker) and an
 optional **model** — chosen automatically, and cost-aware.
 
-## Routing: the cheapest model that can actually do the job
+## Routing: qualification, preference, then cost
 
 `/pwc-find-work` profiles each task as it queues it — *what kind of work is this
 (code-review / implementation / research-writing / ops-comms), how much reasoning does
 it really need (1-5), how cheaply would a wrong answer be caught (1-5), does it touch
-production data?* — and hands that profile to **`pwc route`**, which picks the
-**cheapest model whose capability clears the bar**. The task states what it needs; the
-table decides who serves it. Adding a new model is a new row, not a code change.
+production data?* — and hands that profile to **`pwc route`**. The router first keeps
+only qualified models. It then applies the user's domain preference to the configured
+share of task IDs. Other tasks use cost order. The task states what it needs; the table
+decides who serves it. Adding a new model is a new row, not a code change.
 
 ```
-$ pwc route --domain implementation --reasoning 3 --verifiability 4
-→ opencode / openrouter/deepseek/deepseek-v4-pro   ($0.13/Mtok)
-$ pwc route --domain code-review --reasoning 4 --verifiability 2
+$ pwc route --task pwc-12 --domain implementation --reasoning 3 --verifiability 4
+→ codex / gpt-5.6-sol  (preference selected Sol; Opus is 12.6% cheaper)
+$ pwc route --task review-auth --domain code-review --reasoning 4 --verifiability 2
 → claude / opus  (raised to tier 5: low verifiability — a wrong answer wouldn't be caught)
 ```
 
@@ -125,6 +126,11 @@ objective columns from OpenRouter's free catalog; `/pwc-find-work` checks stalen
 (>7 days) and **proposes** the diff for confirmation rather than applying it silently.
 Your own tier corrections live in a separate **overlay** that a refresh cannot touch —
 so the table converges on *your* experience, not on vendor benchmarks.
+
+User taste lives in a third, top-level **`preferences`** block. One model can be
+preferred per domain with a 0-100% target share, an optional expiry, and a note. The
+task ID maps each task to a stable share bucket. Preference applies only after every
+hard filter and capability gate. It never changes price or capability data.
 
 Two deliberate hard edges:
 

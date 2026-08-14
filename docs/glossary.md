@@ -49,9 +49,15 @@ fetch` rewrites the rows wholesale and never touches the overlay). This is what 
 the table converge on *your* experience rather than on vendor benchmarks — every "that
 model was overkill / too weak" at task close lands here.
 
+**Preference** — User taste stored in the model table's separate top-level
+`preferences` block. Each domain can name one preferred model, a 0-100% target share,
+an optional expiry, and a note. The task ID makes selection deterministic. Preference
+reorders qualified candidates only. It never changes cost, capability, trust, context,
+or availability.
+
 **Task profile** — What a task NEEDS, expressed independently of any model: domain
 (code-review | implementation | research-writing | ops-comms), reasoning 1-5,
-verifiability 1-5, risk (none | outward | prod-data), context need. `/pwc-find-work`
+verifiability 1-5, risk (none | outward | prod-data), context need, and task ID. `/pwc-find-work`
 judges it at queue time and hands it to `pwc route`. The inversion is the point: the
 task says what it needs, the table decides who serves it — so a new model is a new
 row, not a code change.

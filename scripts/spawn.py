@@ -561,7 +561,7 @@ def _unrouted_error(task_type: str, task_id: str) -> None:
     fail(
         f"task {task_id!r} has no routing — harness/model not set.\n"
         f"\n"
-        f"  pwc route --domain {domain} --reasoning <1-5>"
+        f"  pwc route --task {task_id} --domain {domain} --reasoning <1-5>"
         f" --verifiability <1-5> --risk none\n"
         f"\n"
         f"then store the result:\n"

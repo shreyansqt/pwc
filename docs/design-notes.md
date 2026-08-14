@@ -330,3 +330,9 @@ costs are the vendor's fact. Keeping corrections in a separate top-level `overla
 object (rather than as fields inside the rows) is what makes "your calibration survives
 a refresh" true by construction: `fetch` rewrites `models[]` wholesale and literally
 cannot touch the overlay. Verified: rate a model down, refresh, the rating holds.
+
+**Preference is a third input, not a bent price.** The top-level `preferences` block
+records user taste per domain. A stable task-ID bucket applies its 0-100% target share
+after all hard filters and the capability gate. Tasks outside that share use cost
+order. This produces a real mix while keeping objective prices and capability tiers
+truthful. An optional RFC3339 expiry stops temporary preferences automatically.

@@ -1,5 +1,7 @@
 import pytest
+import copy
 import datetime as _dt
+from types import SimpleNamespace
 from unittest import mock
 
 import models
@@ -23,6 +25,9 @@ SEED_DATA = {
          "cache_read": None, "cache_write": None, "data_ok": True, "tiers": {}},
     ],
     "overlay": {},
+    "preferences": {
+        "implementation": {"key": "codex/gpt-5.5", "strength": 80},
+    },
 }
 
 EMPTY_CATALOG = {}
@@ -88,9 +93,53 @@ def test_codex_not_installed_marks_all_unavailable():
     assert codex3["available"] is False
 
 
+def test_fetch_preserves_preferences_unchanged():
+    original = copy.deepcopy(SEED_DATA["preferences"])
+    with mock.patch.object(models, "_openrouter_catalog", return_value=EMPTY_CATALOG), \
+         mock.patch.object(models, "_codex_model_slugs", return_value=CODEX_SLUGS), \
+         mock.patch("shutil.which", return_value="/usr/bin/codex"):
+        new_table, _changes = models.compute_fetch(SEED_DATA)
+    assert new_table["preferences"] == original
+
+
+def test_set_preference_writes_top_level_block():
+    data = copy.deepcopy(SEED_DATA)
+    args = SimpleNamespace(domain="implementation", key="codex/gpt-5.5",
+                           strength=80, expires_at=None,
+                           note="Prefer Codex for implementation.")
+    with mock.patch.object(models, "load_raw", return_value=data), \
+         mock.patch.object(models, "save") as save:
+        models.cmd_set_preference(args)
+    written = save.call_args.args[0]
+    assert written["preferences"]["implementation"]["key"] == "codex/gpt-5.5"
+    assert written["preferences"]["implementation"]["strength"] == 80
+    assert "cost_weight" not in written["preferences"]["implementation"]
+
+
+def test_set_preference_rejects_expiry_without_timezone():
+    args = SimpleNamespace(domain="implementation", key="codex/gpt-5.5",
+                           strength=80, expires_at="2026-09-01T00:00:00",
+                           note=None)
+    with mock.patch.object(models, "load_raw", return_value=copy.deepcopy(SEED_DATA)), \
+         pytest.raises(SystemExit):
+        models.cmd_set_preference(args)
+
+
+def test_clear_weight_removes_override():
+    data = copy.deepcopy(SEED_DATA)
+    data["overlay"] = {"codex/gpt-5.5": {"cost_weight": 0.85}}
+    args = SimpleNamespace(key="codex/gpt-5.5")
+    with mock.patch.object(models, "load_raw", return_value=data), \
+         mock.patch.object(models, "save") as save:
+        models.cmd_clear_weight(args)
+    written = save.call_args.args[0]
+    assert "cost_weight" not in written["overlay"]["codex/gpt-5.5"]
+
+
 # ── table_freshness ─────────────────────────────────────────────────────────
 def _data_with_fetched_at(ts: str | None) -> dict:
-    return {"version": 1, "fetched_at": ts, "models": [], "overlay": {}}
+    return {"version": 1, "fetched_at": ts, "models": [], "overlay": {},
+            "preferences": {}}
 
 
 def test_freshness_recent_table():

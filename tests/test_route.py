@@ -1,4 +1,5 @@
 import pytest
+from datetime import datetime, timezone
 from unittest import mock
 
 import route as route_mod
@@ -29,13 +30,17 @@ def _model(key, *, available=True, data_ok=True, context=200_000, tiers=None,
     return row
 
 
-def _table(*models):
-    return {"version": 1, "fetched_at": None, "models": list(models), "overlay": {}}
+def _table(*models, preference=None):
+    preferences = {DOMAIN: preference} if preference else {}
+    return {"version": 1, "fetched_at": None, "models": list(models),
+            "overlay": {}, "preferences": preferences}
 
 
-def _profile(domain=DOMAIN, reasoning=3, verifiability=3, risk="none", context_need=0):
-    return {"domain": domain, "reasoning": reasoning, "verifiability": verifiability,
-            "risk": risk, "context_need": context_need}
+def _profile(domain=DOMAIN, reasoning=3, verifiability=3, risk="none", context_need=0,
+             task_id="task-1"):
+    return {"task_id": task_id, "domain": domain, "reasoning": reasoning,
+            "verifiability": verifiability, "risk": risk,
+            "context_need": context_need}
 
 
 # ── 1. cheapest model clearing the required tier wins ──────────────────────────
@@ -118,7 +123,90 @@ def test_no_qualifying_model_exits():
         route(_profile(), _table(bad))
 
 
-# ── 7. cost_weight ranks weighted models as more expensive ─────────────────────
+def test_task_id_is_required_for_deterministic_preference():
+    with pytest.raises(SystemExit):
+        route({"domain": DOMAIN, "reasoning": 3}, _table(_model("model")))
+
+
+# ── 7. preference reorders qualified models only ─────────────────────────────
+def test_preference_overrides_cost_and_explains_price_difference():
+    cheap = _model("cheap", cost_in=1, cost_out=1, cache_read=1, cache_write=1)
+    preferred = _model("preferred", cost_in=2, cost_out=2,
+                       cache_read=2, cache_write=2)
+    pref = {"key": "preferred", "strength": 100,
+            "note": "Prefer this qualified model."}
+
+    result = route(_profile(), _table(cheap, preferred, preference=pref))
+
+    assert result["key"] == "preferred"
+    assert result["preference"]["applied"] is True
+    assert "preference selected preferred" in result["why"]
+    assert "cheap is 50.0% cheaper on blended rack rate" in result["why"]
+
+
+def test_preference_strength_produces_a_deterministic_mix():
+    cheap = _model("cheap", cost_in=1, cost_out=1, cache_read=1, cache_write=1)
+    preferred = _model("preferred", cost_in=2, cost_out=2,
+                       cache_read=2, cache_write=2)
+    table = _table(cheap, preferred,
+                   preference={"key": "preferred", "strength": 80})
+
+    picks = [route(_profile(task_id=f"SMT-{i}"), table)["key"]
+             for i in range(1_000)]
+
+    assert 750 <= picks.count("preferred") <= 850
+    assert route(_profile(task_id="SMT-42"), table)["key"] == picks[42]
+
+
+def test_preference_never_selects_unavailable_model():
+    cheap = _model("cheap")
+    preferred = _model("preferred", available=False)
+    result = route(_profile(), _table(
+        cheap, preferred, preference={"key": "preferred", "strength": 100}))
+    assert result["key"] == "cheap"
+    assert result["preference"]["applied"] is False
+    assert "not in the qualified candidate set" in result["why"]
+
+
+def test_preference_never_selects_under_tier_model():
+    qualified = _model("qualified", tiers={DOMAIN: 4})
+    preferred = _model("preferred", tiers={DOMAIN: 3})
+    result = route(_profile(reasoning=4), _table(
+        qualified, preferred, preference={"key": "preferred", "strength": 100}))
+    assert result["key"] == "qualified"
+
+
+def test_preference_never_selects_insufficient_context_model():
+    qualified = _model("qualified", context=200_000)
+    preferred = _model("preferred", context=50_000)
+    result = route(_profile(context_need=100_000), _table(
+        qualified, preferred, preference={"key": "preferred", "strength": 100}))
+    assert result["key"] == "qualified"
+
+
+def test_preference_never_selects_prod_data_untrusted_model():
+    qualified = _model("qualified", data_ok=True, tiers={DOMAIN: 4})
+    preferred = _model("preferred", data_ok=False, tiers={DOMAIN: 5})
+    result = route(_profile(reasoning=4, risk="prod-data"), _table(
+        qualified, preferred, preference={"key": "preferred", "strength": 100}))
+    assert result["key"] == "qualified"
+
+
+def test_expired_preference_stops_applying():
+    cheap = _model("cheap", cost_in=1, cost_out=1, cache_read=1, cache_write=1)
+    preferred = _model("preferred", cost_in=2, cost_out=2,
+                       cache_read=2, cache_write=2)
+    pref = {"key": "preferred", "strength": 100,
+            "expires_at": "2026-08-01T00:00:00Z"}
+    now = datetime(2026, 8, 14, tzinfo=timezone.utc)
+
+    result = route(_profile(), _table(cheap, preferred, preference=pref), now=now)
+
+    assert result["key"] == "cheap"
+    assert "expired at 2026-08-01T00:00:00Z" in result["why"]
+
+
+# ── 8. cost_weight ranks weighted models as more expensive ─────────────────────
 def test_cost_weight_loses_to_cheaper_peer():
     glm = _model("glm", cost_in=1.0, cost_out=3.0, cache_read=1.0, cache_write=1.0,
                  cost_weight=1.5)
@@ -157,7 +245,8 @@ def test_cost_weight_unweighted_default():
 
 # ── staleness guard ─────────────────────────────────────────────────────────
 
-RAW = {"version": 1, "fetched_at": "2026-07-14T00:00:00Z", "models": [], "overlay": {}}
+RAW = {"version": 1, "fetched_at": "2026-07-14T00:00:00Z", "models": [],
+       "overlay": {}, "preferences": {}}
 MERGED = [{"key": "m", "harness": "test", "model": "test/m", "available": True,
            "data_ok": True, "context": 200_000, "cost_in": 1.0, "cost_out": 5.0,
            "cache_read": 1.0, "cache_write": 1.0, "tiers": {"implementation": 3},

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""`pwc route` — pick the model for a task. Deterministic, cheapest-that-qualifies.
+"""`pwc route` — pick the model for a task. Deterministic qualification and preference.
 
 Input is a TASK PROFILE (what the work needs), not a model name — that inversion is
 the point. The caller describes the job; the table decides who serves it. Add a row
@@ -31,9 +31,11 @@ The decision, in order:
      whose wrongness is silent), the cost of a plausible-but-wrong answer is high, so
      demand more capability up front.
 
-  3. RANK — cheapest first, by BLENDED cost (see `_blended_cost`). Ties break toward
-     the LOWER tier (don't over-serve — an over-tiered pick is wasted money) then by
-     key (total determinism: same input, same table -> same answer, always).
+  3. PREFERENCE — after qualification, use the task id to apply the domain's target
+     preference share. Preference can reorder qualified candidates only.
+
+  4. COST — when preference does not select the task, rank by BLENDED cost (see
+     `_blended_cost`). Ties break toward the LOWER tier, then by key.
 
 NO FALLBACK CHAINS. If nothing qualifies, this exits nonzero and says what filtered
 everything out. A failed dispatch is a decision for the user, not something to paper
@@ -46,7 +48,7 @@ exact spend we're trying to measure, and would hide whether the plan still earns
 its keep. See models.py for the full reasoning.
 
 Usage:
-  route.py --domain implementation --reasoning 4 [--verifiability 3]
+  route.py --task pwc-12 --domain implementation --reasoning 4 [--verifiability 3]
            [--risk none|outward|prod-data] [--context-need 200000] [--explain]
   route.py --json -        # the same profile as a JSON body on stdin
 
@@ -57,7 +59,9 @@ plus `candidates` (what else qualified, cheapest-first) when --explain.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import sys
+from datetime import datetime, timezone
 
 import models as models_mod
 from _common import emit, fail, read_json_stdin
@@ -83,6 +87,8 @@ RISKS = ("none", "outward", "prod-data")
 # in+out comparison would rank models by a price class that is ~1% of the real bill.
 # `pwc cost` reports what tasks ACTUALLY cost; this is only for ordering candidates.
 _MIX = {"cache_read": 0.80, "cost_in": 0.05, "cost_out": 0.10, "cache_write": 0.05}
+
+_PREFERENCE_BUCKETS = 10_000
 
 
 def _blended_cost(row: dict) -> float:
@@ -112,18 +118,71 @@ def required_tier(reasoning: int, verifiability: int) -> tuple[int, str | None]:
     return reasoning, None
 
 
-def route(profile: dict, table: dict) -> dict:
+def _preference_bucket(task_id: str) -> int:
+    """Stable 0-9999 bucket. The same task always gets the same route decision."""
+    digest = hashlib.sha256(task_id.encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big") % _PREFERENCE_BUCKETS
+
+
+def _preference_for(table: dict, domain: str,
+                    now: datetime | None = None) -> tuple[dict | None, str | None]:
+    pref = (table.get("preferences") or {}).get(domain)
+    if not pref:
+        return None, None
+    if not isinstance(pref, dict) or not pref.get("key"):
+        fail(f"malformed preference for {domain}: expected an object with `key`")
+    try:
+        strength = int(pref.get("strength"))
+    except (TypeError, ValueError):
+        fail(f"malformed preference for {domain}: strength must be 0-100")
+    if not 0 <= strength <= 100:
+        fail(f"malformed preference for {domain}: strength must be 0-100")
+    pref = {**pref, "strength": strength}
+    expires_at = pref.get("expires_at")
+    if expires_at:
+        try:
+            expiry = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+        except (AttributeError, ValueError):
+            fail(f"malformed preference for {domain}: expires_at must be RFC3339")
+        if expiry.tzinfo is None:
+            fail(f"malformed preference for {domain}: expires_at needs a timezone")
+        current = now or datetime.now(timezone.utc)
+        if current >= expiry:
+            return None, f"preference for {pref['key']} expired at {expires_at}"
+    return pref, None
+
+
+def _rack_rate_comparison(preferred: dict, cost_pick: dict) -> str:
+    """Explain the real rack-rate difference without treating preference as cost."""
+    preferred_cost = preferred["blended"]
+    cost_cost = cost_pick["blended"]
+    if preferred_cost == cost_cost:
+        return "the blended rack rates are equal"
+    if cost_cost < preferred_cost:
+        cheaper = (preferred_cost - cost_cost) / preferred_cost * 100
+        return (f"{cost_pick['key']} is {cheaper:.1f}% cheaper on blended rack rate "
+                f"({cost_cost:g} vs {preferred_cost:g})")
+    cheaper = (cost_cost - preferred_cost) / cost_cost * 100
+    return (f"{preferred['key']} is {cheaper:.1f}% cheaper on blended rack rate "
+            f"({preferred_cost:g} vs {cost_cost:g})")
+
+
+def route(profile: dict, table: dict, *, now: datetime | None = None) -> dict:
     """Pure decision function: (profile, table) -> decision. No I/O, no globals.
 
     Kept pure so it is trivially testable and so the same inputs always produce the
     same output — a router you can't predict is one you stop trusting.
     """
     domain = profile["domain"]
+    task_id = str(profile.get("task_id") or "").strip()
     reasoning = int(profile["reasoning"])
     verifiability = int(profile.get("verifiability", 3))
     risk = profile.get("risk", "none")
     context_need = int(profile.get("context_need", 0) or 0)
 
+    if not task_id:
+        fail("route requires a task id for deterministic preference selection "
+             "(pass `--task <id>` or JSON field `task_id`)")
     if domain not in models_mod.DOMAINS:
         fail(f"unknown domain {domain!r} — known: {', '.join(models_mod.DOMAINS)}")
     if risk not in RISKS:
@@ -182,17 +241,58 @@ def route(profile: dict, table: dict) -> dict:
              + ". There is no fallback chain by design: widen the profile, fix "
                "harness availability, or lower the requirement deliberately.")
 
-    # Cheapest that clears the bar, after cost_weight. Tie-break toward the lower
-    # tier (don't over-serve), then the key, so the result is fully deterministic.
+    # Cost order remains independent of preference. Preference may select another
+    # entry from this already-qualified list, but it never adds an entry to it.
     candidates.sort(key=lambda c: (c["blended"] * c["cost_weight"], c["tier"], c["key"]))
-    pick = candidates[0]
+    cost_pick = candidates[0]
+    pick = cost_pick
 
-    bits = [f"cheapest {domain} model at tier >= {need}"]
+    pref, inactive_why = _preference_for(table, domain, now=now)
+    preference_result = None
+    preference_why = inactive_why
+    if pref:
+        bucket = _preference_bucket(task_id)
+        selected = bucket < pref["strength"] * 100
+        preferred = next((c for c in candidates if c["key"] == pref["key"]), None)
+        applied = bool(selected and preferred)
+        if applied:
+            pick = preferred
+        preference_result = {
+            "key": pref["key"],
+            "strength": pref["strength"],
+            "task_bucket": round(bucket / 100, 2),
+            "selected": selected,
+            "applied": applied,
+        }
+        for field in ("expires_at", "note"):
+            if pref.get(field):
+                preference_result[field] = pref[field]
+        if preferred is None:
+            preference_why = (f"preference for {pref['key']} did not apply because "
+                              "that model was not in the qualified candidate set")
+        elif not selected:
+            preference_why = (f"preference target is {pref['strength']}%; task "
+                              f"{task_id} bucket {bucket / 100:.2f}% fell outside it")
+        elif preferred["key"] == cost_pick["key"]:
+            preference_why = (f"preference selected {preferred['key']} for {domain} "
+                              f"at {pref['strength']}%; it also won on cost")
+        else:
+            preference_why = (f"preference selected {preferred['key']} for {domain} "
+                              f"at {pref['strength']}% over cost winner "
+                              f"{cost_pick['key']}; "
+                              f"{_rack_rate_comparison(preferred, cost_pick)}")
+
+    if pick["key"] == cost_pick["key"]:
+        bits = [f"cheapest {domain} model at tier >= {need}"]
+    else:
+        bits = [f"qualified {domain} model at tier >= {need}"]
+    if preference_why:
+        bits.append(preference_why)
     if raised_why:
         bits.append(raised_why)
     if context_need:
         bits.append(f"{pick['context']:,} ctx covers the {context_need:,} needed")
-    runners = [c for c in candidates[1:3]]
+    runners = [c for c in candidates[1:3]] if pick["key"] == cost_pick["key"] else []
     if runners:
         parts = []
         for c in runners:
@@ -207,6 +307,7 @@ def route(profile: dict, table: dict) -> dict:
 
     result = {
         "key": pick["key"],
+        "task_id": task_id,
         "harness": pick["harness"],
         "model": pick["model"],
         "domain": domain,
@@ -224,6 +325,8 @@ def route(profile: dict, table: dict) -> dict:
     }
     if pick["cost_weight"] != 1.0:
         result["cost_weight_applied"] = pick["cost_weight"]
+    if preference_result:
+        result["preference"] = preference_result
     return result
 
 
@@ -259,6 +362,8 @@ def load_table_for_routing(no_fetch: bool = False):
 
 def main(argv=None):
     p = argparse.ArgumentParser(prog="route.py", description=__doc__)
+    p.add_argument("--task", dest="task_id",
+                   help="stable task id used for deterministic preference selection")
     p.add_argument("--domain", choices=models_mod.DOMAINS,
                    help="what KIND of work this is")
     p.add_argument("--reasoning", type=int,
@@ -280,10 +385,11 @@ def main(argv=None):
     if args.json == "-":
         profile = read_json_stdin()
     else:
-        if not args.domain or args.reasoning is None:
-            fail("route: --domain and --reasoning are required "
+        if not args.task_id or not args.domain or args.reasoning is None:
+            fail("route: --task, --domain and --reasoning are required "
                  "(or pass the profile with --json -)")
-        profile = {"domain": args.domain, "reasoning": args.reasoning,
+        profile = {"task_id": args.task_id, "domain": args.domain,
+                   "reasoning": args.reasoning,
                    "verifiability": args.verifiability, "risk": args.risk,
                    "context_need": args.context_need}
 

@@ -41,7 +41,7 @@ to run without it.
   judgment flags (`--reasoning`, `--verifiability`, `--risk`) as placeholders for the
   coordinator to fill. So routing is one edit-and-paste away.
   Example emitted:
-  `pwc route --domain implementation --reasoning <1-5> --verifiability <1-5> --risk none`
+  `pwc route --task <id> --domain implementation --reasoning <1-5> --verifiability <1-5> --risk none`
   then: "store the result with `pwc update-task --task <id> --harness <h> --model <m>`, then re-run spawn."
 
 ### 3. Re-scoped tasks: a separate `pwc reroute` command (NOT folded into clear-session)

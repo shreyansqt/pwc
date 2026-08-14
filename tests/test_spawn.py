@@ -93,7 +93,7 @@ def test_spawn_refuses_unrouted(ws):
                       "--cwd", str(ws.root / "workdir"), "--dry-run")
     assert rc != 0
     assert "has no routing" in err
-    assert "pwc route --domain" in err
+    assert "pwc route --task no-route --domain" in err
     assert "pwc update-task" in err
     assert "pwc spawn" not in err.lower() or "re-run" in err.lower()
 

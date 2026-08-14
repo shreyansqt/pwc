@@ -7,7 +7,7 @@ what is a fact about this person's taste. Every workspace routes off the same on
 This script is the single read/write/refresh path to it; `route.py` reads it to
 decide, `cost.py` reads it to price a session, /pwc-find-work refreshes it.
 
-Two kinds of column, and the split is the whole design:
+Three kinds of input, and the split is the whole design:
 
   OBJECTIVE (fetched, overwritten on every refresh) — cost per Mtok (four of them:
     in, out, cache-read, cache-write), context window, whether the model is
@@ -21,6 +21,10 @@ Two kinds of column, and the split is the whole design:
     clobber them: `fetch` rewrites `models[]` wholesale and never touches `overlay`.
     Reads deep-merge overlay over the row. That structural separation is what makes
     "your calibration survives refreshes" true by construction rather than by promise.
+
+  PREFERENCE (yours, NEVER fetched) — which qualified model you would rather use
+    for each domain. Preferences live in a separate top-level `preferences` object.
+    They are taste, not model facts, capability claims, or synthetic prices.
 
 Every model is priced at its API RACK RATE — there is deliberately no
 subscription/"it's free, I already pay for it" column. Claude and Codex ride
@@ -47,6 +51,8 @@ Usage:
   models.py fetch [--dry-run]      # refresh objective columns from OpenRouter; --dry-run diffs only
   models.py seed [--force]         # write the initial table (the 8 models we start from)
   models.py set-tier --key K --domain D --tier N [--note "..."]   # write an overlay correction
+  models.py set-preference --domain D --key K --strength 0-100
+                           [--expires-at RFC3339] [--note "..."]
 
 All output is JSON on stdout; diagnostics on stderr; exit 1 on error.
 """
@@ -61,6 +67,7 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
+from datetime import datetime
 
 from _common import age_days, emit, fail, model_table_path, now_iso, ssl_context
 
@@ -189,6 +196,15 @@ def _seed_table() -> dict:
         "overlay": {
             "opencode/glm-5.2": {"cost_weight": 1.5},
         },
+        "preferences": {
+            "implementation": {
+                "key": "codex/gpt-5.6-sol",
+                "strength": 80,
+                "note": ("Prefer Sol for 80% of qualified implementation tasks so "
+                         "the paid Codex subscription carries real work. Preference "
+                         "is taste, not a price or capability claim."),
+            },
+        },
     }
 
 
@@ -207,6 +223,7 @@ def load_raw(*, must_exist: bool = True) -> dict:
     if not isinstance(data, dict) or not isinstance(data.get("models"), list):
         fail(f"malformed model table at {p}: expected an object with a 'models' list")
     data.setdefault("overlay", {})
+    data.setdefault("preferences", {})
     return data
 
 
@@ -404,7 +421,8 @@ def cmd_show(args):
     emit({"fetched_at": data.get("fetched_at"),
           "age_days": age_days(data.get("fetched_at") or ""),
           "models": models,
-          "overlay": data.get("overlay", {})})
+          "overlay": data.get("overlay", {}),
+          "preferences": data.get("preferences", {})})
 
 
 def cmd_stale(args):
@@ -504,6 +522,48 @@ def cmd_set_weight(args):
     emit({"key": args.key, "cost_weight": args.weight, "overlay": ov})
 
 
+def cmd_clear_weight(args):
+    """Remove a cost override instead of recording a neutral synthetic price."""
+    data = load_raw()
+    if not any(m.get("key") == args.key for m in data["models"]):
+        known = ", ".join(m.get("key", "?") for m in data["models"])
+        fail(f"unknown model key {args.key!r} — known: {known}")
+    ov = data.setdefault("overlay", {}).setdefault(args.key, {})
+    old = ov.pop("cost_weight", None)
+    ov["updated_at"] = now_iso()
+    save(data)
+    emit({"key": args.key, "old": old, "cost_weight": None, "overlay": ov})
+
+
+def cmd_set_preference(args):
+    """Record user taste separately from model facts and capability calibration."""
+    if not 0 <= args.strength <= 100:
+        fail(f"strength must be 0-100 (got {args.strength})")
+    data = load_raw()
+    if not any(m.get("key") == args.key for m in data["models"]):
+        known = ", ".join(m.get("key", "?") for m in data["models"])
+        fail(f"unknown model key {args.key!r} — known: {known}")
+    if args.expires_at:
+        try:
+            parsed = datetime.fromisoformat(args.expires_at.replace("Z", "+00:00"))
+        except ValueError:
+            fail("expires_at must be an RFC3339 timestamp, for example "
+                 "2026-09-01T00:00:00Z")
+        if parsed.tzinfo is None:
+            fail("expires_at must include a timezone, for example "
+                 "2026-09-01T00:00:00Z")
+    pref = {"key": args.key, "strength": args.strength,
+            "updated_at": now_iso()}
+    if args.expires_at:
+        pref["expires_at"] = args.expires_at
+    if args.note:
+        pref["note"] = args.note
+    old = data.setdefault("preferences", {}).get(args.domain)
+    data["preferences"][args.domain] = pref
+    save(data)
+    emit({"domain": args.domain, "old": old, "preference": pref})
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="models.py", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -537,6 +597,20 @@ def main(argv=None):
     s.add_argument("--key", required=True)
     s.add_argument("--weight", required=True, type=float)
     s.set_defaults(func=cmd_set_weight)
+
+    s = sub.add_parser("clear-weight", help="remove a cost weight from the overlay")
+    s.add_argument("--key", required=True)
+    s.set_defaults(func=cmd_clear_weight)
+
+    s = sub.add_parser("set-preference", help="prefer one qualified model for a domain")
+    s.add_argument("--domain", required=True, choices=DOMAINS)
+    s.add_argument("--key", required=True)
+    s.add_argument("--strength", required=True, type=int,
+                   help="target share from 0 to 100 percent")
+    s.add_argument("--expires-at",
+                   help="optional RFC3339 timestamp; ignored after this time")
+    s.add_argument("--note")
+    s.set_defaults(func=cmd_set_preference)
 
     args = p.parse_args(argv)
     try:
