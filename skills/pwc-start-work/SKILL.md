@@ -93,10 +93,22 @@ of the way.
 
 ### Worker path
 
-2. **Resolve the working directory.** Use the task's `workdir` (from `detail`)
-   joined to the workspace root. If absent, infer from refs (e.g. a PR's repo) or
-   ask the user. This exact cwd must be reused verbatim on any later resume — the
-   session transcript is keyed by it.
+2. **Resolve the owning workspace and working directory.** Start from the target
+   repo, not the coordinator's current directory. Find its nearest ancestor that
+   contains `.pwc/store.json` or `.pwc/taskdb.db`; that is the task's owning PWC
+   workspace. Use the task's `workdir` (from `detail`) joined to that workspace root.
+   If absent, infer it from refs (e.g. a PR's repo) or ask the user.
+
+   A local `pwc spawn` resolves the task store from `--cwd`. Before dispatch, verify
+   that `pwc detail --workspace <owning-workspace> --task <id>` finds the task. If the
+   target repo belongs to a different sibling workspace, create the task in that
+   workspace and pin every task write with `--workspace <owning-workspace>`. Do not
+   create a convenience copy in the coordinator's current workspace. If a task was
+   already created on the wrong board, recreate it with its refs on the correct board,
+   then archive the misplaced row with a reason.
+
+   This exact cwd must be reused verbatim on any later resume — the session transcript
+   is keyed by it.
 
    If a `--resume` fails with *"no transcript for session …"*, that keying is why:
    the session ran under a different cwd (a renamed workspace, or a task whose
