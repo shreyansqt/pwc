@@ -25,14 +25,13 @@ Harnesses (`--harness`, default claude):
               and the worker idle at $0.00). Model via --model. Note: on a fresh spawn the
               session id is MINTED HERE (opencode ids aren't chooseable), so the
               caller must record the RETURNED session_id, not one it generated.
-  codex     — session-tracked too (verified 2026-07-10 on v0.144.1): a fresh spawn
-              PRE-CREATES the session via `codex app-server` JSON-RPC
-              (`thread/start` mints the uuid; the rollout file is only written on
-              the server's GRACEFUL shutdown — close stdin and wait, never
-              terminate()), then launches `codex resume <uuid> '<seed>'` — resume
+  codex     — session-tracked too: a fresh spawn PRE-CREATES and PRIMES the
+              session via `codex app-server` JSON-RPC (`thread/start` mints the
+              uuid, then one minimal `turn/start` makes it resumable), then
+              launches `codex resume <uuid> '<seed>'` — resume
               accepts a positional prompt and -m/--model, and the uuid in argv
-              gives pgrep liveness. Auto-submit behavior of that prompt: verify on
-              first interactive use. PWC workers also pass
+              gives pgrep liveness. The positional prompt auto-submits (verified
+              2026-08-31 on v0.151.0). PWC workers also pass
               `-c sandbox_workspace_write.network_access=true` (supported by
               codex-cli 0.145.0) so hub-backed workspace calls can reach their
               task store without changing the user's global Codex sandbox policy.
@@ -288,30 +287,65 @@ def _build_opencode(*, session_id, resume, cwd, seed_prompt, model,
     return mode, args, session_id
 
 
-_CODEX_SESSIONS = Path.home() / ".codex" / "sessions"
+_CODEX_HOME = Path(
+    os.environ.get("CODEX_HOME", Path.home() / ".codex")
+).expanduser()
+_CODEX_SESSIONS = _CODEX_HOME / "sessions"
+_CODEX_STATE_DB = _CODEX_HOME / "state_5.sqlite"
+_CODEX_PRIME_PROMPT = (
+    "You are being set up as a PWC worker session. "
+    "Reply with exactly: ready. Do nothing else."
+)
 
 
-def _codex_rollout_exists(session_id: str) -> bool:
-    """Codex stores each session as a rollout file named ...-<uuid>.jsonl under
-    ~/.codex/sessions/YYYY/MM/DD/. Existence of that file is what `codex resume
-    <uuid>` needs."""
+def _codex_session_exists(session_id: str) -> bool:
+    """Return whether Codex knows a resumable thread with this id.
+
+    Codex 0.151.0 moved thread discovery to ``state_5.sqlite``. A row from an
+    empty ``thread/start`` is not enough: Codex rejects it with "no rollout
+    found". A first message, preview, or token count shows that at least one real
+    turn reached persistent storage. Keep the rollout lookup for older Codex
+    versions and sessions that have not migrated.
+
+    On a database error, attach when no legacy file is visible. Codex will then
+    report the authoritative error in the worker tab. This preserves the old
+    fail-visible behavior for an unknown future schema.
+    """
+    db_checked = False
     try:
-        return next(_CODEX_SESSIONS.glob(f"*/*/*/rollout-*-{session_id}.jsonl"),
-                    None) is not None
+        import sqlite3
+        conn = sqlite3.connect(
+            f"file:{_CODEX_STATE_DB}?mode=ro", uri=True, timeout=2,
+        )
+        try:
+            row = conn.execute(
+                "SELECT first_user_message, preview, tokens_used "
+                "FROM threads WHERE id = ?", (session_id,),
+            ).fetchone()
+            db_checked = True
+            if row is not None and (row[0] or row[1] or row[2] > 0):
+                return True
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001 - fall back to legacy storage
+        pass
+
+    try:
+        if next(_CODEX_SESSIONS.glob(
+                f"*/*/*/rollout-*-{session_id}.jsonl"), None) is not None:
+            return True
     except OSError:
-        return True  # on doubt, attach — a bad resume fails visibly in the tab
+        return True
+    return not db_checked
 
 
-def _preallocate_codex_session(cwd: str, title: str) -> str:
-    """Mint a codex session BEFORE the worker exists and return its uuid.
+def _preallocate_codex_session(cwd: str, title: str, model: str | None) -> str:
+    """Mint and prime a Codex session before the worker exists.
 
-    codex has no `session create` CLI, but `codex app-server` (JSON-RPC on stdio,
-    works unauthenticated) does: `thread/start` returns the session uuid and its
-    rollout path. TWO quirks, both verified 2026-07-10 on v0.144.1:
-    - an EMPTY UNNAMED thread is discarded at shutdown — `thread/name/set` is what
-      marks it worth persisting (and names it usefully in codex's resume picker);
-    - the rollout file is only flushed on the server's GRACEFUL shutdown — close
-      stdin and wait; terminate() discards the session.
+    Codex 0.151.0 records an empty ``thread/start`` row in SQLite, but refuses to
+    resume it. Complete one harmless setup turn first. The real task seed remains
+    a follow-up supplied to the interactive worker, so task work never runs in
+    this transient app-server process.
     """
     import json as _json
     import subprocess
@@ -327,7 +361,7 @@ def _preallocate_codex_session(cwd: str, title: str) -> str:
         proc.stdin.write(_json.dumps(obj) + "\n")
         proc.stdin.flush()
 
-    sid = path = None
+    sid = None
     try:
         send({"jsonrpc": "2.0", "id": 1, "method": "initialize",
               "params": {"clientInfo": {"name": "pwc", "title": "PWC",
@@ -352,37 +386,78 @@ def _preallocate_codex_session(cwd: str, title: str) -> str:
             fail(f"codex app-server did not answer {what} within 20s")
 
         thread = read_reply(2, "thread/start")["thread"]
-        sid, path = thread["sessionId"], thread.get("path")
-        # Name the thread — without this an empty thread is DISCARDED at shutdown.
-        send({"jsonrpc": "2.0", "id": 3, "method": "thread/name/set",
+        sid = thread.get("id") or thread.get("sessionId")
+        if not sid:
+            fail(f"codex thread/start returned no thread id: {thread}")
+
+        turn_params = {
+            "threadId": sid,
+            "input": [{"type": "text", "text": _CODEX_PRIME_PROMPT}],
+        }
+        if model:
+            turn_params["model"] = model
+        send({"jsonrpc": "2.0", "id": 3, "method": "turn/start",
+              "params": turn_params})
+
+        turn_accepted = False
+        turn_completed = None
+        deadline = time.time() + 60
+        while time.time() < deadline and not (turn_accepted and turn_completed):
+            line = proc.stdout.readline()
+            if not line:
+                fail("codex app-server exited while priming the session")
+            try:
+                msg = _json.loads(line)
+            except ValueError:
+                continue
+            if msg.get("id") == 3:
+                if "error" in msg:
+                    fail("codex turn/start failed: "
+                         f"{msg['error'].get('message')}")
+                turn_accepted = True
+            if (msg.get("method") == "turn/completed"
+                    and msg.get("params", {}).get("threadId") == sid):
+                turn_completed = msg["params"]["turn"]
+        if not turn_accepted or turn_completed is None:
+            fail("codex app-server did not complete the setup turn within 60s")
+        if turn_completed.get("status") != "completed":
+            fail("codex setup turn ended with status "
+                 f"{turn_completed.get('status', 'unknown')}")
+
+        send({"jsonrpc": "2.0", "id": 4, "method": "thread/name/set",
               "params": {"threadId": sid, "name": title}})
-        read_reply(3, "thread/name/set")
+        read_reply(4, "thread/name/set")
     finally:
-        # Graceful shutdown — this is what makes codex WRITE the rollout file.
+        # Let app-server flush its SQLite state before the interactive resume.
         try:
             proc.stdin.close()
             proc.wait(timeout=10)
         except Exception:  # noqa: BLE001
             proc.terminate()
-    if path and not os.path.exists(path):
-        fail(f"codex session {sid} was minted but its rollout file never appeared "
-             f"at {path} — cannot hand a resumable session to the worker")
     return sid
 
 
 def _build_codex(*, session_id, resume, cwd, seed_prompt, model,
                  title=None, dry_run=False):
-    """Session-tracked like claude/opencode, same inverted id flow as opencode
-    (codex mints the uuid; pre-created here on a fresh spawn). BOTH fresh and
-    resume launch `codex resume <uuid>` — fresh just resumes the empty
-    pre-created session — so the uuid sits in the process argv (pgrep liveness)
-    either way. `codex resume` takes -m/--model and a positional prompt."""
-    if resume and session_id and _codex_rollout_exists(session_id):
+    """Session-tracked like claude/opencode, same inverted id flow as opencode.
+
+    Codex mints the uuid and PWC primes it before a fresh spawn. Both fresh and
+    resume launch ``codex resume <uuid>``. The uuid stays in the process argv for
+    liveness checks. ``codex resume`` accepts a model and positional prompt.
+    """
+    if resume:
+        if not session_id:
+            fail("--resume requires --session-id for the codex harness")
+        if not dry_run and not _codex_session_exists(session_id):
+            fail(f"--resume: no resumable codex thread {session_id}\n"
+                 "\n"
+                 "to start a NEW session instead, drop --resume.")
         mode = "resume"
     else:
         mode = "fresh"
         session_id = ("00000000-DRYRUN-not-created" if dry_run
-                      else _preallocate_codex_session(cwd, title or "PWC worker"))
+                      else _preallocate_codex_session(
+                          cwd, title or "PWC worker", model))
     # Absolute path: `codex` is an npm global under one mise node version, so in
     # a repo whose .nvmrc pins a different node it vanishes from the worker
     # shell's PATH ("command not found", kontax-backend/smarta-systems
@@ -410,8 +485,7 @@ def _build_codex(*, session_id, resume, cwd, seed_prompt, model,
 # positional prompt; opencode --prompt does NOT (verified live 2026-07-13: a worker
 # spawned without this sat idle at 0 messages / $0.00 — the seed was visible on
 # screen and never sent). codex's `resume <id> '<prompt>'` is the same shape as
-# claude's and is assumed to auto-submit — VERIFY on its first interactive use, and
-# if it too just pre-fills, flip this flag rather than reinventing the delivery.
+# claude's and auto-submits (verified live 2026-08-31 on codex-cli 0.151.0).
 _BUILDERS = {
     "claude": (_build_claude, True, False),   # (builder, session_tracked, needs_submit)
     "opencode": (_build_opencode, True, True),

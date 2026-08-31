@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -20,6 +21,9 @@ _COMMON = SCRIPTS / "_common.py"
 
 PYTHON = sys.executable
 ENV = {**os.environ, "PYTHONPATH": str(SCRIPTS)}
+
+sys.path.insert(0, str(SCRIPTS))
+import spawn as spawn_module  # noqa: E402
 
 
 def _run(*args, **kwargs):
@@ -114,6 +118,142 @@ def test_codex_spawn_enables_network_only_for_worker_sandbox(ws):
                         "--cwd", str(ws.root / "workdir"), "--dry-run")
     assert rc == 0, err
     assert "-c sandbox_workspace_write.network_access=true resume" in out
+
+
+def _codex_state_db(path, *, session_id, first_message="", preview="", tokens=0):
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            "CREATE TABLE threads ("
+            "id TEXT PRIMARY KEY, first_user_message TEXT NOT NULL, "
+            "preview TEXT NOT NULL, tokens_used INTEGER NOT NULL)"
+        )
+        conn.execute(
+            "INSERT INTO threads VALUES (?, ?, ?, ?)",
+            (session_id, first_message, preview, tokens),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_codex_resume_detection_uses_sqlite_without_rollout(monkeypatch, tmp_path):
+    session_id = "00000000-0000-0000-0000-000000000151"
+    state_db = tmp_path / "state_5.sqlite"
+    sessions = tmp_path / "sessions"
+    sessions.mkdir()
+    _codex_state_db(
+        state_db, session_id=session_id,
+        first_message="PWC setup", preview="PWC setup", tokens=42,
+    )
+    monkeypatch.setattr(spawn_module, "_CODEX_STATE_DB", state_db)
+    monkeypatch.setattr(spawn_module, "_CODEX_SESSIONS", sessions)
+
+    assert spawn_module._codex_session_exists(session_id) is True
+
+
+def test_codex_resume_detection_rejects_empty_sqlite_thread(
+        monkeypatch, tmp_path):
+    session_id = "00000000-0000-0000-0000-000000000152"
+    state_db = tmp_path / "state_5.sqlite"
+    sessions = tmp_path / "sessions"
+    sessions.mkdir()
+    _codex_state_db(state_db, session_id=session_id)
+    monkeypatch.setattr(spawn_module, "_CODEX_STATE_DB", state_db)
+    monkeypatch.setattr(spawn_module, "_CODEX_SESSIONS", sessions)
+
+    assert spawn_module._codex_session_exists(session_id) is False
+
+
+def test_codex_resume_detection_keeps_legacy_rollout_fallback(
+        monkeypatch, tmp_path):
+    session_id = "00000000-0000-0000-0000-000000000153"
+    state_db = tmp_path / "state_5.sqlite"
+    sessions = tmp_path / "sessions"
+    rollout_dir = sessions / "2026" / "08" / "31"
+    rollout_dir.mkdir(parents=True)
+    _codex_state_db(state_db, session_id="different-thread")
+    (rollout_dir / f"rollout-old-{session_id}.jsonl").touch()
+    monkeypatch.setattr(spawn_module, "_CODEX_STATE_DB", state_db)
+    monkeypatch.setattr(spawn_module, "_CODEX_SESSIONS", sessions)
+
+    assert spawn_module._codex_session_exists(session_id) is True
+
+
+def test_codex_preallocation_completes_setup_turn(monkeypatch, tmp_path):
+    sent = []
+    session_id = "00000000-0000-0000-0000-000000000154"
+
+    class FakeStdin:
+        def write(self, line):
+            sent.append(json.loads(line))
+
+        def flush(self):
+            pass
+
+        def close(self):
+            pass
+
+    class FakeStdout:
+        def __init__(self):
+            self.lines = iter([
+                json.dumps({"jsonrpc": "2.0", "id": 1, "result": {}}) + "\n",
+                json.dumps({
+                    "jsonrpc": "2.0", "id": 2,
+                    "result": {"thread": {"sessionId": session_id}},
+                }) + "\n",
+                json.dumps({"jsonrpc": "2.0", "id": 3, "result": {}}) + "\n",
+                json.dumps({
+                    "jsonrpc": "2.0", "method": "turn/completed",
+                    "params": {
+                        "threadId": session_id,
+                        "turn": {"status": "completed"},
+                    },
+                }) + "\n",
+                json.dumps({"jsonrpc": "2.0", "id": 4, "result": {}}) + "\n",
+            ])
+
+        def readline(self):
+            return next(self.lines, "")
+
+    class FakeProcess:
+        def __init__(self):
+            self.stdin = FakeStdin()
+            self.stdout = FakeStdout()
+
+        def wait(self, timeout):
+            return 0
+
+        def terminate(self):
+            pass
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
+
+    result = spawn_module._preallocate_codex_session(
+        str(tmp_path), "Test worker", "gpt-test",
+    )
+
+    assert result == session_id
+    assert [message["method"] for message in sent] == [
+        "initialize", "thread/start", "turn/start", "thread/name/set",
+    ]
+    assert sent[2]["params"]["model"] == "gpt-test"
+    assert sent[2]["params"]["input"] == [
+        {"type": "text", "text": spawn_module._CODEX_PRIME_PROMPT},
+    ]
+
+
+def test_codex_resume_missing_thread_fails_instead_of_starting_fresh(
+        monkeypatch, capsys):
+    monkeypatch.setattr(spawn_module, "_codex_session_exists", lambda _: False)
+
+    with pytest.raises(SystemExit):
+        spawn_module._build_codex(
+            session_id="missing", resume=True, cwd="/tmp", seed_prompt=None,
+            model="gpt-test", dry_run=False,
+        )
+
+    assert "no resumable codex thread" in capsys.readouterr().err
 
 
 # ── --force-model requires --force-reason ──────────────────────────────────────
