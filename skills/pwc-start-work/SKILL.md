@@ -163,6 +163,40 @@ of the way.
      fresh on an unblocked task whose original session is still resumable is a real
      defect — it throws away the exact context the task needs.
 
+3b. **Do NOT research the task before dispatching.** The thin-seed rule below governs
+   what the seed may CONTAIN; this one governs what the coordinator may DO to write it.
+   They are different, and complying with the first while breaking the second is the
+   common failure.
+
+   Before dispatching, the coordinator may read: the PWC task (`pwc detail`), the
+   ticket or issue the task points at, and the routing/skill-hint config. That is all
+   it needs.
+
+   It must NOT: grep or read source, check whether a referenced module/client/table
+   actually exists, verify a ticket's technical claims, inspect repo or git state,
+   query external systems for supporting detail, or otherwise pre-establish facts the
+   worker will establish anyway.
+
+   Three reasons, in order of weight:
+   - **It pollutes the coordinator's context.** The two-tier design exists so the
+     coordinator holds the shape of ALL work rather than the detail of one task. Every
+     file read to write a seed spends the budget that keeps the board legible.
+   - **It is slower, not faster.** The worker re-derives it regardless, with better
+     tools and full attention on one task.
+   - **It makes findings look authoritative when they are cheap.** A coordinator's
+     five-minute grep, stated in a seed, reads to the worker as established fact. If it
+     is wrong, the worker inherits the error with the coordinator's confidence behind
+     it.
+
+   The pull is real: pre-checking FEELS diligent, especially on a task with production
+   consequences. Resist it. Dispatch, and let the worker report. If a task genuinely
+   cannot be scoped without investigation, that IS the task — dispatch it as an
+   investigation rather than doing the investigation and dispatching the conclusion.
+
+   The narrow exception is DISPATCH MECHANICS, not task content: confirming a prior
+   session's transcript exists and which cwd it is keyed to, and checking whether a
+   runhost is reachable. Those decide HOW to spawn, not WHAT the work is.
+
 4. **For a fresh session, build a thin seed that routes to the task-type skill.** The
    coordinator's seed says what task this is, points at durable context, and hands off
    process ownership. It does **not** claim tickets, design an approach, list
@@ -194,7 +228,15 @@ of the way.
    - **A one-line goal/intent** from the task title/notes, describing the desired
      outcome without prescribing how to get there.
    - **The closing-report step** — *"When you've finished or hit a blocker you can't
-     clear, run `/pwc-report-status` for this task."*
+     clear, run `/pwc-report-status` for this task."* For a non-Claude harness the
+     seed must spell out BOTH halves of what that skill does, because the worker
+     cannot run it: log the outcome, then **set the status** — *"record the outcome
+     with `pwc log-event --task <id> --source worker --kind note --detail …`, then
+     `pwc update-task --task <id> --status done` (or `blocked`) as your last
+     action."* A seed that only asks for the note leaves the task `in-progress`
+     forever: on 15.09.2026 eight codex workers finished, each logged a thorough
+     note, and none flipped its status, so the board showed eight in-flight tasks
+     with one live worker.
    - **The attach-threads step** — *"If you post to or meaningfully read any Slack
      thread about this task, attach it to the task as a working ref (via
      `/pwc-report-status` / `add-ref`, using the message's real `thread_ts`) so replies
@@ -360,8 +402,12 @@ of the way.
     skills are Claude Code skills, so the seed points at the `pwc` CLI instead —
     *"Run `pwc detail --task <id>` for your full context"* replaces
     `/pwc-show-task`, and *"record the outcome with `pwc log-event --task <id>
-    --source worker --kind note --detail …`"* replaces `/pwc-report-status`.
-    The configured-skill vs. fallback-gate split is harness-neutral.
+    --source worker --kind note --detail …`, then `pwc update-task --task <id>
+    --status done|blocked`"* replaces `/pwc-report-status`. **Both commands, every
+    time.** `/pwc-report-status` writes the note AND the status; a seed that
+    translates only the note half leaves every finished codex task `in-progress`
+    (observed 15.09.2026, eight tasks). The configured-skill vs. fallback-gate
+    split is harness-neutral.
 - **Never resume a session that's still alive** — that's what the worker-status check in
   step 3 guards against (claude-harness tasks only).
 - /start does not auto-pick tasks; it acts on a task the user chose (often via
