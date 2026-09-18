@@ -206,9 +206,12 @@ of the way.
    actions). How work is claimed is workspace policy, so the skill names no ticket
    system or chat tool here.
 
-   - **Empty result (`{}`) → nothing to claim. Go to step 4.** Either the task type's
-     skill claims for itself (`/start-ticket` assigns the ticket and moves it), or the
-     workspace has no claim convention.
+   - **Empty result (`{}`) → nothing to claim. Go to step 4.** The workspace has no
+     claim convention for this task type.
+   - **The coordinator claims, even when the task type's skill also can.** A worker
+     reaches its skill's claim step minutes after the spawn. Until then the team's
+     board shows the work as free, and a teammate can pick it up. So the claim happens
+     here, before the spawn, and the seed tells the worker it is done (see below).
    - **Run the `check` first. If someone else took the work, STOP.** Do not claim, do
      not spawn. Tell the user who holds it and since when, and let them decide: leave
      it, take it over, or archive the task. A takeover is the user's call, never the
@@ -218,7 +221,10 @@ of the way.
      people then do is the cost this step exists to remove.
    - **Tell the worker the claim is done**, as one environment line in the seed
      ("Already done by the coordinator: …"), so its skill does not claim twice.
-   - **A resume skips this step.** The task was claimed when it first started.
+   - **A resume runs this step too.** A task that comes back (reopened, handed back,
+     unblocked) is often unclaimed again: the ticket sits in its to-do column, or
+     someone else holds it now. The `check` says when the claim already holds; then
+     skip the `steps`. Claim steps are safe to repeat.
 
    The reads this step needs (the ticket's assignee and status, the reactions and
    replies on the request) are dispatch mechanics, not task research: they decide

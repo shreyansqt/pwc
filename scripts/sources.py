@@ -166,8 +166,10 @@ def cmd_claim(args):
           }
         }
 
-    A task type with no entry has nothing to claim (its skill claims, or the workspace
-    has no claim convention). With `--type`, return that type's entry, or {}.
+    A task type with no entry has nothing to claim. The coordinator claims BEFORE the
+    spawn even when the type's skill can claim too, because a worker reaches that step
+    minutes later and the team's board shows the work as free until then.
+    With `--type`, return that type's entry, or {}.
     """
     claim = _load(args.workspace).get("claim", {}) or {}
     if not isinstance(claim, dict):
