@@ -87,3 +87,22 @@ def test_one_bad_workspace_does_not_kill_the_sweep(tmp_path, monkeypatch):
 
     assert "good" in out["workspaces"]
     assert "bad" not in out["workspaces"]
+
+
+def test_claim_returns_one_type_or_an_empty_object(tmp_path, monkeypatch):
+    """`claim --type` gives start-work that type's policy; an unconfigured type has
+    nothing to claim, which must read as {} and not as an error."""
+    ws = _mk_workspace(tmp_path, "smarta", {
+        "sources": {},
+        "claim": {"pr-review": {"check": "is it assigned?", "steps": ["assign it"]}},
+    })
+    assert _run(["claim", "--type", "pr-review"], ws, monkeypatch) == {
+        "check": "is it assigned?", "steps": ["assign it"]}
+    assert _run(["claim", "--type", "jira"], ws, monkeypatch) == {}
+    assert _run(["claim"], ws, monkeypatch) == {
+        "pr-review": {"check": "is it assigned?", "steps": ["assign it"]}}
+
+
+def test_claim_is_empty_when_the_workspace_configures_none(tmp_path, monkeypatch):
+    ws = _mk_workspace(tmp_path, "side-projects", {"sources": {}})
+    assert _run(["claim", "--type", "pr-review"], ws, monkeypatch) == {}

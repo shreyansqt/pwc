@@ -11,7 +11,7 @@ Task-database subcommands are top-level (they're the daily surface); the other
 scripts are grouped under a named subcommand:
 
   pwc summary | detail | events | add-task | update-task | ...   -> taskdb.py
-  pwc sources show | enabled | set | skill-hints | priority      -> sources.py
+  pwc sources show | enabled | set | skill-hints | claim | priority      -> sources.py
   pwc models show | stale | fetch | seed | set-tier | set-preference -> models.py
   pwc route --task <id> --domain <d> --reasoning <n> ...         -> route.py
   pwc cost --task <id> | --report | --sweep                      -> cost.py
@@ -38,7 +38,7 @@ task database (see `pwc <command> -h` for each):
   clear-session archive promote merge init
 
 other:
-  pwc sources <show|enabled|set|skill-hints|priority> [args]
+  pwc sources <show|enabled|set|skill-hints|claim|priority> [args]
   pwc models <show|stale|fetch|seed|set-tier|set-preference> [args]
   pwc route --task <id>
             --domain <code-review|implementation|research-writing|ops-comms>

@@ -48,6 +48,7 @@ Usage:
   sources.py set --json -         # replace the whole config from JSON on stdin
   sources.py enabled              # print only the enabled sources (what /find-work scans)
   sources.py skill-hints [--type T]  # the task-type -> skill(s) map (or one type's list)
+  sources.py claim [--type T]     # how work is claimed before dispatch, per task type, or {}
   sources.py priority             # the workspace's priority model (P1/P2/P3 rules), or {}
   sources.py routing              # the model/harness routing policy, or {}
   sources.py runhosts             # named remote machines workers can run on, or {}
@@ -148,6 +149,36 @@ def cmd_skill_hints(args):
         emit(skill_hints_for_type(args.workspace, args.type))
     else:
         emit(_load(args.workspace).get("skill_hints", {}) or {})
+
+
+def cmd_claim(args):
+    """The workspace's claim policy per task type (empty object if none configured).
+
+    /pwc-start-work reads this BEFORE a fresh dispatch: it first checks that nobody else
+    took the work, then marks it as the user's, then spawns. How work is claimed is
+    workspace policy (a Jira assignee, a Slack reaction, a GitHub self-assign), so it
+    lives here — NOT hardcoded in the generic skill. Shape:
+
+        "claim": {
+          "pr-review": {
+            "check": "<free-text prose: how to see that someone else already took it>",
+            "steps": ["<free-text prose: one claim action>", "..."]
+          }
+        }
+
+    A task type with no entry has nothing to claim (its skill claims, or the workspace
+    has no claim convention). With `--type`, return that type's entry, or {}.
+    """
+    claim = _load(args.workspace).get("claim", {}) or {}
+    if not isinstance(claim, dict):
+        fail("malformed claim config: expected an object keyed by task type")
+    if args.type:
+        entry = claim.get(args.type, {}) or {}
+        if not isinstance(entry, dict):
+            fail(f"malformed claim entry for task type {args.type!r}: expected an object")
+        emit(entry)
+    else:
+        emit(claim)
 
 
 def cmd_priority(args):
@@ -305,6 +336,9 @@ def main(argv=None):
     s = sub.add_parser("skill-hints")
     s.add_argument("--type", help="return only this task type's hints (a list)")
     s.set_defaults(func=cmd_skill_hints)
+    s = sub.add_parser("claim")
+    s.add_argument("--type", help="return only this task type's claim entry (an object)")
+    s.set_defaults(func=cmd_claim)
     sub.add_parser("priority").set_defaults(func=cmd_priority)
     sub.add_parser("routing").set_defaults(func=cmd_routing)
     sub.add_parser("runhosts").set_defaults(func=cmd_runhosts)

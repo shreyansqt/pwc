@@ -78,6 +78,9 @@ of the way.
   map is the source of truth for "which skill owns this kind of work." If it returns
   no skills, the seed names that as a visible process gap and uses the generic
   fallback gate.
+- `pwc sources claim [--type <type>]` — the workspace's claim policy per task type:
+  a `check` (is the work already taken?) and `steps` (the claim actions). Read it in
+  step 3c, before every fresh dispatch. `{}` means this type has nothing to claim.
 - `pwc update-task` / `log-event` — for inline outcomes.
 
 ## Steps
@@ -197,6 +200,35 @@ of the way.
    session's transcript exists and which cwd it is keyed to, and checking whether a
    runhost is reachable. Those decide HOW to spawn, not WHAT the work is.
 
+3c. **Claim the work BEFORE a fresh dispatch.** Run `pwc sources claim --type
+   <task-type>`. It returns the workspace's claim policy for this task type: a `check`
+   (how to see that someone else already took the work) and `steps` (the claim
+   actions). How work is claimed is workspace policy, so the skill names no ticket
+   system or chat tool here.
+
+   - **Empty result (`{}`) → nothing to claim. Go to step 4.** Either the task type's
+     skill claims for itself (`/start-ticket` assigns the ticket and moves it), or the
+     workspace has no claim convention.
+   - **Run the `check` first. If someone else took the work, STOP.** Do not claim, do
+     not spawn. Tell the user who holds it and since when, and let them decide: leave
+     it, take it over, or archive the task. A takeover is the user's call, never the
+     coordinator's — overwriting a teammate's claim is visible to the whole team.
+   - **If the work is free, run every `steps` entry, then dispatch.** A claim step
+     that fails stops the dispatch: report it, because an unclaimed review that two
+     people then do is the cost this step exists to remove.
+   - **Tell the worker the claim is done**, as one environment line in the seed
+     ("Already done by the coordinator: …"), so its skill does not claim twice.
+   - **A resume skips this step.** The task was claimed when it first started.
+
+   The reads this step needs (the ticket's assignee and status, the reactions and
+   replies on the request) are dispatch mechanics, not task research: they decide
+   WHETHER to spawn. They do not license reading the diff or the ticket's content.
+
+   (18.09.2026: the older of two review requests looked free on the board. The ticket
+   was In Review and assigned to a teammate since the day before. Only a manual check
+   before the spawn caught it; the skill had no claim step, and its 👀 came after the
+   dispatch.)
+
 4. **For a fresh session, build a thin seed that routes to the task-type skill.** The
    coordinator's seed says what task this is, points at durable context, and hands off
    process ownership. It does **not** claim tickets, design an approach, list
@@ -309,7 +341,9 @@ of the way.
    task later paused/killed keeps its 👀 — there's no removal API and this is
    best-effort by design; don't try to build teardown. Only react at all when the task
    actually carries Slack refs (smarta tasks do; a GitHub-only side-projects task has
-   none — skip silently).
+   none — skip silently). When step 3c's claim already put 👀 on a message, skip that
+   message here; this step still covers the task's other Slack refs, and task types
+   with no claim entry.
 
    Then, in your reply:
    tell the user the worker tab is open and the seed was **auto-submitted**. If a
