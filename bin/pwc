@@ -14,6 +14,8 @@ scripts are grouped under a named subcommand:
   pwc sources show | enabled | set | skill-hints | claim | priority      -> sources.py
   pwc models show | stale | fetch | seed | set-tier | set-preference -> models.py
   pwc route --task <id> --domain <d> --reasoning <n> ...         -> route.py
+  pwc quota show | mark-empty | clear-mark                       -> quota.py
+  pwc maintain run | status                                      -> maintain.py
   pwc cost --task <id> | --report | --sweep                      -> cost.py
   pwc coord [claude|codex|opencode] ...                          -> coord.py
   pwc spawn --task <id> --cwd <dir> ...                          -> spawn.py
@@ -43,7 +45,9 @@ other:
   pwc route --task <id>
             --domain <code-review|implementation|research-writing|ops-comms>
             --reasoning <1-5> [--verifiability <1-5>] [--risk none|outward|prod-data]
-            [--context-need <tokens>] [--explain]
+            [--context-need <tokens>] [--author-vendor V] [--explain] [--save]
+  pwc quota <show [--fresh]|mark-empty|clear-mark> [args]
+  pwc maintain <run [--force] [--dry-run]|status>
   pwc cost --task <id> | --report [--since 30d] | --sweep
   pwc coord [claude|codex|opencode] [--model M] [--workspace DIR] [--name N]
   pwc spawn --task <id> --cwd <dir> [--session-id U] [--resume] [--prompt -] [--name N]
@@ -121,6 +125,8 @@ def main(argv):
     if ws is not None:
         if cmd in ("sources", "cost"):
             rest = ["--workspace", ws, *rest]
+        elif cmd == "route":
+            rest = [*rest, "--workspace", ws]  # route reads routing.allowed_harnesses
         elif cmd in ("spawn", "coord"):
             pass  # spawn is located by --cwd; coord declares its own --workspace
         else:
@@ -138,6 +144,12 @@ def main(argv):
     elif cmd == "cost":
         import cost
         cost.main(rest)
+    elif cmd == "quota":
+        import quota
+        quota.main(rest)
+    elif cmd == "maintain":
+        import maintain
+        maintain.main(rest)
     elif cmd == "coord":
         import coord
         raise SystemExit(coord.main(rest))

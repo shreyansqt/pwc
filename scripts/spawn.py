@@ -1203,6 +1203,11 @@ def main(argv=None):
         seed_prompt = args.prompt
 
     enforce_skill_hints(args, task_row, workspace_root, seed_prompt)
+    if not args.dry_run:
+        # First spawn of the day: update harnesses and the model list BEFORE
+        # routing, so the route sees today's models. Never blocks the spawn.
+        import maintain
+        maintain.run_if_due()
     harness, model = resolve_routing(args, task_row, workspace_root)
 
     session_id = args.session_id or str(uuid.uuid4())

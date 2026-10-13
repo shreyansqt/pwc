@@ -398,7 +398,11 @@ def compute_fetch(data: dict) -> tuple[dict, list[dict]]:
         # codex: the binary check alone is insufficient — ChatGPT-account codex
         # silently rejects certain models the API-key variant supports. Cross-
         # reference against codex's own model catalog (the authoritative list).
-        if harness == "codex" and codex_slugs is not None:
+        # `retired` is set by `pwc maintain` when the harness stopped listing the
+        # model. The binary being installed says nothing about that model.
+        if row.get("retired"):
+            avail = False
+        elif harness == "codex" and codex_slugs is not None:
             avail = (shutil.which("codex") is not None
                      and row.get("model") in codex_slugs)
         else:
