@@ -31,11 +31,25 @@ The decision, in order:
      whose wrongness is silent), the cost of a plausible-but-wrong answer is high, so
      demand more capability up front.
 
-  3. PREFERENCE — after qualification, use the task id to apply the domain's target
-     preference share. Preference can reorder qualified candidates only.
+  3. FENCES — two relational rules that need no history:
+     - `allowed_harnesses` (workspace policy, e.g. a client workspace that must not
+       send code to a new vendor) rejects every other harness.
+     - REVIEWER != AUTHOR: a code-review task whose profile names `author_vendor`
+       rejects models from that vendor. A model is blind to its own failure modes,
+       so a same-family review is worth less (pwc#5, goal 2).
 
-  4. COST — when preference does not select the task, rank by BLENDED cost (see
-     `_blended_cost`). Ties break toward the LOWER tier, then by key.
+  4. QUOTA (when the caller passes `quota`, see quota.py) — the decision moves from
+     "which model" to "which SUBSCRIPTION", because a quota belongs to a plan:
+     - a plan that is `exhausted` is rejected;
+     - a plan whose quota is `unknown` gets a small deterministic share of tasks
+       (`unknown_share`, by task-id bucket) so it still carries work;
+     - otherwise the plan with the most unused quota wins (see `_pick_subscription`);
+     - inside the winning plan, the cheapest qualified model wins (step 5).
+     The capability gate in step 2 is never relaxed to satisfy a quota.
+
+  5. COST — rank by BLENDED cost (see `_blended_cost`). Ties break toward the LOWER
+     tier, then by key. Without quota data (legacy cost mode), a domain PREFERENCE
+     may first select another qualified model by task-id bucket.
 
 NO FALLBACK CHAINS. If nothing qualifies, this exits nonzero and says what filtered
 everything out. A failed dispatch is a decision for the user, not something to paper
@@ -64,6 +78,7 @@ import sys
 from datetime import datetime, timezone
 
 import models as models_mod
+import quota as quota_mod
 from _common import emit, fail, read_json_stdin
 
 # A task touching production data gets a capability floor regardless of how simple
@@ -89,6 +104,24 @@ RISKS = ("none", "outward", "prod-data")
 _MIX = {"cache_read": 0.80, "cost_in": 0.05, "cost_out": 0.10, "cache_write": 0.05}
 
 _PREFERENCE_BUCKETS = 10_000
+
+# Share of tasks (0-1) that may go to a plan whose quota CodexBar cannot read. Small,
+# because nobody can see that plan running dry until a worker hits the wall.
+_UNKNOWN_SHARE = 0.10
+
+# Vendor of a model, from its catalog id prefix, then from its harness. A row may
+# set `vendor` directly (Antigravity serves Claude models, so harness is not enough).
+_CATALOG_VENDOR = {"anthropic": "anthropic", "openai": "openai", "x-ai": "xai",
+                   "xai": "xai", "google": "google"}
+_HARNESS_VENDOR = {"claude": "anthropic", "codex": "openai", "grok": "xai",
+                   "cursor-agent": "cursor", "agy": "google"}
+
+
+def vendor_of(row: dict) -> str | None:
+    if row.get("vendor"):
+        return row["vendor"]
+    prefix = (row.get("catalog_id") or "").split("/")[0]
+    return _CATALOG_VENDOR.get(prefix) or _HARNESS_VENDOR.get(row.get("harness"))
 
 
 def _blended_cost(row: dict) -> float:
@@ -167,11 +200,55 @@ def _rack_rate_comparison(preferred: dict, cost_pick: dict) -> str:
             f"({preferred_cost:g} vs {cost_cost:g})")
 
 
-def route(profile: dict, table: dict, *, now: datetime | None = None) -> dict:
-    """Pure decision function: (profile, table) -> decision. No I/O, no globals.
+def _pick_subscription(by_sub: dict[str, list[dict]], quota: dict, settings: dict,
+                       task_id: str) -> tuple[str, str]:
+    """Choose the plan for this task among plans with a qualified, unexhausted model.
+
+    Returns (subscription, why). `by_sub` maps plan -> its qualified candidates.
+
+    - UNKNOWN plans get `unknown_share` of tasks by task-id bucket (deterministic).
+    - Among readable plans: with a `fill_order`, the first listed plan that is not
+      ahead of its pace (slack >= 0) wins, so cheap plans fill to pace before an
+      expensive one gets work. Without it, the plan with the largest slack wins
+      (the most quota that would otherwise be wasted at reset).
+    - Ties go to the plan whose cheapest candidate is cheaper, then by name.
+    """
+    known = {s: quota[s] for s in by_sub if quota.get(s, {}).get("status") == "ok"}
+    unknown = sorted(s for s in by_sub if s not in known)
+    share = float(settings.get("unknown_share", _UNKNOWN_SHARE))
+    bucket = _preference_bucket(f"quota:{task_id}")
+    if unknown and (not known or bucket < share * _PREFERENCE_BUCKETS):
+        pick = unknown[bucket % len(unknown)]
+        why = (f"{pick} quota is unknown; it takes {share:.0%} of tasks and task "
+               f"{task_id} fell in that share" if known else
+               f"{pick} quota is unknown and no readable plan qualifies")
+        return pick, why
+
+    def cheapest(s):
+        return min(c["blended"] * c["cost_weight"] for c in by_sub[s])
+
+    def slack(s):
+        return known[s].get("slack") or 0.0
+
+    for s in settings.get("fill_order") or []:
+        if s in known and slack(s) >= 0:
+            return s, (f"{s} is first in the fill order that is not ahead of pace "
+                       f"(weekly slack {slack(s):+g} points)")
+    pick = sorted(known, key=lambda s: (-slack(s), cheapest(s), s))[0]
+    others = ", ".join(f"{s} {slack(s):+g}" for s in sorted(known) if s != pick)
+    return pick, (f"{pick} has the most unused quota (weekly slack {slack(pick):+g} "
+                  f"points" + (f"; {others}" if others else "") + ")")
+
+
+def route(profile: dict, table: dict, *, now: datetime | None = None,
+          quota: dict | None = None,
+          allowed_harnesses: list[str] | None = None) -> dict:
+    """Pure decision function: (profile, table, quota) -> decision. No I/O.
 
     Kept pure so it is trivially testable and so the same inputs always produce the
-    same output — a router you can't predict is one you stop trusting.
+    same output — a router you can't predict is one you stop trusting. Quota is an
+    ARGUMENT (the caller reads CodexBar), so route stays pure even though the
+    decision now depends on live usage. `quota=None` is the old cost-only mode.
     """
     domain = profile["domain"]
     task_id = str(profile.get("task_id") or "").strip()
@@ -179,6 +256,7 @@ def route(profile: dict, table: dict, *, now: datetime | None = None) -> dict:
     verifiability = int(profile.get("verifiability", 3))
     risk = profile.get("risk", "none")
     context_need = int(profile.get("context_need", 0) or 0)
+    author_vendor = profile.get("author_vendor")
 
     if not task_id:
         fail("route requires a task id for deterministic preference selection "
@@ -205,6 +283,17 @@ def route(profile: dict, table: dict, *, now: datetime | None = None) -> dict:
         if not row.get("available"):
             rejected.append({"key": key, "why": "harness unavailable "
                                                 "(not installed or not authenticated)"})
+            continue
+        if allowed_harnesses is not None and row.get("harness") not in allowed_harnesses:
+            rejected.append({"key": key,
+                             "why": f"harness {row.get('harness')} is not allowed in "
+                                    f"this workspace (routing.allowed_harnesses)"})
+            continue
+        if (author_vendor and domain == "code-review"
+                and vendor_of(row) == author_vendor):
+            rejected.append({"key": key,
+                             "why": f"same vendor ({author_vendor}) as the author "
+                                    f"of the work under review"})
             continue
         if risk == "prod-data" and not row.get("data_ok"):
             rejected.append({"key": key,
@@ -244,10 +333,41 @@ def route(profile: dict, table: dict, *, now: datetime | None = None) -> dict:
     # Cost order remains independent of preference. Preference may select another
     # entry from this already-qualified list, but it never adds an entry to it.
     candidates.sort(key=lambda c: (c["blended"] * c["cost_weight"], c["tier"], c["key"]))
+
+    quota_result = None
+    if quota is not None:
+        subs = quota_mod.subscriptions(table)
+        by_sub: dict[str, list[dict]] = {}
+        for c in candidates:
+            sub = quota_mod.subscription_for_harness(c["harness"], subs) \
+                or f"harness:{c['harness']}"
+            st = quota.get(sub) or {"status": "unknown"}
+            if st.get("status") == "exhausted":
+                rejected.append({"key": c["key"],
+                                 "why": f"{sub} out of quota: {st.get('why', '')}"})
+                continue
+            by_sub.setdefault(sub, []).append({**c, "subscription": sub})
+        if not by_sub:
+            fail("every qualified model's subscription is out of quota. Rejected: "
+                 + "; ".join(f"{r['key']} — {r['why']}" for r in rejected)
+                 + ". There is no fallback chain by design: wait for a reset, or "
+                   "pin the task to a harness deliberately.")
+        sub, quota_why = _pick_subscription(by_sub, quota, table.get("quota") or {},
+                                            task_id)
+        candidates = by_sub[sub]
+        quota_result = {
+            "subscription": sub,
+            "why": quota_why,
+            "snapshot": {s: {k: v for k, v in (quota.get(s) or {}).items()
+                             if k in ("status", "slack", "why")}
+                         for s in by_sub},
+        }
+
     cost_pick = candidates[0]
     pick = cost_pick
 
-    pref, inactive_why = _preference_for(table, domain, now=now)
+    pref, inactive_why = (None, None) if quota is not None else \
+        _preference_for(table, domain, now=now)
     preference_result = None
     preference_why = inactive_why
     if pref:
@@ -282,10 +402,14 @@ def route(profile: dict, table: dict, *, now: datetime | None = None) -> dict:
                               f"{cost_pick['key']}; "
                               f"{_rack_rate_comparison(preferred, cost_pick)}")
 
+    bits = []
+    if quota_result:
+        bits.append(quota_result["why"])
     if pick["key"] == cost_pick["key"]:
-        bits = [f"cheapest {domain} model at tier >= {need}"]
+        bits.append(f"cheapest {domain} model at tier >= {need}"
+                    + (f" in {quota_result['subscription']}" if quota_result else ""))
     else:
-        bits = [f"qualified {domain} model at tier >= {need}"]
+        bits.append(f"qualified {domain} model at tier >= {need}")
     if preference_why:
         bits.append(preference_why)
     if raised_why:
@@ -327,6 +451,8 @@ def route(profile: dict, table: dict, *, now: datetime | None = None) -> dict:
         result["cost_weight_applied"] = pick["cost_weight"]
     if preference_result:
         result["preference"] = preference_result
+    if quota_result:
+        result["quota"] = quota_result
     return result
 
 
@@ -360,6 +486,29 @@ def load_table_for_routing(no_fetch: bool = False):
     return {**raw, "models": merged}
 
 
+def allowed_harnesses_for(workspace_root) -> list[str] | None:
+    """The workspace's `routing.allowed_harnesses` list from sources.json, or None."""
+    if workspace_root is None:
+        return None
+    import sources
+    allowed = (sources._load(workspace_root).get("routing") or {}) \
+        .get("allowed_harnesses")
+    return list(allowed) if allowed else None
+
+
+def decide(profile: dict, *, workspace_root=None, no_fetch: bool = False,
+           use_quota: bool = True) -> dict:
+    """Load the table, the live quota and the workspace fence, then route.
+
+    The I/O shell around the pure `route()`. `pwc route` and `pwc spawn` both call
+    this, so the decision at spawn time is exactly what `pwc route` would print.
+    """
+    table = load_table_for_routing(no_fetch=no_fetch)
+    quota = quota_mod.read(table) if use_quota else None
+    return route(profile, table, quota=quota,
+                 allowed_harnesses=allowed_harnesses_for(workspace_root))
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="route.py", description=__doc__)
     p.add_argument("--task", dest="task_id",
@@ -379,6 +528,16 @@ def main(argv=None):
                    help="include the full candidate/rejection list")
     p.add_argument("--no-fetch", action="store_true",
                    help="skip the automatic table refresh when stale (offline mode)")
+    p.add_argument("--author-vendor",
+                   choices=sorted(set(_CATALOG_VENDOR.values())
+                                  | set(_HARNESS_VENDOR.values())),
+                   help="code-review only: the vendor whose model wrote the work; "
+                        "its models are excluded from the review")
+    p.add_argument("--no-quota", action="store_true",
+                   help="ignore live subscription quota (old cost-only mode)")
+    p.add_argument("--workspace",
+                   help="workspace root whose routing.allowed_harnesses applies "
+                        "(default: discovered from the cwd)")
     p.add_argument("--json", metavar="-", help="read the profile as JSON on stdin")
     args = p.parse_args(argv)
 
@@ -392,9 +551,13 @@ def main(argv=None):
                    "reasoning": args.reasoning,
                    "verifiability": args.verifiability, "risk": args.risk,
                    "context_need": args.context_need}
+        if args.author_vendor:
+            profile["author_vendor"] = args.author_vendor
 
-    table = load_table_for_routing(no_fetch=args.no_fetch)
-    decision = route(profile, table)
+    from _common import find_workspace_root
+    root = args.workspace or find_workspace_root()
+    decision = decide(profile, workspace_root=root, no_fetch=args.no_fetch,
+                      use_quota=not args.no_quota)
     if not args.explain:
         decision.pop("candidates", None)
         decision.pop("rejected", None)
