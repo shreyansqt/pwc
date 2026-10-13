@@ -346,8 +346,16 @@ On startup:
 
    If `pwc maintain status` lists models in `needs_tiers`, add one line: "New
    models without tiers: … — they take no work until tiers are set." Tiers come
-   from public benchmarks (`docs/model-benchmarks.md`); propose them to the user,
-   never set them yourself.
+   from public benchmarks, collected BEFORE any tier is proposed (Shreyans,
+   13.10.2026):
+   - Start one Opus research agent (`model: "opus"`; the agent must not start
+     subagents of its own). It collects the new models' public benchmarks in the
+     format of `docs/model-benchmarks.md`: every number with its source, date, and
+     an (I) independent or (V) vendor tag, and no guessed numbers.
+   - Add the result to `docs/model-benchmarks.md` in the PWC repo, as a worker
+     task if the change is more than a few rows.
+   - Only then propose tiers to the user, with the numbers that justify each one.
+     Never set tiers yourself.
 
 7. **Offer next moves, don't take them.** End by pointing at what the user might do
    (e.g. "drill into a task, or run `/pwc-pick-work` for a suggestion"). Beyond the worker-status

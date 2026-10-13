@@ -81,6 +81,12 @@ def test_expired_mark_is_ignored():
     assert quota.apply_marks(status, marks, now=NOW)["x"]["status"] == "ok"
 
 
+def test_null_override_removes_a_plan():
+    subs = quota.subscriptions({"subscriptions": {"google-ai": None}})
+    assert "google-ai" not in subs
+    assert "claude" in subs
+
+
 def test_table_overrides_subscription_map():
     subs = quota.subscriptions({"subscriptions": {"claude": {"plan": "Claude Pro"}}})
     assert subs["claude"]["plan"] == "Claude Pro"

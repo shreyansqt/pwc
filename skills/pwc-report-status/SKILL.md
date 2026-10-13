@@ -143,29 +143,12 @@ they have finished or hit a blocker they cannot clear.
    was a one-off. Do not edit or publish skills from here; surface the recommendation
    for the user to decide.
 
-7. **On `done` only — measure what it cost, and rate the model that ran it.** This is
-   the feedback loop that makes routing get *better* instead of staying a guess.
+7. **On `done` only — rate the model that ran it.** This is the feedback loop that
+   makes routing get *better* instead of staying a guess. (Until 13.10.2026 this step
+   also ran `pwc cost`. Shreyans does not use the cost figures, and the quota lines in
+   `/pwc-show-work` now answer "is this plan the right size?", so that part is gone.)
 
-   **a. Measure.** Run `pwc cost --task <id>`. This re-reads the worker session's
-   actual token usage from its harness's own store and prices it against the model
-   table. Report the figure in one line. Two things to say correctly rather than
-   glibly:
-   - For **claude/codex** the number is *fair-value at rack rate* — those tokens ran
-     on a subscription, so it is what they WOULD have cost on the open market, not
-     money billed. That is precisely the number that answers "would a cheaper plan
-     cover me?", so don't round it away.
-   - For **opencode/OpenRouter** it is real metered spend.
-   If it returns `cost_usd: null`, say why (an inline task has no session; a pruned
-   transcript can't be read) rather than reporting zero — **a fabricated zero is worse
-   than a missing number**, because it silently understates the very bill this exists
-   to measure.
-
-   Cost is **re-read live, never frozen at close**: a worker session keeps spending
-   after its task is done (the follow-up skill tweak, the docs pass). Re-running
-   `pwc cost --task <id>` later always returns the up-to-date total, so don't treat
-   the close-out figure as final.
-
-   **b. Rate the routing.** Ask the user one question: *was that model right for this
+   Ask the user one question: *was that model right for this
    task?* — too weak / about right / overkill, plus a one-liner. If they say too weak
    or overkill, write the correction into the table's overlay:
    ```
@@ -181,11 +164,11 @@ they have finished or hit a blocker they cannot clear.
    Then log it so the decision is auditable:
    ```
    pwc log-event --task <id> --kind routing-outcome \
-     --detail "<harness>/<model>: <rating> — <one-liner> (\$<cost>)"
+     --detail "<harness>/<model>: <rating> — <one-liner>"
    ```
 
    **Skip this whole step for a task with no worker** (inline, never dispatched) —
-   there's nothing to measure and nothing to rate.
+   there's nothing to rate.
 
 ## Notes
 

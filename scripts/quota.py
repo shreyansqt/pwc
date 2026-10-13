@@ -106,9 +106,13 @@ def codexbar_path() -> str | None:
 
 
 def subscriptions(table: dict | None = None) -> dict:
-    """The subscription map: the defaults, overridden per key by the table."""
+    """The subscription map: the defaults, overridden per key by the table.
+    A `null` override removes a plan (for example one Shreyans stopped using)."""
     subs = {k: dict(v) for k, v in DEFAULT_SUBSCRIPTIONS.items()}
     for key, override in ((table or {}).get("subscriptions") or {}).items():
+        if override is None:
+            subs.pop(key, None)
+            continue
         subs[key] = {**subs.get(key, {}), **override}
     return subs
 
