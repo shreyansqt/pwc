@@ -281,8 +281,10 @@ def route(profile: dict, table: dict, *, now: datetime | None = None,
         tier = (row.get("tiers") or {}).get(domain)
 
         if not row.get("available"):
-            rejected.append({"key": key, "why": "harness unavailable "
-                                                "(not installed or not authenticated)"})
+            rejected.append({"key": key, "why": (
+                "retired: the harness no longer lists it" if row.get("retired") else
+                "turned off in the table" if row.get("note") else
+                "harness unavailable (not installed or not authenticated)")})
             continue
         if allowed_harnesses is not None and row.get("harness") not in allowed_harnesses:
             rejected.append({"key": key,
