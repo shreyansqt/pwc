@@ -279,7 +279,10 @@ On startup:
      Slack reply or a research item). Don't invent a directory the task doesn't carry;
      show `—` rather than guessing.
    - **Where** — **how and where this task runs**, from the task's `harness`, `model`
-     and `runhost` (all in `summary`). Render as `harness/model@runhost`, collapsing
+     and `runhost` (all in `summary`). Since 13.10.2026 `pwc spawn` picks the harness at
+     spawn time, so a task without a pin has no `harness` in `summary`; for a
+     dispatched one, read the harness/model of its newest session (`pwc sessions
+     --task <id>`). Render as `harness/model@runhost`, collapsing
      what's absent: `harness/model`, `harness/model@runhost`, `harness` when no model is
      set, and `—` when the task has no harness yet (never dispatched). Keep it terse —
      it's a column, not a sentence; shorten provider-qualified model ids to their final
@@ -334,6 +337,17 @@ On startup:
    how many pending, how many blocked, and anything flagged for attention (an
    in-progress task whose worker died and is resumable, stale tasks). This is the
    orientation the user is actually after.
+
+   Then add **one line per subscription** from `pwc quota show`: plan, status
+   (`ok` / `exhausted` / `unknown`), weekly use, and slack (positive = behind pace,
+   quota that will be wasted at reset). Example: "Claude Max 5x — ok, 27% of week
+   used, +38 behind pace". This is the evidence for plan sizes: a plan that ends
+   week after week far behind pace is bigger than needed.
+
+   If `pwc maintain status` lists models in `needs_tiers`, add one line: "New
+   models without tiers: … — they take no work until tiers are set." Tiers come
+   from public benchmarks (`docs/model-benchmarks.md`); propose them to the user,
+   never set them yourself.
 
 7. **Offer next moves, don't take them.** End by pointing at what the user might do
    (e.g. "drill into a task, or run `/pwc-pick-work` for a suggestion"). Beyond the worker-status

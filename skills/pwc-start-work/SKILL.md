@@ -28,8 +28,11 @@ of the way.
 
 - `pwc detail --task <id>` — the task's fields, refs, and
   event timeline; the basis for the cwd, the resume decision, the seed prompt, and
-  the dispatch target (`harness` + `model` + `runhost`, set at queue time by
-  `pwc route`). Spawn reads these from the task record; NULL means unrouted.
+  the dispatch target. Routing happens AT SPAWN TIME: the task carries a
+  `route-profile` event (saved at queue time by `pwc route … --save`), and `pwc
+  spawn` routes that profile against the live subscription quota. A `harness` +
+  `model` on the task record is a PIN (or the queue-time route of a task queued
+  before 13.10.2026) and wins over the profile. `runhost` is unchanged.
 - `pwc sources runhosts` — the named remote machines workers can run on
   (`{name: {ssh, workspace_root, …}}`, or `{}`). Resolve a task's `runhost` here
   to get the `--ssh` target and to map the task's `workdir` onto the REMOTE
@@ -42,11 +45,14 @@ of the way.
 - `pwc worker-status --session-ids <uuid>` — whether the task's existing
   session (if any) is currently running.
 - `pwc spawn --task <id> --cwd <dir> [--ssh <target> --runhost <name>] --session-id <uuid> [--resume] [--prompt -] [--name "<id> · <gist>"]`
-  — open the worker tab and launch the task's harness. Harness/model are READ from
-  the task record (set by `pwc route` at queue time); do NOT pass `--harness` or
-  `--model` in normal use. For a re-scoped task with stale routing, run `pwc
-  reroute --task <id>` first (clears the fields so the next spawn refuses and tells
-  you to re-route). The locked-down override (rare, logged): `--force-model
+  — open the worker tab and launch the task's harness. Spawn DECIDES the
+  harness/model itself, in this order: the session's own harness on `--resume`; a
+  pin on the task record; otherwise `pwc route` on the saved profile with live quota
+  (logged as a `routed` event, and returned as `routed` in the result). Do NOT pass
+  `--harness` or `--model` in normal use, and never pick them yourself. For a
+  re-scoped task, save a new profile with `pwc route … --save`; to remove an old
+  pin, run `pwc reroute --task <id>`. On the first spawn of the day, spawn runs
+  `pwc maintain` (harness updates, model discovery) before it routes. The locked-down override (rare, logged): `--force-model
   --force-reason "<why>" --harness <h> --model <m>`. The seed is passed as the
   harness's prompt, so it **auto-submits on startup**. Prints
   `{harness, model, session_id, session_tracked, cwd, mode, transcript_expected, seed}`
@@ -59,11 +65,14 @@ of the way.
   *follow-up* into a resumed worker and it runs on its own (verified 2026-07-07). The
   seed is never typed into the input box, so there is no `not-typed` failure mode and
   nothing for the user to paste by hand.
-- `pwc set-session --task <id> --session-id <uuid> --workdir <dir>`
-  — record the pre-allocated session id at spawn (atomic with a `dispatched` event).
+- `pwc set-session --task <id> --session-id <uuid> --workdir <dir> --harness <h>
+  --model <m>` — record the session id at spawn (atomic with a `dispatched` event).
+  **Always pass `--harness`/`--model` from the spawn result.** With spawn-time
+  routing the task record no longer holds them, and a resume reads the harness that
+  ran the session from this record.
 - `pwc reroute --task <id> [--reason "..."]` — clear a task's
-  stored harness/model (for a re-scoped task whose routing is stale from a different
-  chapter). The next `pwc spawn` will refuse and hand over a `pwc route` template.
+  stored harness/model PIN. The next `pwc spawn` routes the saved profile; with no
+  profile it refuses and hands over a `pwc route … --save` template.
   Does NOT clear the session; those concerns are separate.
 - `pwc clear-session --task <id>` — the inverse: NULL the
   session_id (logs a neutral note, not a dispatch; status untouched). Use to back out
@@ -238,10 +247,14 @@ of the way.
 4. **For a fresh session, build a thin seed that routes to the task-type skill.** The
    coordinator's seed says what task this is, points at durable context, and hands off
    process ownership. It does **not** claim tickets, design an approach, list
-   implementation steps, or choose a different harness/model. The worker's harness and
-   model are the task's stored `harness`/`model` from `pwc detail`, which were set by
-   `pwc route` when the task was queued; `/pwc-start-work` dispatches those stored
-   values and does not override them by judgment.
+   implementation steps, or choose a different harness/model. `pwc spawn` decides the
+   worker's harness and model (see the spawn tool above); `/pwc-start-work` never
+   overrides that by judgment. **Learn the harness before you write the seed**: run
+   `pwc spawn --task <id> --cwd <dir> --dry-run` first. It routes exactly as the real
+   spawn will (the quota reading is cached for 5 minutes) and launches nothing. Write
+   the seed for the harness it returns (see **Non-claude harnesses**), then spawn for
+   real within those 5 minutes. If the real spawn returns a different harness, stop
+   and rewrite the seed before the user relies on the worker.
 
    Run `pwc sources skill-hints --type <task-type>` before writing every fresh seed.
 
@@ -322,10 +335,11 @@ of the way.
    follow-up) or `"skipped"` (no `--prompt` — a bare resume with no follow-up).
 
 6. **Record it, then tell the user how to start the worker.** Right after dispatch,
-   run `pwc set-session --task <id> --session-id <result.session_id> --workdir <dir>`
+   run `pwc set-session --task <id> --session-id <result.session_id> --workdir <dir>
+   --harness <result.harness> --model <result.model>`
    (writes the session id and a `dispatched` event, so the task is tracked from the
    instant the worker starts) — **only if the spawn result said `session_tracked:
-   true`** (true for all current harnesses: claude, opencode, codex). For a future
+   true`** (true for all current harnesses: claude, opencode, codex, grok, agy). For a future
    untracked harness there is no session to record, so instead log the dispatch
    (`pwc log-event --task <id> --kind dispatched --detail "spawned <harness>
    (<model>) worker in <dir>"`). Either way, **move the task to `in-progress`**
@@ -417,9 +431,9 @@ of the way.
   - Remote workers can't reach this machine's task database, MCP connectors, the
     VPN-gated prod DB, or a browser — route repo-centric work there, keep
     prod-data investigation local.
-- **Non-claude harnesses (task `harness` = opencode, codex, …).** Dispatch works the
-  same — build the seed, `pwc spawn` (harness/model come from the task record, not
-  CLI flags) — with these deltas:
+- **Non-claude harnesses (opencode, codex, grok, agy, …).** Dispatch works the
+  same — build the seed, `pwc spawn` (spawn decides the harness/model, never CLI
+  flags) — with these deltas:
   - **opencode and codex are session-tracked like claude** (both verified
     2026-07-10): fresh spawns pre-create the session via the harness's own server
     API (**record the returned `session_id`** — these harnesses mint their own ids),
@@ -434,6 +448,29 @@ of the way.
     `typed` as submitted for opencode. For codex this is still unverified — on its
     first spawn, ask the user to confirm the seed actually ran, and note the
     answer in the task.
+  - **grok (Grok Build) is session-tracked like claude** (verified 13.10.2026, grok
+    1.0.52): spawn chooses the uuid (`-s <uuid>`), the seed is the positional
+    prompt, and resume is `-r <uuid> "<follow-up>"`. Known limits:
+    - Grok loads AGENTS.md, project instructions and skills only in a TRUSTED
+      folder. When the worker folder is not trusted, the spawn result carries a
+      `warning`. Tell the user to answer Grok's trust question in the new tab.
+    - Grok does not follow the `@import` in `~/.claude/CLAUDE.md`. Name the
+      instruction files by path in the seed (the personal
+      `~/workspaces/side-projects/dotfiles/agents/AGENTS.md`, plus the workspace
+      `AGENTS.md` / `CLAUDE.md`).
+    - Grok bundles its own `code-review` skill, which collides with a workspace
+      skill of the same name. Name a workspace skill by its file path in the seed.
+    - Some MCP servers do not connect inside Grok (Atlassian failed on 13.10).
+  - **agy (Antigravity CLI) is session-tracked like codex**: agy mints the
+    conversation id, so a fresh spawn runs one tiny headless setup turn first and
+    returns the id (**record the returned `session_id`**). It runs with
+    `--mode accept-edits`: it edits files freely and asks in its tab before shell
+    commands. CodexBar cannot read its quota, so route gives it only a small share.
+    When an agy worker stops with a quota error, run `pwc quota mark-empty
+    --subscription google-ai --why "<error>"`, then tell the user. Do not move the
+    task to another harness by yourself.
+  - **Any harness that hits its quota**: the same rule. Mark the plan empty with
+    `pwc quota mark-empty` when CodexBar cannot see it, and report to the user.
   - **A future untracked harness** (spawn result `session_tracked: false`): skip
     step 3's liveness/resume logic, and in step 6 log the `dispatched` event
     instead of `set-session`; the worker's status is then only what gets reported —

@@ -118,7 +118,8 @@ grouped rendering.
   refresher for the model table; the objective columns also auto-refresh during
   `pwc route` (step 0).
 - `pwc route --task <derived-id> --domain <d> --reasoning <n> [--verifiability <n>] [--risk <r>]
-  [--context-need <tokens>]` — pick the harness+model for a task (step 5).
+  [--context-need <tokens>] [--author-vendor <v>] --save` — store the task's routing
+  PROFILE on the task (step 5). `pwc spawn` routes it later against the live quota.
 
 ## Steps
 
@@ -413,7 +414,7 @@ grouped rendering.
    - multi-source or unclear → use the config's top-level `id_fallback`.
    `pwc` dedups the id automatically if it's taken, so don't worry about
    collisions. Then:
-   `add-task --task <derived-id> --type <jira|pr-review|slack|email|...> --title "..." [--workdir <repo>] --priority <N> [--harness <h>] [--model <m>]`,
+   `add-task --task <derived-id> --type <jira|pr-review|slack|email|...> --title "..." [--workdir <repo>] --priority <N>`,
    then `add-ref --kind identity --ref-type <t> --value <raw-id>` to attach its
    identity reference, then `log-event --kind new-task`. Report back what was queued.
 
@@ -426,12 +427,13 @@ grouped rendering.
    policy too — `pwc sources priority --workspace <root>` and `… routing --workspace
    <root>` — since those differ per board.
 
-   **Set `--harness` / `--model` by profiling the task and asking `pwc route`.** Pass
-   the derived ID as `--task`; preference uses it for a stable target-share decision.
-   Routing is no longer a prose rule you apply by judgment — it's a deterministic
-   decision made from a task PROFILE, so the same task always gets the same answer
-   and the reasoning is inspectable. For each task you're about to queue, judge four
-   things from its title, source, and thread:
+   **Profile the task and save the profile with `pwc route … --save`.** Do NOT set
+   `--harness` / `--model` on `add-task`: a harness/model on the task is a PIN that
+   turns quota routing off for that task. Since 13.10.2026 routing happens at SPAWN
+   time, because the subscription quota changes by the hour and a model chosen at
+   queue time is often wrong when the work starts. Routing is a deterministic
+   decision made from a task PROFILE, so the reasoning is inspectable. For each task
+   you're about to queue, judge these things from its title, source, and thread:
 
    - **`--domain`** — `code-review` | `implementation` | `research-writing` | `ops-comms`.
      What KIND of work is it? (A PR review is `code-review`; a Slack reply is
@@ -470,20 +472,26 @@ grouped rendering.
    - **`--context-need`** (optional) — tokens of context the work needs held at once.
      Pass it when a task obviously needs a lot (a big refactor across many files);
      omit otherwise.
+   - **`--author-vendor`** (code-review only) — the vendor whose model wrote the work
+     under review: `anthropic`, `openai`, `xai`, `google`. Read it from the PR's
+     commit trailers (`Co-Authored-By: Claude …` = anthropic, Codex = openai) or from
+     the task that produced the PR. Route then excludes that vendor's models, because
+     a model is blind to its own failure modes. Omit it when the author is a human.
 
-   `route` then hard-filters (harness actually installed+authenticated, context window
-   big enough, prod-data trust + tier floor), keeps only models whose tier in that
-   domain clears the required level, and picks **the cheapest one left**. It returns
-   the harness, the model, and a one-line `why`. Pass them straight through as
-   `--harness` / `--model`.
+   With `--save`, `route` checks the profile WITHOUT quota: it hard-filters (harness
+   installed, context window, prod-data trust + tier floor, the workspace's
+   `routing.allowed_harnesses`), keeps the models whose tier clears the required
+   level, and stores the profile as a `route-profile` event. Its harness/model output
+   is only a PREVIEW. At spawn, the same profile is routed again with the live quota:
+   the plan with spare quota wins (the table's `quota.fill_order` lists the plans to
+   fill first), then the cheapest qualified model inside it.
 
-   **Show the routing decision with each candidate, always** — not just when it
-   deviates from a default. The whole point is that work now flows to the cheapest
-   table-approved model where it's good enough, and the user is choosing to trust that;
-   hiding the choice would mean they only discover the selected model after the fact.
-   Use the concrete harness/model/cost returned by `pwc route` in that run. If the user
-   disagrees, adjust the task profile and rerun `pwc route`; do not hand-pick or
-   manually override the worker harness/model.
+   **Show the saved profile with each candidate, always** (domain, reasoning,
+   verifiability, risk), and say that the harness is chosen at spawn. If the user
+   disagrees, adjust the profile and rerun `pwc route … --save` (the newest profile
+   wins); do not hand-pick the worker harness/model. If the user wants one harness
+   for this task no matter the quota, that is a pin: `pwc update-task --task <id>
+   --harness <h> --model <m>`, on the user's word only.
 
    **If `route` REFUSES** (it exits nonzero when nothing qualifies — there are no
    fallback chains by design), do not silently queue the task unrouted and do not

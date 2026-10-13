@@ -512,6 +512,26 @@ def _build_grok(*, session_id, resume, cwd, seed_prompt, model):
     return mode, args, session_id
 
 
+def grok_trusts(cwd: str) -> bool:
+    """Does Grok trust `cwd` (or a parent)? Grok loads AGENTS.md, project
+    instructions and skills ONLY in a trusted folder (PWC coordinator finding,
+    2026-10-13). Grok asks in its TUI; PWC never grants trust on the user's behalf,
+    it only warns."""
+    import tomllib
+    try:
+        data = tomllib.loads((Path.home() / ".grok" / "trusted_folders.toml")
+                             .read_text())
+    except (OSError, ValueError):
+        return False
+    target = Path(cwd).resolve()
+    for folder, entry in (data.get("folders") or {}).items():
+        if isinstance(entry, dict) and entry.get("trusted"):
+            root = Path(folder).resolve()
+            if target == root or root in target.parents:
+                return True
+    return False
+
+
 _AGY_PRIME_PROMPT = _CODEX_PRIME_PROMPT
 
 
@@ -1274,6 +1294,11 @@ def main(argv=None):
             f"ssh -t {shlex.quote(args.ssh)} tmux attach -t {_tmux_name(args.task)}")
     elif harness == "claude":
         result["transcript_expected"] = str(transcript_path(cwd, session_id))
+    elif harness == "grok" and not grok_trusts(cwd):
+        result["warning"] = (
+            f"grok does not trust {cwd} yet, so it will NOT load AGENTS.md, project "
+            f"instructions or skills. Answer its trust question in the new tab.")
+        print(f"pwc: WARNING — {result['warning']}", file=sys.stderr)
 
     if args.dry_run:
         result["dry_run"] = True
