@@ -538,6 +538,9 @@ def main(argv=None):
     p.add_argument("--workspace",
                    help="workspace root whose routing.allowed_harnesses applies "
                         "(default: discovered from the cwd)")
+    p.add_argument("--save", action="store_true",
+                   help="store this profile on the task (a route-profile event); "
+                        "`pwc spawn` routes it again with live quota at spawn time")
     p.add_argument("--json", metavar="-", help="read the profile as JSON on stdin")
     args = p.parse_args(argv)
 
@@ -556,8 +559,23 @@ def main(argv=None):
 
     from _common import find_workspace_root
     root = args.workspace or find_workspace_root()
+    # With --save, check the profile WITHOUT quota: a profile that no model can serve
+    # must fail now, at queue time, but a plan that is empty right now must not stop
+    # a task from being queued. Spawn applies the quota later.
     decision = decide(profile, workspace_root=root, no_fetch=args.no_fetch,
-                      use_quota=not args.no_quota)
+                      use_quota=not (args.no_quota or args.save))
+    if args.save:
+        import json
+        import spawn
+        if spawn._load_task_row(str(root), profile["task_id"]) is None:
+            fail(f"--save: no task {profile['task_id']!r} in workspace {root}")
+        saved = {k: v for k, v in profile.items() if k != "task_id"}
+        spawn._log_task_event(str(root), profile["task_id"], spawn.PROFILE_EVENT,
+                              json.dumps(saved, sort_keys=True))
+        decision["saved_profile"] = saved
+        decision["_note"] = ("profile saved. The decision above ignores quota and is "
+                             "only a capability check; `pwc spawn` routes again "
+                             "with the live quota")
     if not args.explain:
         decision.pop("candidates", None)
         decision.pop("rejected", None)

@@ -475,6 +475,96 @@ def _build_codex(*, session_id, resume, cwd, seed_prompt, model,
     return mode, args, session_id
 
 
+_GROK_SESSIONS = Path.home() / ".grok" / "sessions"
+
+
+def _grok_session_exists(session_id: str) -> bool:
+    """Grok keeps each session in ~/.grok/sessions/<url-encoded cwd>/<uuid>/."""
+    try:
+        return next(_GROK_SESSIONS.glob(f"*/{session_id}"), None) is not None
+    except OSError:
+        return True  # unreadable store: attach and let grok report the error
+
+
+def _build_grok(*, session_id, resume, cwd, seed_prompt, model):
+    """Grok Build — the same shape as claude (verified 2026-10-13 on grok 1.0.52).
+
+    `-s <uuid>` names a NEW session, so the id is chosen here and sits in argv for
+    pgrep liveness; `-r <uuid>` resumes it. The positional prompt is the first user
+    message. `--permission-mode auto` matches how claude workers run.
+    """
+    grok_bin = shutil.which("grok") or str(Path.home() / ".grok" / "bin" / "grok")
+    args = [grok_bin, "--permission-mode", "auto"]
+    if model:
+        args += ["-m", model]
+    if resume:
+        if not _grok_session_exists(session_id):
+            fail(f"--resume: no grok session {session_id} under {_GROK_SESSIONS}\n"
+                 "\n"
+                 "to start a NEW session instead, drop --resume.")
+        args += ["-r", session_id]
+        mode = "resume"
+    else:
+        args += ["-s", session_id]
+        mode = "fresh"
+    if seed_prompt:
+        args.append(seed_prompt)
+    return mode, args, session_id
+
+
+_AGY_PRIME_PROMPT = _CODEX_PRIME_PROMPT
+
+
+def _preallocate_agy_conversation(cwd: str, model: str | None) -> str:
+    """Mint an Antigravity conversation before the worker exists.
+
+    agy has no flag to choose a conversation id. One tiny headless turn creates the
+    conversation and prints its id (verified 2026-10-13 on agy 1.3.4); the worker
+    then attaches with `--conversation <id>`. The turn costs one small request of the
+    Google AI quota.
+    """
+    import json as _json
+    import subprocess
+    cmd = ["agy", "-p", _AGY_PRIME_PROMPT, "--output-format", "json"]
+    if model:
+        cmd += ["--model", model]
+    try:
+        out = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
+                             timeout=120)
+        data = _json.loads(out.stdout or "null")
+    except subprocess.TimeoutExpired:
+        fail("agy did not finish the setup turn within 120s")
+    except (OSError, ValueError) as e:
+        fail(f"agy setup turn failed: {type(e).__name__}: {e}")
+    if not isinstance(data, dict) or data.get("status") != "SUCCESS" \
+            or not data.get("conversation_id"):
+        fail(f"agy setup turn returned no conversation id: {str(data)[:300]}")
+    return data["conversation_id"]
+
+
+def _build_agy(*, session_id, resume, cwd, seed_prompt, model, dry_run=False):
+    """Antigravity CLI. Session-tracked with the codex-style inverted id flow: agy
+    mints the conversation id, so a fresh spawn pre-creates it and the caller must
+    record the RETURNED id. `-i <prompt>` starts the TUI with the seed submitted.
+    `--mode accept-edits` lets it edit files and still ask before shell commands.
+    """
+    if resume:
+        if not session_id:
+            fail("--resume requires --session-id for the agy harness")
+        mode = "resume"
+    else:
+        mode = "fresh"
+        session_id = ("00000000-DRYRUN-not-created" if dry_run
+                      else _preallocate_agy_conversation(cwd, model))
+    args = [shutil.which("agy") or "agy", "--conversation", session_id,
+            "--mode", "accept-edits"]
+    if model:
+        args += ["--model", model]
+    if seed_prompt:
+        args += ["-i", seed_prompt]
+    return mode, args, session_id
+
+
 # session_tracked = the harness's session id is known at spawn time and appears in
 # the worker's argv, so identity (`pwc set-session`), pgrep liveness, and resume
 # all work. claude: caller-chosen uuid. opencode/codex: pre-created via their
@@ -490,6 +580,8 @@ _BUILDERS = {
     "claude": (_build_claude, True, False),   # (builder, session_tracked, needs_submit)
     "opencode": (_build_opencode, True, True),
     "codex": (_build_codex, True, False),
+    "grok": (_build_grok, True, False),
+    "agy": (_build_agy, True, False),
 }
 
 
@@ -612,6 +704,8 @@ def build_command(*, harness, session_id, resume, cwd, seed_prompt=None,
                   seed_prompt=seed_prompt, model=model)
     if harness in ("opencode", "codex"):
         kwargs.update(title=title, dry_run=dry_run)
+    elif harness == "agy":
+        kwargs.update(dry_run=dry_run)
     mode, args, effective_id = builder(**kwargs)
     inner = f"cd {shlex.quote(cwd)} && {shlex.join(args)}"
     # Only type when there IS a seed and the harness can't carry it on the CLI.
@@ -633,16 +727,18 @@ def _unrouted_error(task_type: str, task_id: str) -> None:
     coordinator pastes, fills in the judgment flags, and runs."""
     domain = _TYPE_DOMAIN.get(task_type, "implementation")
     fail(
-        f"task {task_id!r} has no routing — harness/model not set.\n"
+        f"task {task_id!r} has no routing — no task profile and no pinned "
+        f"harness/model.\n"
+        f"\n"
+        f"Save the task profile (spawn routes it with live quota):\n"
         f"\n"
         f"  pwc route --task {task_id} --domain {domain} --reasoning <1-5>"
-        f" --verifiability <1-5> --risk none\n"
+        f" --verifiability <1-5> --risk none --save\n"
         f"\n"
-        f"then store the result:\n"
+        f"and re-run this spawn command. To pin one harness instead (rare):\n"
         f"\n"
         f"  pwc update-task --task {task_id} --harness <h> --model <m>\n"
         f"\n"
-        f"and re-run this spawn command.\n"
         f"\n"
         f"to override routing manually (rare): "
         f"pass --force-model --force-reason \"<why>\" --harness <h> --model <m>"
@@ -697,13 +793,66 @@ def _log_task_event(workspace_root, task_id, kind, detail_text,
         )
 
 
+def _store_call(workspace_root, op, payload, local):
+    """Run a read op through the hub, or `local(conn)` against the sqlite store."""
+    from _common import store_config
+    store = store_config(workspace_root)
+    if store.get("store") == "hub":
+        import hub_client
+        return hub_client.call(op, payload, store)
+    import pwc_db
+    return local(pwc_db.connect(workspace_root))
+
+
+def _task_events(workspace_root, task_id) -> list[dict]:
+    rows = _store_call(
+        workspace_root, "events", {"task": task_id},
+        lambda conn: [dict(r) for r in conn.execute(
+            "SELECT at, source, kind, detail FROM events WHERE task_id = ? "
+            "ORDER BY at, id", (task_id,)).fetchall()])
+    return rows if isinstance(rows, list) else []
+
+
+def _task_sessions(workspace_root, task_id) -> list[dict]:
+    rows = _store_call(
+        workspace_root, "sessions", {"task": task_id},
+        lambda conn: [dict(r) for r in conn.execute(
+            "SELECT session_id, harness, model, started_at FROM task_sessions "
+            "WHERE task_id = ? ORDER BY started_at, session_id",
+            (task_id,)).fetchall()])
+    return rows if isinstance(rows, list) else []
+
+
+PROFILE_EVENT = "route-profile"
+
+
+def latest_profile(events: list[dict]) -> dict | None:
+    """The task profile from the newest `route-profile` event, or None."""
+    import json as _json
+    for ev in reversed(events):
+        if ev.get("kind") == PROFILE_EVENT:
+            try:
+                profile = _json.loads(ev.get("detail") or "")
+            except ValueError:
+                continue
+            if isinstance(profile, dict):
+                return profile
+    return None
+
+
 def resolve_routing(args, task_row, workspace_root):
     """Return (harness, model) for the worker, or fail with an actionable error.
 
-    Normal path: the task's stored harness/model (set by pwc route). Force path:
-    explicit --force-model + --force-reason + --harness + --model, logged as an
-    audit event. Error path: --harness/--model without --force-model, or no
-    routing on the task.
+    The order, first match wins:
+      1. FORCE: --force-model + --force-reason + --harness + --model, logged as an
+         audit event.
+      2. RESUME: the harness and model that ran that session (task_sessions). A
+         resume continues a context, so it never moves to another harness.
+      3. PIN: a harness/model stored on the task. Tasks queued before spawn-time
+         routing carry their old queue-time route here, and it still applies.
+      4. ROUTE NOW: the task's latest `route-profile` event goes through
+         `pwc route` with live quota, and the decision is logged as a `routed`
+         event. This is the normal path for new tasks.
     """
     task_harness = task_row["harness"]
     task_model = task_row["model"]
@@ -729,10 +878,34 @@ def resolve_routing(args, task_row, workspace_root):
              "to override routing. Run `pwc route` to set routing normally, "
              "or add --force-model --force-reason \"<why>\" to override.")
 
-    if not task_harness or not task_model:
+    if args.resume and args.session_id:
+        ran = next((s for s in _task_sessions(workspace_root, task_id)
+                    if s.get("session_id") == args.session_id), None)
+        if ran and ran.get("harness"):
+            return ran["harness"], ran.get("model")
+
+    if task_harness and task_model:
+        return task_harness, task_model
+
+    if args.resume:
+        fail(f"--resume: cannot tell which harness ran session {args.session_id} "
+             f"of task {task_id!r} (no task_sessions row and no pin). A resume must "
+             f"use the session's own harness. Pass --force-model --force-reason "
+             f"\"<why>\" --harness <h> --model <m> with the harness that ran it.")
+
+    profile = latest_profile(_task_events(workspace_root, task_id))
+    if profile is None:
         _unrouted_error(task_type, task_id)
 
-    return task_harness, task_model
+    import route as route_mod
+    decision = route_mod.decide({**profile, "task_id": task_id},
+                                workspace_root=workspace_root)
+    if not args.dry_run:
+        _log_task_event(workspace_root, task_id, "routed",
+                        f"{decision['harness']}/{decision['model']} — "
+                        f"{decision['why']}")
+    args._route_decision = decision
+    return decision["harness"], decision["model"]
 
 
 def _seed_mentions_skill(seed_prompt: str | None, skill: str) -> bool:
@@ -1084,6 +1257,9 @@ def main(argv=None):
         "mode": mode,
         "command": command,
     }
+    decision = getattr(args, "_route_decision", None)
+    if decision:
+        result["routed"] = {"why": decision["why"], "quota": decision.get("quota")}
     if args.ssh:
         result["runhost"] = args.runhost or args.ssh
         result["ssh"] = args.ssh

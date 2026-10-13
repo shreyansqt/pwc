@@ -556,3 +556,86 @@ def test_remote_spawn_does_not_require_cwd_to_exist_locally(ws):
                         "--dry-run")
     assert rc == 0, f"remote dry-run failed: {err}"
     assert "does not exist" not in err
+
+
+# ── spawn-time routing from a saved task profile ──────────────────────────────
+def _routing_env(tmp_path, models):
+    from _common import now_iso
+    table = tmp_path / "model-table.json"
+    table.write_text(json.dumps({"version": 1, "fetched_at": now_iso(),
+                                 "models": models, "overlay": {},
+                                 "preferences": {}}))
+    return {**ENV, "PWC_MODEL_TABLE": str(table),
+            "PWC_CONFIG_DIR": str(tmp_path / "cfg"),
+            "PWC_CODEXBAR": str(tmp_path / "no-codexbar")}
+
+
+def _row(key, harness, model, tier=4):
+    return {"key": key, "harness": harness, "model": model, "catalog_id": None,
+            "available": True, "data_ok": True, "context": 200_000,
+            "cost_in": 1.0, "cost_out": 1.0, "cache_read": 1.0, "cache_write": 1.0,
+            "tiers": {"implementation": tier, "code-review": tier}}
+
+
+def _run_env(env, *args):
+    r = subprocess.run([PYTHON, *args], capture_output=True, text=True,
+                       timeout=60, env=env)
+    return r.returncode, r.stdout.strip(), r.stderr.strip()
+
+
+def test_spawn_routes_saved_profile_at_spawn_time(ws, tmp_path):
+    env = _routing_env(tmp_path, [_row("grok/grok-4.7", "grok", "grok-4.7")])
+    ws.add_task("profiled")
+    rc, out, err = _run_env(env, str(SCRIPTS / "route.py"), "--task", "profiled",
+                            "--domain", "implementation", "--reasoning", "3",
+                            "--workspace", str(ws.root), "--save")
+    assert rc == 0, err
+    assert '"saved_profile"' in out
+    rc, out, err = _run_env(env, str(SPAWN), "--task", "profiled",
+                            "--cwd", str(ws.root / "workdir"), "--dry-run")
+    assert rc == 0, err
+    result = json.loads(out)
+    assert result["harness"] == "grok"
+    assert result["model"] == "grok-4.7"
+    assert "routed" in result
+    assert "--permission-mode auto" in result["command"]
+    assert " -s " in result["command"]
+
+
+def test_pinned_task_ignores_profile(ws, tmp_path):
+    env = _routing_env(tmp_path, [_row("grok/grok-4.7", "grok", "grok-4.7")])
+    ws.add_task("pinned", harness="claude", model="opus")
+    _run_env(env, str(SCRIPTS / "route.py"), "--task", "pinned", "--domain",
+             "implementation", "--reasoning", "3", "--workspace", str(ws.root),
+             "--save")
+    rc, out, err = _run_env(env, str(SPAWN), "--task", "pinned",
+                            "--cwd", str(ws.root / "workdir"), "--dry-run")
+    assert rc == 0, err
+    assert json.loads(out)["harness"] == "claude"
+
+
+def test_resume_uses_the_harness_that_ran_the_session(ws, tmp_path):
+    env = _routing_env(tmp_path, [_row("claude/opus", "claude", "opus")])
+    ws.add_task("resumed")
+    sid = "11111111-2222-3333-4444-555555555555"
+    _run_taskdb(str(ws.root), "set-session", "--task", "resumed",
+                "--session-id", sid, "--harness", "agy", "--model", "gemini-x")
+    rc, out, err = _run_env(env, str(SPAWN), "--task", "resumed", "--cwd",
+                            str(ws.root / "workdir"), "--session-id", sid,
+                            "--resume", "--dry-run", "--prompt", "continue")
+    assert rc == 0, err
+    result = json.loads(out)
+    assert result["harness"] == "agy"
+    assert f"--conversation {sid}" in result["command"]
+    assert "-i continue" in result["command"]
+
+
+def test_resume_without_known_harness_refuses(ws, tmp_path):
+    env = _routing_env(tmp_path, [_row("claude/opus", "claude", "opus")])
+    ws.add_task("lost")
+    rc, _, err = _run_env(env, str(SPAWN), "--task", "lost", "--cwd",
+                          str(ws.root / "workdir"), "--session-id",
+                          "99999999-0000-0000-0000-000000000000", "--resume",
+                          "--dry-run")
+    assert rc != 0
+    assert "cannot tell which harness" in err
