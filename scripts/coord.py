@@ -65,8 +65,9 @@ def pick_model(harness: str) -> tuple[str | None, str]:
 
     Returns (model, why). Scored on the MINIMUM tier across the coordinator's
     domains, so a model that is brilliant at prose but mediocre at ops work does not
-    win on its best score alone — the coordinator needs both. Ties break toward the
-    cheaper model: equal capability is not worth paying more for.
+    win on its best score alone — the coordinator needs both. A tie on the minimum
+    breaks toward the higher TOTAL tier (a 5+4 model beats a 4+4 model), then toward
+    the cheaper model: equal capability is not worth paying more for.
 
     Returns (None, reason) when the table cannot answer, and the caller launches on
     the harness default rather than refusing — a coordinator that will not start is
@@ -89,9 +90,9 @@ def pick_model(harness: str) -> tuple[str | None, str]:
 
     def score(row):
         tiers = row.get("tiers") or {}
-        weakest = min((tiers.get(d) or 0) for d in COORD_DOMAINS)
-        # Cheaper wins ties: negate cost so max() prefers the lower number.
-        return (weakest, -(row.get("cost_out") or 0.0))
+        levels = [tiers.get(d) or 0 for d in COORD_DOMAINS]
+        # Cheaper wins remaining ties: negate cost so max() prefers the lower number.
+        return (min(levels), sum(levels), -(row.get("cost_out") or 0.0))
 
     best = max(usable, key=score)
     weakest = min(((best.get("tiers") or {}).get(d) or 0) for d in COORD_DOMAINS)
