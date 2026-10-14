@@ -54,9 +54,19 @@ On startup:
    into how to build one specific thing, capture that as a task, profile it, route it
    with `pwc route`, and dispatch a worker. The coordinator must not choose or
    override the worker harness/model by judgment.
-4. **PWC improvements are worker work.** Skill/config/repo changes to PWC itself are
+4. **Investigate nothing you are about to dispatch.** The coordinator reads the task,
+   the ticket it points at, and the routing config — not source files, not repo state,
+   not whether a referenced module actually exists. That is the worker's job and it
+   will do it anyway, with better tools and full attention. Pre-checking feels
+   diligent, especially on risky work, which is exactly why it slips in; but it spends
+   the coordinator's context on one task's detail, and a cheap five-minute finding
+   stated in a seed carries the coordinator's authority whether or not it is right.
+   If a task cannot be scoped without investigation, dispatch it AS an investigation.
+   (Dispatch mechanics — does a prior transcript exist, is the runhost reachable — are
+   not task research and remain fine.)
+5. **PWC improvements are worker work.** Skill/config/repo changes to PWC itself are
    discussed here only for scoping, then captured and dispatched.
-5. **Inline only seconds-long bookkeeping.** A typo fix, ref correction, or status flip
+6. **Inline only seconds-long bookkeeping.** A typo fix, ref correction, or status flip
    can be inline. Implementation, redesign, config changes, or anything likely to grow
    gets a worker.
 

@@ -37,9 +37,19 @@ On startup:
    into how to build one specific thing, capture that as a task, profile it, route it
    with `pwc route`, and dispatch a worker. The coordinator must not choose or
    override the worker harness/model by judgment.
-4. **PWC improvements are worker work.** Skill/config/repo changes to PWC itself are
+4. **Investigate nothing you are about to dispatch.** The coordinator reads the task,
+   the ticket it points at, and the routing config — not source files, not repo state,
+   not whether a referenced module actually exists. That is the worker's job and it
+   will do it anyway, with better tools and full attention. Pre-checking feels
+   diligent, especially on risky work, which is exactly why it slips in; but it spends
+   the coordinator's context on one task's detail, and a cheap five-minute finding
+   stated in a seed carries the coordinator's authority whether or not it is right.
+   If a task cannot be scoped without investigation, dispatch it AS an investigation.
+   (Dispatch mechanics — does a prior transcript exist, is the runhost reachable — are
+   not task research and remain fine.)
+5. **PWC improvements are worker work.** Skill/config/repo changes to PWC itself are
    discussed here only for scoping, then captured and dispatched.
-5. **Inline only seconds-long bookkeeping.** A typo fix, ref correction, or status flip
+6. **Inline only seconds-long bookkeeping.** A typo fix, ref correction, or status flip
    can be inline. Implementation, redesign, config changes, or anything likely to grow
    gets a worker.
 
@@ -162,10 +172,34 @@ grouped rendering.
    configured Slack channels, etc. (Let the user narrow further if they ask — e.g.
    "just Slack.") Only scan sources that are enabled in the config.
 
-   **Slack must be scanned three ways, not one** — they catch different things, and
+   **Slack must be scanned FOUR ways, not one** — they catch different things, and
    missing any one of them silently drops real work:
-   - **New mentions/DMs** — search for fresh `<@me>` mentions and direct messages
-     since the last scan. This catches brand-new pings *addressed to you*.
+   - **New mentions** — search for fresh `<@me>` mentions since the last scan. This
+     catches brand-new pings *addressed to you* in channels.
+
+     **An empty or all-bot mention result is a BROKEN SEARCH, not a quiet week.** The
+     `to:<@USER_ID>` form has come back empty while real mentions existed, and an
+     `@Name` fallback has returned nothing but jirabot posts. When a mention pass
+     yields zero human hits, do NOT conclude there were none — say the search
+     degraded and fall back to the per-conversation reads below.
+   - **DMs and group DMs (MPIMs)** — a SEPARATE pass, not a by-product of the mention
+     search. **A mention-only pass structurally cannot cover a 1:1 DM**: nobody
+     @-mentions you in a one-to-one conversation, so the message that opens "Good
+     morning, quick agenda for our 1:1" is invisible to it by construction.
+
+     Enumerate conversations (`channels_list` with `channel_types: "im,mpim"`), then
+     read each one's history since `last_scanned`. Group DMs matter as much as 1:1s:
+     a 3-person MPIM is where a working thread with two colleagues lives, and it
+     appears in NO channel list. Treat these as a `tasks`-mode surface — a human
+     message here is a task candidate, and the read-the-thread-before-you-judge rule
+     applies exactly as it does in channels. Drop bot DMs automatically (Jira,
+     Calendar, Sentry, CodeRabbit, Slackbot, rotation apps, Drive) — their work is
+     already covered by their own sources.
+
+     (This is the 2026-08-10 miss: a find-work sweep reported DMs quiet while both a
+     1:1 agenda DM and a direct "can we move on with the next steps here?" in a group
+     DM sat unread. Both were retrievable the whole time — the tooling was never the
+     limit, the scan design was.)
    - **Activity on threads you already track** — for every Slack thread linked to a
      task on the board (active tasks *and recently-done ones still in the ~2-day
      window*; pull the `working`/`identity` slack refs via `pwc detail`),
