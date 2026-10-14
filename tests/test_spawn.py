@@ -78,6 +78,13 @@ class _Workspace:
         rc, out, _ = _run_taskdb(str(self.root), "events", "--task", task_id)
         return out
 
+    def log_event(self, task_id, kind, detail):
+        rc, _, err = _run_taskdb(
+            str(self.root), "log-event", "--task", task_id,
+            "--source", "coordinator", "--kind", kind, "--detail", detail,
+        )
+        assert rc == 0, err
+
     def close(self):
         import shutil
         shutil.rmtree(self.root)
@@ -426,6 +433,108 @@ def test_skip_skill_hint_logs_missing_skills_and_reason(ws):
     events = ws.events("jira-task")
     assert "SKIPPED configured skill hint(s) start-ticket" in events
     assert "incident recovery requires the existing branch" in events
+
+
+def test_stored_skill_event_wins_over_the_type_hint(ws):
+    ws.set_skill_hints({"calendar": ["calendar-skill"]})
+    ws.add_task("prep", type="calendar", harness="opencode", model="test/model")
+    ws.log_event("prep", "skill", "refinement-prep")
+
+    rc, _, err = _run(str(SPAWN), "--task", "prep",
+                      "--cwd", str(ws.root / "workdir"), "--dry-run",
+                      "--prompt", "Run /refinement-prep for this meeting.")
+
+    assert rc == 0, err
+
+
+def test_stored_skill_event_does_not_accept_only_the_type_skill(ws):
+    ws.set_skill_hints({"calendar": ["calendar-skill"]})
+    ws.add_task("prep", type="calendar", harness="opencode", model="test/model")
+    ws.log_event("prep", "skill", "refinement-prep")
+
+    rc, _, err = _run(str(SPAWN), "--task", "prep",
+                      "--cwd", str(ws.root / "workdir"), "--dry-run",
+                      "--prompt", "Run /calendar-skill first.")
+
+    assert rc != 0
+    assert "omits stored skill(s): refinement-prep" in err
+    assert "calendar-skill" not in err
+
+
+def test_newest_skill_event_wins(ws):
+    ws.set_skill_hints({})
+    ws.add_task("prep", type="calendar", harness="opencode", model="test/model")
+    ws.log_event("prep", "skill", "start-ticket")
+    ws.log_event("prep", "skill", "refinement-prep")
+
+    rc, _, err = _run(str(SPAWN), "--task", "prep",
+                      "--cwd", str(ws.root / "workdir"), "--dry-run",
+                      "--prompt", "Run refinement-prep now.")
+
+    assert rc == 0, err
+
+
+def test_skill_event_json_list_requires_every_skill(ws):
+    ws.set_skill_hints({})
+    ws.add_task("prep", type="calendar", harness="opencode", model="test/model")
+    ws.log_event("prep", "skill", '["refinement-prep", "jira"]')
+
+    rc, _, err = _run(str(SPAWN), "--task", "prep",
+                      "--cwd", str(ws.root / "workdir"), "--dry-run",
+                      "--prompt", "Run /refinement-prep now.")
+
+    assert rc != 0
+    assert "omits stored skill(s): jira" in err
+
+
+def test_skill_event_accepts_a_leading_slash(ws):
+    ws.set_skill_hints({"calendar": ["calendar-skill"]})
+    ws.add_task("prep", type="calendar", harness="opencode", model="test/model")
+    ws.log_event("prep", "skill", "/refinement-prep")
+
+    rc, _, err = _run(str(SPAWN), "--task", "prep",
+                      "--cwd", str(ws.root / "workdir"), "--dry-run",
+                      "--prompt", "Run refinement-prep now.")
+
+    assert rc == 0, err
+
+
+def test_blank_skill_event_falls_back_to_the_type_hint(ws):
+    ws.set_skill_hints({"jira": ["start-ticket"]})
+    ws.add_task("jira-task", type="jira", harness="opencode", model="test/model")
+    ws.log_event("jira-task", "skill", "   ")
+
+    rc, _, err = _run(str(SPAWN), "--task", "jira-task",
+                      "--cwd", str(ws.root / "workdir"), "--dry-run",
+                      "--prompt", "Handle this task.")
+
+    assert rc != 0
+    assert "omits configured skill hint(s): start-ticket" in err
+
+
+def test_malformed_skill_event_json_is_an_error(ws):
+    ws.set_skill_hints({})
+    ws.add_task("prep", type="calendar", harness="opencode", model="test/model")
+    ws.log_event("prep", "skill", "[refinement-prep")
+
+    rc, _, err = _run(str(SPAWN), "--task", "prep",
+                      "--cwd", str(ws.root / "workdir"), "--dry-run",
+                      "--prompt", "Run refinement-prep now.")
+
+    assert rc != 0
+    assert "malformed JSON" in err
+
+
+def test_resume_does_not_enforce_a_stored_skill(ws):
+    ws.set_skill_hints({})
+    ws.add_task("prep", type="calendar", harness="opencode", model="test/model")
+    ws.log_event("prep", "skill", "refinement-prep")
+
+    rc, _, err = _run(str(SPAWN), "--task", "prep",
+                      "--cwd", str(ws.root / "workdir"), "--dry-run", "--resume",
+                      "--session-id", "ses_existing", "--prompt", "Continue.")
+
+    assert rc == 0, err
 
 
 # ── reroute clears harness/model ──────────────────────────────────────────────

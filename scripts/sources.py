@@ -30,10 +30,12 @@ Config shape (JSON):
   }
 
 "skill_hints" maps a task TYPE (or a free-form signal label) to the skill(s) that
-help with it. /start-work looks up the task's type here and SUGGESTS the matching
-skill in the worker's seed (as available, never commanded). Configured once at
-/setup-workspace by scanning the available skills; reused on every spawn so the right
-skill is offered without the user imposing it later. Unknown/extra keys are allowed.
+help with it. A task can also carry its own skill: the newest event with kind
+"skill". /find-work writes that event when a signal label names the work more
+specifically than the task type. /start-work and spawn read the event first. With
+no skill event, /start-work looks up the task's type here and names the matching
+skill in the worker's seed. Configured once at /setup-workspace by scanning the
+available skills. Unknown/extra keys are allowed.
 
 Task ids are meaningful and derived per-source at creation. "id_convention" tells
 /find-work how to build a new task's id from a given source:
@@ -142,8 +144,9 @@ def skill_hints_for_type(workspace, task_type: str) -> list[str]:
 def cmd_skill_hints(args):
     """The task-type -> skill(s) map (empty object if none configured).
 
-    /start-work reads this to suggest the relevant skill in a worker's seed. If
-    `--type` is given, return just that type's hints (a list, possibly empty).
+    /start-work reads this when the task has no `skill` event. If `--type` is
+    given, return just that type's hints (a list, possibly empty). With no
+    `--type`, return the whole map so /find-work can match a narrower label.
     """
     if args.type:
         emit(skill_hints_for_type(args.workspace, args.type))

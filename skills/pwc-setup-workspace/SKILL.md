@@ -77,8 +77,11 @@ depends on the exact contents, so it's safe to re-run anytime to adjust.
    - investigation / data lookup → `db-query`, `service-cli`
    - and any one-off domain skills present (release, delete-customer, trigger-job, …)
    Store as a top-level `"skill_hints"` object: `{"<task-type-or-signal>": ["<skill>", …]}`.
-   Keep it to skills that actually exist in the scan. This is optional — skip if the
-   user has no skills set up.
+   A key that is not a task type is a narrower label. When `/pwc-find-work` queues a
+   task and that label names the work, it logs the label's skills on the task as a
+   `skill` event. `/pwc-start-work` reads that event before this map. Keep it to
+   skills that actually exist in the scan. This is optional — skip if the user has
+   no skills set up.
 
 6. **Capture the priority model** — how this workspace decides P1/P2/P3. This is
    **workspace policy** (it depends on the workspace's Jira columns, team conventions,

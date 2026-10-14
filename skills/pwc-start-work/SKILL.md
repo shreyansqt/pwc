@@ -79,14 +79,18 @@ of the way.
   a session recorded by mistake, or to detach a finished/abandoned one so the task
   reads as not-dispatched.
 - `pwc sources skill-hints [--type <type>]` — the configured
-  task-type → skill(s) map. **Run it with `--type <task-type>` while building every
-  fresh seed** (step 4): if it returns skills for the type, the seed tells the worker
-  to run the configured skill immediately as step 1. This is the workspace's deliberate
-  process routing — e.g. `pr-review` → `code-review` — so a PR-review worker starts
-  from `/code-review`, not from whatever tool the coordinator happens to think of. The
-  map is the source of truth for "which skill owns this kind of work." If it returns
-  no skills, the seed names that as a visible process gap and uses the generic
-  fallback gate.
+  task-type → skill(s) map. A task can also carry its own skill: the newest event
+  with `kind` `skill` on `pwc detail`. **Read that event first while building every
+  fresh seed** (step 4). If it names skills, the seed tells the worker to run the
+  first one immediately. Find-work writes this event when a label in the map names
+  the work more specifically than the task type (a Product Refinement stays type
+  `calendar` and carries `refinement-prep`). If there is no skill event, run
+  `pwc sources skill-hints --type <task-type>`. If that returns skills, the seed
+  tells the worker to run the first one immediately. This is the workspace's
+  deliberate process routing — e.g. `pr-review` → `code-review` — so a PR-review
+  worker starts from `/code-review`, not from whatever tool the coordinator happens
+  to think of. If the event and the type map are both empty, the seed names that as
+  a visible process gap and uses the generic fallback gate.
 - `pwc sources claim [--type <type>]` — the workspace's claim policy per task type:
   a `check` (is the work already taken?) and `steps` (the claim actions). Read it in
   step 3c, before every fresh dispatch. `{}` means this type has nothing to claim.
@@ -244,7 +248,7 @@ of the way.
    before the spawn caught it; the skill had no claim step, and its 👀 came after the
    dispatch.)
 
-4. **For a fresh session, build a thin seed that routes to the task-type skill.** The
+4. **For a fresh session, build a thin seed that routes to the task's skill.** The
    coordinator's seed says what task this is, points at durable context, and hands off
    process ownership. It does **not** claim tickets, design an approach, list
    implementation steps, or choose a different harness/model. `pwc spawn` decides the
@@ -256,10 +260,15 @@ of the way.
    real within those 5 minutes. If the real spawn returns a different harness, stop
    and rewrite the seed before the user relies on the worker.
 
-   Run `pwc sources skill-hints --type <task-type>` before writing every fresh seed.
+   Read the newest event whose `kind` is `skill` before writing every fresh seed.
+   Its `detail` is one skill name, or a JSON list of skill names. That list is the
+   skill handoff for this task. Do not also look up the type.
+
+   If there is no `skill` event, run `pwc sources skill-hints --type <task-type>`.
 
    **If a skill is configured, the seed tells the worker to run it immediately as step
-   1.** The skill owns the process and its gates: `/start-ticket` owns claiming,
+   1.** The skill comes from the event, or from the type map when the event is
+   absent. The skill owns the process and its gates: `/start-ticket` owns claiming,
    research, and plan approval; `/code-review` owns review context, Slack signaling, and
    sign-off; any future skill owns its own workflow. Do not duplicate those steps in
    the seed and do not insert a generic investigate-then-propose gate before the skill.
@@ -294,8 +303,9 @@ of the way.
      get noticed later."*
 
    **If no skill is configured, say so explicitly and use the generic fallback gate.**
-   Phrase it plainly: *"No skill is configured for task type `<type>` — using the
-   generic fallback gate; this is a process gap."* Then tell the worker to load
+   This applies only when the task has no `skill` event and the type map is empty
+   for its type. Phrase it plainly: *"No skill is configured for task type `<type>`
+   — using the generic fallback gate; this is a process gap."* Then tell the worker to load
    context, investigate freely, and stop before any state-changing or outward action
    until the user agrees an approach: no code edits, branch, PR, substantive Jira
    change, Slack post, or mutating job. Since there is no skill for this type, also
@@ -367,9 +377,10 @@ of the way.
 
    Then, in your reply:
    tell the user the worker tab is open and the seed was **auto-submitted**. If a
-   task-type skill was configured, the worker is already running that skill; its own
-   gates govern when it stops for approval or sign-off. If no skill was configured,
-   the worker is using the visible generic fallback gate and will investigate, then ask
+   skill was named (a `skill` event on the task, or a skill for the task type), the
+   worker is already running that skill. Its own gates govern when it stops for
+   approval or sign-off. If no skill was named, the worker is using the visible
+   generic fallback gate and will investigate, then ask
    before changing anything. (No review-then-Enter step anymore.) If `seed`
    came back `"skipped"` on what should have been a fresh spawn, something is off —
    flag it rather than claiming the worker started. **On a resume:** if you piped a

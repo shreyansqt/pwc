@@ -78,10 +78,12 @@ Usage:
 Harness/model are read from the task record (set by `pwc route`). The
 --harness/--model flags require --force-model + --force-reason and log an
 audit event — they are the locked-down override, not everyday flags.
-On a fresh spawn, every skill configured for the task type must be named in the
-seed. Omitting one requires --skip-skill-hint + --skip-skill-reason and records
-the deviation on the task timeline. Resumes are exempt because the worker already
-has its process context.
+On a fresh spawn, the seed must name the skill that owns the task. A `skill`
+event on the task wins: find-work writes it when the task type is too broad to
+decide the skill. With no skill event, every skill configured for the task type
+must be named. Omitting one requires --skip-skill-hint + --skip-skill-reason and
+records the deviation on the task timeline. Resumes are exempt because the worker
+already has its process context.
 """
 
 from __future__ import annotations
@@ -935,13 +937,82 @@ def _seed_mentions_skill(seed_prompt: str | None, skill: str) -> bool:
     return re.search(pattern, seed_prompt or "", flags=re.IGNORECASE) is not None
 
 
+SKILL_EVENT = "skill"
+
+
+def _clean_skill_names(names: list[str]) -> list[str]:
+    """Drop blanks and a leading slash so `/name` and `name` are one skill."""
+    cleaned = []
+    for name in names:
+        skill = name.strip().lstrip("/")
+        if skill:
+            cleaned.append(skill)
+    return cleaned
+
+
+def _parse_skill_event_detail(detail: str | None, task_id: str) -> list[str] | None:
+    """Skills named by one `skill` event.
+
+    The detail is one skill name, or a JSON list of skill names. None means the
+    event names nothing, so the caller falls back to the type map. A detail that
+    starts with `[` but is not a JSON list of strings is an error: a bad event
+    must not be read as a skill name.
+    """
+    text = (detail or "").strip()
+    if not text:
+        return None
+    if text.startswith("["):
+        import json as _json
+        try:
+            parsed = _json.loads(text)
+        except ValueError:
+            fail(
+                f"task {task_id!r} has a skill event with malformed JSON: {text}. "
+                "Use one skill name, or a JSON list of skill names."
+            )
+        if (not isinstance(parsed, list)
+                or not all(isinstance(item, str) for item in parsed)):
+            fail(
+                f"task {task_id!r} has a skill event whose JSON is not a list of "
+                f"skill names: {text}."
+            )
+        return _clean_skill_names(parsed) or None
+    return _clean_skill_names([text]) or None
+
+
+def stored_skills_from_events(events: list[dict], task_id: str) -> list[str] | None:
+    """Skills from the newest `skill` event, or None when the task has none.
+
+    None means "fall back to the type map". The newest event wins, so a later
+    log replaces an earlier choice.
+    """
+    for ev in reversed(events):
+        if ev.get("kind") != SKILL_EVENT:
+            continue
+        return _parse_skill_event_detail(ev.get("detail"), task_id)
+    return None
+
+
 def enforce_skill_hints(args, task_row, workspace_root, seed_prompt) -> None:
-    """Refuse a fresh seed that silently omits a configured skill handoff."""
+    """Refuse a fresh seed that silently omits the skill that owns the task.
+
+    A `skill` event stored at queue time wins. It names the skill when the task
+    type is too broad to decide. With no such event, the type's skill_hints
+    apply, as before.
+    """
     if args.resume:
         return
 
-    import sources
-    skills = sources.skill_hints_for_type(workspace_root, task_row["type"])
+    task_id = task_row["id"]
+    stored = stored_skills_from_events(_task_events(workspace_root, task_id), task_id)
+    if stored is not None:
+        skills = stored
+        label = "stored skill(s)"
+    else:
+        import sources
+        skills = sources.skill_hints_for_type(workspace_root, task_row["type"])
+        label = "configured skill hint(s)"
+
     missing = [skill for skill in skills
                if not _seed_mentions_skill(seed_prompt, skill)]
     if not missing:
@@ -953,15 +1024,14 @@ def enforce_skill_hints(args, task_row, workspace_root, seed_prompt) -> None:
             fail("--skip-skill-reason is required with --skip-skill-hint "
                  "(explain why the configured skill handoff is being skipped)")
         _log_task_event(
-            workspace_root, task_row["id"], "note",
-            f"SKIPPED configured skill hint(s) {missing_text} in fresh seed: "
+            workspace_root, task_id, "note",
+            f"SKIPPED {label} {missing_text} in fresh seed: "
             f"{args.skip_skill_reason}",
         )
         return
 
     fail(
-        f"fresh seed for task {task_row['id']!r} omits configured skill "
-        f"hint(s): {missing_text}.\n"
+        f"fresh seed for task {task_id!r} omits {label}: {missing_text}.\n"
         "Include each skill in the seed (with or without a leading `/`) and "
         "re-run, or pass --skip-skill-hint --skip-skill-reason \"<why>\" "
         "to override."

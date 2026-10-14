@@ -452,6 +452,23 @@ grouped rendering.
    then `add-ref --kind identity --ref-type <t> --value <raw-id>` to attach its
    identity reference, then `log-event --kind new-task`. Report back what was queued.
 
+   **Store a skill when the task type does not name it.** Read `pwc sources
+   skill-hints` with no `--type`. The keys are task types and narrower labels. If a
+   label names this work more specifically than the task type, log that label's
+   skills on the task:
+
+   `pwc log-event --task <id> --kind skill --detail "<skill>"`
+
+   One skill: the detail is the skill name, for example `refinement-prep`. Several
+   skills: the detail is a JSON list, for example `["code-review", "request-review"]`.
+   The newest `skill` event wins. `/pwc-start-work` and `pwc spawn` read it before
+   the type map.
+
+   Log nothing when the only matching key is the task type. The type map already
+   covers that case. Keep the task type as the source. A Product Refinement prep
+   task stays type `calendar` and gets a `skill` event for the skill listed under
+   the `refinement` label. Use only skills the map lists. Do not invent a skill name.
+
    **Multi-workspace: pin every write with `--workspace <root>`.** When scanning from a
    parent (step 1), each of these commands — `add-task`, `add-ref`, `log-event`, and the
    `update-task` / `find-refs` / `detail` used in steps 3 and 6 — MUST carry
