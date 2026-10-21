@@ -41,12 +41,18 @@ from pathlib import Path
 import models as models_mod
 from _common import emit, now_iso
 
-# harness -> its own update command. Not claude: it auto-updates.
+# harness -> its own update command. Not claude or cursor-agent: they auto-update
+# (cursor-agent unpacks a new version in the background at launch, seen 2026-10-21).
 UPDATE_COMMANDS = {
     "codex": ["codex", "update"],
     "grok": ["grok", "update"],
     "agy": ["agy", "update"],
 }
+
+# Harnesses whose model list is too long to add every model as a row: cursor-agent
+# lists 264 (2026-10-21), one per model x effort x speed. Their rows are added by
+# hand; discovery only retires a row whose model is gone, or restores it.
+NO_NEW_ROWS = ("cursor-agent",)
 
 _TIMEOUT = 300
 
@@ -134,6 +140,13 @@ def parse_grok_models(lines: list[str]) -> set[str]:
             if m}
 
 
+def parse_cursor_models(lines: list[str]) -> set[str]:
+    """`cursor-agent models` prints `<id> - <display name>` under a heading. `auto`
+    is left out: it lets Cursor pick the model, so route cannot know what runs."""
+    return {m.group(1) for m in (re.match(r"(\S+) - \S", ln) for ln in lines)
+            if m and m.group(1) != "auto"}
+
+
 def parse_agy_models(lines: list[str]) -> set[str]:
     """`agy models` prints `<id>\\t<display name>` after a `Fetching…` line."""
     return {ln.split("\t")[0].strip() for ln in lines
@@ -147,6 +160,9 @@ def list_models(harness: str) -> set[str] | None:
     if harness == "grok":
         lines = _lines(["grok", "models"])
         return parse_grok_models(lines) if lines is not None else None
+    if harness == "cursor-agent":
+        lines = _lines(["cursor-agent", "models"])
+        return parse_cursor_models(lines) if lines is not None else None
     if harness == "agy":
         lines = _lines(["agy", "models"])
         return parse_agy_models(lines) if lines is not None else None
@@ -155,12 +171,14 @@ def list_models(harness: str) -> set[str] | None:
 
 def reconcile(data: dict, served: dict[str, set[str]]) -> list[dict]:
     """Add rows for new models, retire rows for gone ones. Mutates `data`. Pure
-    apart from that: `served` is {harness: models it lists}."""
+    apart from that: `served` is {harness: models it lists}. A harness in
+    NO_NEW_ROWS only gets its existing rows retired or restored."""
     changes = []
     rows = data.setdefault("models", [])
     for harness, names in served.items():
         known = {r.get("model") for r in rows if r.get("harness") == harness}
-        for name in sorted(names - known):
+        new = set() if harness in NO_NEW_ROWS else names - known
+        for name in sorted(new):
             rows.append({"key": f"{harness}/{name}", "harness": harness,
                          "model": name, "catalog_id": None, "context": None,
                          "available": True, "data_ok": False, "needs_tiers": True,

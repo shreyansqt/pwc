@@ -534,6 +534,89 @@ def grok_trusts(cwd: str) -> bool:
     return False
 
 
+_CURSOR_HOME = Path.home() / ".cursor"
+
+
+def _cursor_bin() -> str:
+    return shutil.which("cursor-agent") or str(Path.home() / ".local" / "bin"
+                                               / "cursor-agent")
+
+
+def _cursor_session_exists(session_id: str) -> bool:
+    """Cursor keeps each chat in ~/.cursor/chats/<md5 of cwd>/<chat id>/. The folder
+    appears with the chat's FIRST turn, not at `create-chat`."""
+    try:
+        return next((_CURSOR_HOME / "chats").glob(f"*/{session_id}"), None) is not None
+    except OSError:
+        return True  # unreadable store: attach and let cursor-agent report the error
+
+
+def _preallocate_cursor_chat(cwd: str) -> str:
+    """`cursor-agent create-chat` mints an empty chat and prints its id. It runs no
+    model turn, so it costs no quota (verified 2026-10-21 on 2026.10.01)."""
+    import subprocess
+    try:
+        out = subprocess.run([_cursor_bin(), "create-chat"], cwd=cwd,
+                             capture_output=True, text=True, timeout=60,
+                             stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError) as e:
+        fail(f"cursor-agent create-chat failed: {type(e).__name__}: {e}")
+    chat_id = out.stdout.strip().splitlines()[-1:] or [""]
+    if out.returncode != 0 or not chat_id[0]:
+        fail(f"cursor-agent create-chat returned no chat id (exit {out.returncode}): "
+             f"{(out.stdout + out.stderr).strip()[:300]}")
+    return chat_id[0]
+
+
+def _build_cursor(*, session_id, resume, cwd, seed_prompt, model, dry_run=False):
+    """Cursor CLI. Session-tracked with the codex-style inverted id flow: a fresh
+    spawn mints the chat with `create-chat`, and the caller records the RETURNED id.
+    Fresh and resume both launch `--resume <id>`, so the id is in argv for pgrep
+    liveness. The positional prompt auto-submits, on a fresh chat and on a resume
+    (verified live 2026-10-21 on 2026.10.01). `--auto-review` lets a classifier run
+    safe tool calls and ask for the rest, the nearest match to claude's auto mode.
+    """
+    if resume:
+        if not session_id:
+            fail("--resume requires --session-id for the cursor-agent harness")
+        if not dry_run and not _cursor_session_exists(session_id):
+            fail(f"--resume: no cursor chat {session_id} under "
+                 f"{_CURSOR_HOME / 'chats'}\n"
+                 "\n"
+                 "to start a NEW session instead, drop --resume.")
+        mode = "resume"
+    else:
+        mode = "fresh"
+        session_id = ("00000000-DRYRUN-not-created" if dry_run
+                      else _preallocate_cursor_chat(cwd))
+    args = [_cursor_bin(), "--resume", session_id, "--auto-review"]
+    if model:
+        args += ["--model", model]
+    if seed_prompt:
+        args.append(seed_prompt)
+    return mode, args, session_id
+
+
+def cursor_trusts(cwd: str) -> bool:
+    """Does Cursor trust `cwd` (or a parent)? Without trust, cursor-agent stops at a
+    "Workspace Trust Required" question and sends the seed only after the answer.
+    Cursor writes one ~/.cursor/projects/<slug>/.workspace-trusted file per trusted
+    folder, and a trusted parent covers its subfolders (both verified 2026-10-21).
+    Like grok, PWC never grants trust on the user's behalf; it only warns."""
+    import json as _json
+    target = Path(cwd).resolve()
+    for marker in (_CURSOR_HOME / "projects").glob("*/.workspace-trusted"):
+        try:
+            folder = _json.loads(marker.read_text()).get("workspacePath")
+        except (OSError, ValueError, AttributeError):
+            continue
+        if folder:
+            root = Path(folder).resolve()
+            if target == root or root in target.parents:
+                return True
+    return False
+
+
 _AGY_PRIME_PROMPT = _CODEX_PRIME_PROMPT
 
 
@@ -589,8 +672,9 @@ def _build_agy(*, session_id, resume, cwd, seed_prompt, model, dry_run=False):
 
 # session_tracked = the harness's session id is known at spawn time and appears in
 # the worker's argv, so identity (`pwc set-session`), pgrep liveness, and resume
-# all work. claude: caller-chosen uuid. opencode/codex: pre-created via their
-# server APIs (they mint the id — callers record the returned one).
+# all work. claude/grok: caller-chosen uuid. opencode/codex: pre-created via their
+# server APIs; agy/cursor-agent: pre-created by a CLI call (they mint the id —
+# callers record the returned one).
 #
 # needs_submit = the harness PRE-FILLS its seed into the input box but does not send
 # it, so spawn() must type a newline once the TUI has drawn. claude auto-submits a
@@ -603,6 +687,7 @@ _BUILDERS = {
     "opencode": (_build_opencode, True, True),
     "codex": (_build_codex, True, False),
     "grok": (_build_grok, True, False),
+    "cursor-agent": (_build_cursor, True, False),
     "agy": (_build_agy, True, False),
 }
 
@@ -726,7 +811,7 @@ def build_command(*, harness, session_id, resume, cwd, seed_prompt=None,
                   seed_prompt=seed_prompt, model=model)
     if harness in ("opencode", "codex"):
         kwargs.update(title=title, dry_run=dry_run)
-    elif harness == "agy":
+    elif harness in ("agy", "cursor-agent"):
         kwargs.update(dry_run=dry_run)
     mode, args, effective_id = builder(**kwargs)
     inner = f"cd {shlex.quote(cwd)} && {shlex.join(args)}"
@@ -1368,6 +1453,11 @@ def main(argv=None):
         result["warning"] = (
             f"grok does not trust {cwd} yet, so it will NOT load AGENTS.md, project "
             f"instructions or skills. Answer its trust question in the new tab.")
+        print(f"pwc: WARNING — {result['warning']}", file=sys.stderr)
+    elif harness == "cursor-agent" and not cursor_trusts(cwd):
+        result["warning"] = (
+            f"cursor-agent does not trust {cwd} yet, so it will wait at its trust "
+            f"question and send the seed only after it. Answer it in the new tab.")
         print(f"pwc: WARNING — {result['warning']}", file=sys.stderr)
 
     if args.dry_run:

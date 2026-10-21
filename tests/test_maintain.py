@@ -65,3 +65,19 @@ def test_due_once_per_day(monkeypatch, tmp_path):
     maintain._save_marker({"date": "2026-10-13"})
     assert not maintain.is_due(date(2026, 10, 13))
     assert maintain.is_due(date(2026, 10, 14))
+
+
+def test_parse_cursor_models_skips_auto_and_heading():
+    lines = ["Available models", "", "auto - Auto (default)",
+             "composer-2.5 - Composer 2.5",
+             "grok-4.7-xhigh - Grok 4.7  Extra High"]
+    assert maintain.parse_cursor_models(lines) == {"composer-2.5", "grok-4.7-xhigh"}
+
+
+def test_cursor_discovery_adds_no_rows_but_retires_gone_ones():
+    data = {"models": [{"key": "cursor-agent/old", "harness": "cursor-agent",
+                        "model": "old", "available": True}]}
+    changes = maintain.reconcile(data, {"cursor-agent": {"new-a", "new-b"}})
+    assert [r["key"] for r in data["models"]] == ["cursor-agent/old"]
+    assert data["models"][0]["retired"] is True
+    assert [c["change"] for c in changes] == ["gone from the cursor-agent model list"]

@@ -117,11 +117,25 @@ _HARNESS_VENDOR = {"claude": "anthropic", "codex": "openai", "grok": "xai",
                    "cursor-agent": "cursor", "agy": "google"}
 
 
+# Cursor serves models from many vendors under one harness, so its vendor comes
+# from the model name (`claude-opus-5-5-high`, `cursor-grok-4.6-high`, ...).
+_CURSOR_MODEL_VENDOR = (("claude-", "anthropic"), ("gpt-", "openai"),
+                        ("grok-", "xai"), ("cursor-grok-", "xai"),
+                        ("gemini-", "google"), ("composer-", "cursor"))
+
+
 def vendor_of(row: dict) -> str | None:
     if row.get("vendor"):
         return row["vendor"]
     prefix = (row.get("catalog_id") or "").split("/")[0]
-    return _CATALOG_VENDOR.get(prefix) or _HARNESS_VENDOR.get(row.get("harness"))
+    if _CATALOG_VENDOR.get(prefix):
+        return _CATALOG_VENDOR[prefix]
+    if row.get("harness") == "cursor-agent":
+        name = row.get("model") or ""
+        for start, vendor in _CURSOR_MODEL_VENDOR:
+            if name.startswith(start):
+                return vendor
+    return _HARNESS_VENDOR.get(row.get("harness"))
 
 
 def _blended_cost(row: dict) -> float:

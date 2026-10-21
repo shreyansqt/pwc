@@ -748,3 +748,68 @@ def test_resume_without_known_harness_refuses(ws, tmp_path):
                           "--dry-run")
     assert rc != 0
     assert "cannot tell which harness" in err
+
+
+# ── cursor-agent harness ───────────────────────────────────────────────────────
+def test_cursor_fresh_mints_chat_and_puts_id_in_argv(monkeypatch):
+    monkeypatch.setattr(spawn_module, "_preallocate_cursor_chat", lambda cwd: "chat-1")
+    mode, args, sid = spawn_module._build_cursor(
+        session_id="ignored", resume=False, cwd="/tmp", seed_prompt="do the task",
+        model="composer-2.5")
+    assert (mode, sid) == ("fresh", "chat-1")
+    assert args[1:] == ["--resume", "chat-1", "--auto-review",
+                        "--model", "composer-2.5", "do the task"]
+
+
+def test_cursor_dry_run_does_not_create_a_chat(monkeypatch):
+    def boom(cwd):
+        raise AssertionError("dry run must not call create-chat")
+    monkeypatch.setattr(spawn_module, "_preallocate_cursor_chat", boom)
+    mode, args, sid = spawn_module._build_cursor(
+        session_id=None, resume=False, cwd="/tmp", seed_prompt=None, model=None,
+        dry_run=True)
+    assert mode == "fresh" and "DRYRUN" in sid and "--model" not in args
+
+
+def test_cursor_resume_attaches_existing_chat(monkeypatch):
+    monkeypatch.setattr(spawn_module, "_cursor_session_exists", lambda _: True)
+    mode, args, sid = spawn_module._build_cursor(
+        session_id="chat-2", resume=True, cwd="/tmp", seed_prompt=None, model=None)
+    assert (mode, sid) == ("resume", "chat-2")
+    assert args[1:] == ["--resume", "chat-2", "--auto-review"]
+
+
+def test_cursor_resume_missing_chat_fails(monkeypatch, capsys):
+    monkeypatch.setattr(spawn_module, "_cursor_session_exists", lambda _: False)
+    with pytest.raises(SystemExit):
+        spawn_module._build_cursor(session_id="gone", resume=True, cwd="/tmp",
+                                   seed_prompt=None, model=None)
+    assert "no cursor chat gone" in capsys.readouterr().err
+
+
+def test_cursor_session_exists_reads_the_chat_store(monkeypatch, tmp_path):
+    (tmp_path / "chats" / "md5ofcwd" / "chat-3").mkdir(parents=True)
+    monkeypatch.setattr(spawn_module, "_CURSOR_HOME", tmp_path)
+    assert spawn_module._cursor_session_exists("chat-3")
+    assert not spawn_module._cursor_session_exists("chat-4")
+
+
+def test_cursor_trust_covers_subfolders(monkeypatch, tmp_path):
+    trusted = tmp_path / "repo"
+    (trusted / "sub").mkdir(parents=True)
+    marker = tmp_path / "home" / "projects" / "repo-slug" / ".workspace-trusted"
+    marker.parent.mkdir(parents=True)
+    marker.write_text(json.dumps({"workspacePath": str(trusted)}))
+    monkeypatch.setattr(spawn_module, "_CURSOR_HOME", tmp_path / "home")
+    assert spawn_module.cursor_trusts(str(trusted / "sub"))
+    assert not spawn_module.cursor_trusts(str(tmp_path))
+
+
+def test_cursor_dry_run_spawn_via_pin(ws):
+    ws.add_task("cursor-route", harness="cursor-agent", model="composer-2.5")
+    rc, out, err = _run(str(SPAWN), "--task", "cursor-route",
+                        "--cwd", str(ws.root / "workdir"), "--dry-run")
+    assert rc == 0, err
+    result = json.loads(out)
+    assert result["harness"] == "cursor-agent" and result["session_tracked"]
+    assert "--resume 00000000-DRYRUN-not-created --auto-review" in result["command"]

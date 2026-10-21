@@ -309,3 +309,12 @@ def test_stale_table_refresh_fails_proceeds():
         result = load_table_for_routing()
         m_save.assert_not_called()
         assert "models" in result
+
+
+@pytest.mark.parametrize("model, vendor", [
+    ("claude-opus-5-5-high", "anthropic"), ("gpt-5.6-sol-high", "openai"),
+    ("grok-4.7-xhigh", "xai"), ("cursor-grok-4.6-high", "xai"),
+    ("gemini-3.7-flash-high", "google"), ("composer-2.5", "cursor"),
+])
+def test_cursor_vendor_comes_from_the_model_name(model, vendor):
+    assert route_mod.vendor_of({"harness": "cursor-agent", "model": model}) == vendor

@@ -349,7 +349,8 @@ of the way.
    --harness <result.harness> --model <result.model>`
    (writes the session id and a `dispatched` event, so the task is tracked from the
    instant the worker starts) — **only if the spawn result said `session_tracked:
-   true`** (true for all current harnesses: claude, opencode, codex, grok, agy). For a future
+   true`** (true for all current harnesses: claude, opencode, codex, grok,
+   cursor-agent, agy). For a future
    untracked harness there is no session to record, so instead log the dispatch
    (`pwc log-event --task <id> --kind dispatched --detail "spawned <harness>
    (<model>) worker in <dir>"`). Either way, **move the task to `in-progress`**
@@ -442,7 +443,7 @@ of the way.
   - Remote workers can't reach this machine's task database, MCP connectors, the
     VPN-gated prod DB, or a browser — route repo-centric work there, keep
     prod-data investigation local.
-- **Non-claude harnesses (opencode, codex, grok, agy, …).** Dispatch works the
+- **Non-claude harnesses (opencode, codex, grok, cursor-agent, agy, …).** Dispatch works the
   same — build the seed, `pwc spawn` (spawn decides the harness/model, never CLI
   flags) — with these deltas:
   - **opencode and codex are session-tracked like claude** (both verified
@@ -472,6 +473,19 @@ of the way.
     - Grok bundles its own `code-review` skill, which collides with a workspace
       skill of the same name. Name a workspace skill by its file path in the seed.
     - Some MCP servers do not connect inside Grok (Atlassian failed on 13.10).
+  - **cursor-agent (Cursor CLI) is session-tracked like codex** (verified
+    21.10.2026, cursor-agent 2026.10.01): a fresh spawn mints the chat with
+    `cursor-agent create-chat` (no model turn, no quota), so **record the returned
+    `session_id`**. Fresh and resume both launch `--resume <id> "<prompt>"`, and
+    the prompt auto-submits. It runs with `--auto-review`: a Cursor classifier runs
+    safe tool calls and asks in the tab for the rest. It uses the same X pool as
+    grok. Known limits:
+    - An untrusted folder stops at Cursor's trust question, and the seed waits
+      until somebody answers. The spawn result then carries a `warning`. Tell the
+      user to press `a` in the new tab.
+    - Cursor loads the folder's AGENTS.md and CLAUDE.md. It does not see the
+      personal or pwc skills (`~/.cursor/skills` holds only Cloudflare skills on
+      21.10.2026). Name each skill the seed needs by its SKILL.md path.
   - **agy (Antigravity CLI) is session-tracked like codex**: agy mints the
     conversation id, so a fresh spawn runs one tiny headless setup turn first and
     returns the id (**record the returned `session_id`**). It runs with

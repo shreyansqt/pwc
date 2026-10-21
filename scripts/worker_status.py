@@ -2,7 +2,8 @@
 """Worker-status check — is a worker session still running?
 
 A worker is spawned with its session id in the process argv (`claude --session-id
-<uuid>`, `opencode --session <ses_…>`, `codex resume <uuid>`), so `pgrep -f <id>`
+<uuid>`, `opencode --session <ses_…>`, `codex resume <uuid>`,
+`cursor-agent --resume <uuid>`), so `pgrep -f <id>`
 is an exact "is this session still running?" test — no PID storage, no polling,
 terminal-agnostic. ("Worker status" = alive/dead here, distinct from a task's
 status field.)

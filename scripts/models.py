@@ -302,12 +302,25 @@ def _opencode_authed() -> bool:
     return "0 credentials" not in out
 
 
+def _cursor_authed() -> bool:
+    """`cursor-agent status` prints `Not logged in` when there is no account."""
+    try:
+        out = subprocess.run(["cursor-agent", "status"], capture_output=True,
+                             text=True, timeout=20, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return out.returncode == 0 and "Logged in" in out.stdout \
+        and "Not logged in" not in out.stdout
+
+
 def harness_available(harness: str) -> bool:
     """Is this harness installed AND able to reach its provider?"""
     if shutil.which(harness) is None:
         return False
     if harness == "opencode":
         return _opencode_authed()
+    if harness == "cursor-agent":
+        return _cursor_authed()
     return True  # claude/codex authenticate out-of-band (subscription login)
 
 

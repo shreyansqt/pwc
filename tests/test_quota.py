@@ -212,3 +212,9 @@ def test_preference_ignored_when_quota_routing():
     q = _q(claude={"status": "ok", "slack": 0}, chatgpt={"status": "ok", "slack": 50},
            x={"status": "ok", "slack": 0}, **{"google-ai": {"status": "ok", "slack": 0}})
     assert route(_profile(), table, quota=q)["harness"] == "codex"
+
+
+def test_cursor_shares_the_x_subscription_with_grok():
+    subs = quota.subscriptions()
+    assert quota.subscription_for_harness("cursor-agent", subs) == "x"
+    assert quota.subscription_for_harness("grok", subs) == "x"
