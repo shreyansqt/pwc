@@ -129,6 +129,10 @@ CREATE TABLE IF NOT EXISTS task_sessions (
                                                -- the worker process's argv, NOT an iTerm id
   harness    TEXT,                             -- which agent ran it (claude|opencode|codex)
   model      TEXT,                             -- the model it was dispatched with
+  cwd        TEXT,                             -- directory it was started in. Resume
+                                               -- uses this, not a recomputed join:
+                                               -- transcripts are keyed by it, and a
+                                               -- remote tree need not mirror the laptop.
   started_at TEXT NOT NULL,                    -- ISO8601 UTC of the dispatch
   PRIMARY KEY (task_id, session_id)            -- a resumed session is the SAME row
                                                -- (re-dispatch just updates started_at)

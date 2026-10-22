@@ -7,9 +7,10 @@ description: Act on a PWC task — either dispatch a worker (a Claude Code sessi
 
 Turn a tracked task into action. `/pwc-start-work` decides whether the task warrants
 its own **worker** (a Claude Code session, spawned in a new iTerm2 tab) or can be
-handled **inline** by the coordinator, then does it. It also covers **resumption** —
-there is no separate resume command; picking a stopped task back up is just starting
-it again, reopening its prior session when one survives.
+handled **inline** by the coordinator, then does it. It also covers **resumption** when you are dispatching a specific task: picking a
+stopped task back up reopens its prior session when one survives. From inside a
+workspace, with no task name, `pwc resume` lists every session on that board and
+`pwc continue` opens the most recent one.
 
 A worker is a normal Claude Code session that *you* drive — `/pwc-start-work` opens it
 in the right repo with the task's context pre-loaded so you can begin immediately.
@@ -65,11 +66,12 @@ of the way.
   *follow-up* into a resumed worker and it runs on its own (verified 2026-07-07). The
   seed is never typed into the input box, so there is no `not-typed` failure mode and
   nothing for the user to paste by hand.
-- `pwc set-session --task <id> --session-id <uuid> --workdir <dir> --harness <h>
-  --model <m>` — record the session id at spawn (atomic with a `dispatched` event).
-  **Always pass `--harness`/`--model` from the spawn result.** With spawn-time
-  routing the task record no longer holds them, and a resume reads the harness that
-  ran the session from this record.
+- `pwc set-session --task <id> --session-id <uuid> --workdir <dir> --cwd <dir>
+  --harness <h> --model <m>` — record the session id at spawn (atomic with a
+  `dispatched` event). **Always pass `--harness`/`--model`/`--cwd` from the spawn
+  result.** With spawn-time routing the task record no longer holds the harness,
+  and a resume reads the harness and the directory that ran the session from this
+  record. `--cwd` is the spawn result's `cwd` (the remote path, when there is one).
 - `pwc reroute --task <id> [--reason "..."]` — clear a task's
   stored harness/model PIN. The next `pwc spawn` routes the saved profile; with no
   profile it refuses and hands over a `pwc route … --save` template.
@@ -346,7 +348,7 @@ of the way.
 
 6. **Record it, then tell the user how to start the worker.** Right after dispatch,
    run `pwc set-session --task <id> --session-id <result.session_id> --workdir <dir>
-   --harness <result.harness> --model <result.model>`
+   --cwd <result.cwd> --harness <result.harness> --model <result.model>`
    (writes the session id and a `dispatched` event, so the task is tracked from the
    instant the worker starts) — **only if the spawn result said `session_tracked:
    true`** (true for all current harnesses: claude, opencode, codex, grok,

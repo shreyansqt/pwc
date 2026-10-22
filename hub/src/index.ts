@@ -229,6 +229,7 @@ interface SetSessionBody {
 	workdir?: string | null;
 	harness?: string | null;
 	model?: string | null;
+	cwd?: string | null;
 }
 interface ClearSessionBody {
 	task: string;
@@ -580,14 +581,19 @@ async function opSetSession(db: D1Database, workspace: string, body: Partial<Set
 	params.push(workspace, tid);
 	const harness = body.harness ?? task.harness ?? null;
 	const model = body.model ?? task.model ?? null;
+	const cwd = body.cwd ?? null;
 	await db.batch([
 		db.prepare(`UPDATE tasks SET ${sets.join(', ')} WHERE workspace = ? AND id = ?`).bind(...params),
 		db
 			.prepare(
-				'INSERT INTO task_sessions (workspace, task_id, session_id, harness, model, started_at) VALUES (?,?,?,?,?,?) ' +
-					'ON CONFLICT(workspace, task_id, session_id) DO UPDATE SET started_at = excluded.started_at',
+				'INSERT INTO task_sessions (workspace, task_id, session_id, harness, model, cwd, started_at) VALUES (?,?,?,?,?,?,?) ' +
+					'ON CONFLICT(workspace, task_id, session_id) DO UPDATE SET ' +
+					'started_at = excluded.started_at, ' +
+					'harness = COALESCE(excluded.harness, task_sessions.harness), ' +
+					'model = COALESCE(excluded.model, task_sessions.model), ' +
+					'cwd = COALESCE(excluded.cwd, task_sessions.cwd)',
 			)
-			.bind(workspace, tid, body.session_id, harness, model, ts),
+			.bind(workspace, tid, body.session_id, harness, model, cwd, ts),
 		db
 			.prepare('INSERT INTO events (workspace, task_id, at, source, kind, detail) VALUES (?,?,?,?,?,?)')
 			.bind(workspace, tid, ts, 'coordinator', 'dispatched', `session ${body.session_id}`),
@@ -603,7 +609,7 @@ async function opSessions(db: D1Database, workspace: string, body: Partial<{ tas
 	const task = await requireTask(db, workspace, body.task);
 	const { results } = await db
 		.prepare(
-			'SELECT session_id, harness, model, started_at FROM task_sessions ' +
+			'SELECT session_id, harness, model, cwd, started_at FROM task_sessions ' +
 				'WHERE workspace = ? AND task_id = ? ORDER BY started_at, session_id',
 		)
 		.bind(workspace, task.id)

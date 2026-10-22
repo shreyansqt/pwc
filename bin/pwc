@@ -52,6 +52,8 @@ other:
   pwc coord [claude|codex|opencode] [--model M] [--workspace DIR] [--name N]
   pwc spawn --task <id> --cwd <dir> [--session-id U] [--resume] [--prompt -] [--name N]
             [--skip-skill-hint --skip-skill-reason WHY]
+  pwc resume [--task ID] [--restart] [--dry-run]
+  pwc continue [--restart] [--dry-run]
   pwc worker-status --session-ids <uuid,...> | --json -
 
 The workspace is discovered from the cwd (nearest .pwc/ up the tree);
@@ -156,6 +158,13 @@ def main(argv):
     elif cmd == "spawn":
         import spawn
         spawn.main(rest)
+    elif cmd in ("resume", "continue"):
+        import resume
+        if ws is not None:
+            rest = ["--workspace", ws, *rest]
+        if cmd == "continue":
+            rest = ["--continue", *rest]
+        resume.main(rest)
     elif cmd == "worker-status":
         import worker_status
         worker_status.main(rest)

@@ -947,6 +947,45 @@ def latest_profile(events: list[dict]) -> dict | None:
     return None
 
 
+def runner_from_detail(detail: str | None) -> tuple[str, str] | None:
+    """Pull `harness, model` out of one timeline line, or None.
+
+    Spawn writes either of these:
+      FORCED model claude/sonnet over routed None/None: <why>
+      cursor-agent/claude-sonnet-5-5-high — <why>
+    The model can itself contain slashes, so the split is on the first slash.
+    """
+    text = (detail or "").strip()
+    forced = re.match(r"^FORCED model (.+) over routed\b", text)
+    if forced:
+        harness, sep, model = forced.group(1).partition("/")
+        if sep and harness and model and " " not in harness:
+            return harness, model
+    routed = re.match(r"^(.+?) — ", text)
+    if routed and "/" in routed.group(1):
+        harness, sep, model = routed.group(1).partition("/")
+        if sep and harness and model and " " not in harness:
+            return harness, model
+    return None
+
+
+def runner_from_events(events: list[dict]) -> tuple[str, str] | None:
+    """The harness that actually ran, from the timeline.
+
+    A FORCED note wins over a routed event: the force is the harness that
+    launched, and the routed line is the choice it replaced. Newest of each.
+    """
+    forced = None
+    routed = None
+    for ev in reversed(events or []):
+        detail = ev.get("detail")
+        if forced is None and (detail or "").startswith("FORCED model "):
+            forced = runner_from_detail(detail)
+        elif routed is None and ev.get("kind") == "routed":
+            routed = runner_from_detail(detail)
+    return forced or routed
+
+
 def resolve_routing(args, task_row, workspace_root):
     """Return (harness, model) for the worker, or fail with an actionable error.
 
@@ -990,6 +1029,12 @@ def resolve_routing(args, task_row, workspace_root):
                     if s.get("session_id") == args.session_id), None)
         if ran and ran.get("harness"):
             return ran["harness"], ran.get("model")
+        # set-session used to store a null harness when the caller omitted it
+        # (and a conflict refresh did not fill it in). The timeline still says
+        # what ran: a FORCED model note, or the routed event.
+        inferred = runner_from_events(_task_events(workspace_root, task_id))
+        if inferred:
+            return inferred
 
     if task_harness and task_model:
         return task_harness, task_model

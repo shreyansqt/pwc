@@ -127,6 +127,7 @@ CREATE TABLE IF NOT EXISTS task_sessions (
                                                -- the worker's argv, NOT an iTerm id
   harness    TEXT,                             -- claude|opencode|codex
   model      TEXT,                             -- what it was dispatched with
+  cwd        TEXT,                             -- directory it was started in
   started_at TEXT NOT NULL,                    -- ISO8601 UTC of the dispatch
   PRIMARY KEY (workspace, task_id, session_id),-- a RESUMED session is the SAME row
   FOREIGN KEY (workspace, task_id) REFERENCES tasks(workspace, id) ON DELETE CASCADE

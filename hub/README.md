@@ -18,6 +18,9 @@ belongs in a private instance repo; see Decision 3 in the design doc.
 wrangler d1 create pwc-hub                                    # note the printed database_id
 # paste that id into wrangler.jsonc's d1_databases[0].database_id
 wrangler d1 execute pwc-hub --remote --file=schema.sql         # apply the schema
+# An existing database does not pick up new columns from CREATE IF NOT EXISTS.
+# After pulling a task_sessions change:
+#   wrangler d1 execute pwc-hub --remote --command "ALTER TABLE task_sessions ADD COLUMN cwd TEXT"
 wrangler secret put PWC_TOKEN                                  # bearer token every caller must send
 wrangler deploy
 ```

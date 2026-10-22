@@ -52,6 +52,10 @@ def connect(workspace=None, *, must_exist: bool = True) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute(f"PRAGMA busy_timeout = {_BUSY_TIMEOUT_MS}")
     conn.execute("PRAGMA foreign_keys = ON")
+    # Commit: sqlite3 rolls back on close, so an uncommitted ALTER would vanish
+    # and the next statement that selects the new column would fail.
+    _migrate(conn)
+    conn.commit()
     return conn
 
 
@@ -75,6 +79,8 @@ def _migrate(conn) -> None:
     `CREATE TABLE IF NOT EXISTS` in schema.sql is a no-op once the table exists,
     so new columns must be ALTERed in here. Safe to run on every init()."""
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(tasks)")}
+    if not cols:
+        return  # init() applies schema.sql before the columns exist
     if "archived_at" not in cols:
         conn.execute("ALTER TABLE tasks ADD COLUMN archived_at TEXT")
     conn.execute(
@@ -83,9 +89,15 @@ def _migrate(conn) -> None:
     for col in ("harness", "model", "runhost"):
         if col not in cols:
             conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} TEXT")
+    # task_sessions is created by schema.sql on init. An existing database keeps
+    # its old columns, so a later column is ALTERed here. PRAGMA on a missing
+    # table returns no rows — init creates the table, then migrates.
+    sess_cols = {r["name"] for r in conn.execute("PRAGMA table_info(task_sessions)")}
+    if sess_cols and "cwd" not in sess_cols:
+        conn.execute("ALTER TABLE task_sessions ADD COLUMN cwd TEXT")
     # task_usage and task_sessions are created by schema.sql on every init (CREATE
-    # TABLE IF NOT EXISTS), so a DB that predates them picks them up there — nothing
-    # to ALTER. After creating task_sessions, backfill it from the append-only
+    # TABLE IF NOT EXISTS), so a DB that predates the tables picks them up there.
+    # After creating task_sessions, backfill it from the append-only
     # `dispatched` events: existing DBs have dispatch history that tasks.session_id
     # never kept (the old sweep NULLed it on worker death; a re-dispatch overwrote
     # it). Run `pwc backfill-sessions` for that — it is idempotent and explicit rather

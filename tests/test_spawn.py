@@ -750,6 +750,56 @@ def test_resume_without_known_harness_refuses(ws, tmp_path):
     assert "cannot tell which harness" in err
 
 
+def test_resume_infers_harness_from_the_force_note(ws):
+    """A session row with a null harness still resumes as whatever was forced.
+
+    Remote nabu was routed to cursor-agent, then forced to claude/sonnet, and
+    set-session stored neither. The FORCED line is the harness that ran.
+    """
+    ws.add_task("stuck")
+    ws.log_event(
+        "stuck", "routed",
+        "cursor-agent/claude-sonnet-5-5-high — picked first",
+    )
+    ws.log_event(
+        "stuck", "note",
+        "FORCED model agy/gemini-x over routed cursor-agent/claude-sonnet-5-5-high: "
+        "remote workers are claude-shaped in this test",
+    )
+    sid = "11111111-2222-3333-4444-555555555555"
+    rc, out, err = _run(
+        str(SPAWN), "--task", "stuck", "--cwd", str(ws.root / "workdir"),
+        "--session-id", sid, "--resume", "--dry-run",
+    )
+    assert rc == 0, err
+    result = json.loads(out)
+    assert result["harness"] == "agy"
+    assert result["model"] == "gemini-x"
+
+
+def test_resume_session_harness_beats_a_later_force_note(ws):
+    ws.add_task("pinned-session")
+    sid = "11111111-2222-3333-4444-555555555555"
+    _run_taskdb(str(ws.root), "set-session", "--task", "pinned-session",
+                "--session-id", sid, "--harness", "agy", "--model", "gemini-x")
+    ws.log_event(
+        "pinned-session", "note",
+        "FORCED model grok/grok-4.7 over routed None/None: should not win",
+    )
+    rc, out, err = _run(
+        str(SPAWN), "--task", "pinned-session", "--cwd", str(ws.root / "workdir"),
+        "--session-id", sid, "--resume", "--dry-run",
+    )
+    assert rc == 0, err
+    assert json.loads(out)["harness"] == "agy"
+
+
+def test_model_with_slashes_parses_as_one_model():
+    assert spawn_module.runner_from_detail(
+        "opencode/openrouter/z-ai/glm-5.2 — cheap and enough"
+    ) == ("opencode", "openrouter/z-ai/glm-5.2")
+
+
 # ── cursor-agent harness ───────────────────────────────────────────────────────
 def test_cursor_fresh_mints_chat_and_puts_id_in_argv(monkeypatch):
     monkeypatch.setattr(spawn_module, "_preallocate_cursor_chat", lambda cwd: "chat-1")

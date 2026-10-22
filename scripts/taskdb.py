@@ -359,12 +359,20 @@ def cmd_set_session(args):
         conn.execute(f"UPDATE tasks SET {', '.join(sets)} WHERE id = ?", params)
         # The permanent record. Harness/model default to whatever the task carries,
         # so a session is always attributable to what actually ran it.
+        # A later set-session (the skill passes harness/model/cwd from the spawn
+        # result) must fill a row an earlier call left null. COALESCE keeps an
+        # existing value when this call omits the field.
         conn.execute(
-            "INSERT INTO task_sessions (task_id, session_id, harness, model, started_at) "
-            "VALUES (?,?,?,?,?) "
-            "ON CONFLICT(task_id, session_id) DO UPDATE SET started_at = excluded.started_at",
+            "INSERT INTO task_sessions "
+            "  (task_id, session_id, harness, model, cwd, started_at) "
+            "VALUES (?,?,?,?,?,?) "
+            "ON CONFLICT(task_id, session_id) DO UPDATE SET "
+            "  started_at = excluded.started_at, "
+            "  harness = COALESCE(excluded.harness, task_sessions.harness), "
+            "  model = COALESCE(excluded.model, task_sessions.model), "
+            "  cwd = COALESCE(excluded.cwd, task_sessions.cwd)",
             (tid, args.session_id, args.harness or task["harness"],
-             args.model or task["model"], ts),
+             args.model or task["model"], args.cwd, ts),
         )
         _insert_event(conn, task_id=tid, source="coordinator",
                       kind="dispatched", detail=f"session {args.session_id}")
@@ -439,7 +447,7 @@ def cmd_sessions(args):
     conn = pwc_db.connect(args.workspace)
     tid = _require_task(conn, args.task)["id"]
     rows = conn.execute(
-        "SELECT session_id, harness, model, started_at FROM task_sessions "
+        "SELECT session_id, harness, model, cwd, started_at FROM task_sessions "
         "WHERE task_id = ? ORDER BY started_at, session_id",
         (tid,),
     ).fetchall()
@@ -819,6 +827,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--workdir")
     s.add_argument("--harness", help="what ran it (defaults to the task's harness)")
     s.add_argument("--model", help="what it was dispatched with (defaults to the task's)")
+    s.add_argument("--cwd", help="directory the session was started in (the spawn "
+                                 "result's cwd). Resume uses this path.")
     s.set_defaults(func=cmd_set_session)
 
     s = sub.add_parser("sessions",
