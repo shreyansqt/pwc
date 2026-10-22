@@ -427,7 +427,7 @@ def focus_local_tab(task_id: str) -> bool:
     try:
         import iterm2
     except ImportError:
-        fail("iterm2 module not installed — run `pip install iterm2`")
+        fail("iterm2 module not installed — run `pip install 'iterm2>=2.24'`")
     found = {"ok": False}
 
     async def _main(connection):

@@ -79,8 +79,12 @@ Three parts:
 ### Prerequisites
 
 - **Python 3** (stdlib `sqlite3` — no packages needed for the task database).
-- **iTerm2** with the Python API enabled (Preferences → General → Magic → *Enable
-  Python API*) and `pip install iterm2` — for spawning worker tabs.
+- **iTerm2 3.7.4 or newer** (3.7.6 is the current stable) with the Python API
+  enabled (Preferences → General → Magic → *Enable Python API*) and
+  `pip install 'iterm2>=2.24'` — for spawning worker tabs. `pwc coord` and
+  `pwc spawn` put each workspace's coordinator and its workers in one tab
+  group, named after the workspace directory. An older iTerm2 still opens the
+  tabs; it cannot group them.
 - `pgrep` (standard on macOS) — for worker-status checks.
 
 ## Use

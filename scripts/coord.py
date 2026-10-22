@@ -203,6 +203,11 @@ def main(argv=None):
         sys.stdout.write(f"\033]0;{title}\007")
         sys.stdout.flush()
 
+    # The tab you typed in becomes this workspace's coordinator, so it joins
+    # that workspace's tab group before the shell is replaced. A failure here
+    # is a warning: the coordinator still starts.
+    _group_coordinator_tab(cwd)
+
     print(f"pwc coord: {harness}"
           + (f"/{model}" if model else " (harness default model)")
           + f" in {cwd}", file=sys.stderr)
@@ -213,6 +218,29 @@ def main(argv=None):
               file=sys.stderr)
 
     os.execvp(argv_out[0], argv_out)  # replaces this process; never returns
+
+
+def _group_coordinator_tab(workspace: str) -> None:
+    """Best-effort. The coordinator launches either way."""
+    import iterm_groups
+    tty = iterm_groups.current_tty()
+    if tty is None:
+        return
+    status = iterm_groups.group_tty(workspace, tty)
+    name = iterm_groups.group_name(workspace)
+    if status == "unsupported":
+        print(
+            f"pwc coord: tab group {name!r} needs iTerm2 3.7.4 or newer. "
+            "This app's Python API is older, so the tab stays ungrouped.",
+            file=sys.stderr,
+        )
+    elif status == "no-tab":
+        print("pwc coord: tab group skipped (could not find this tab).",
+              file=sys.stderr)
+    elif str(status).startswith("skipped"):
+        print(f"pwc coord: tab group skipped ({status})", file=sys.stderr)
+    else:
+        print(f"pwc coord: tab group {name} ({status})", file=sys.stderr)
 
 
 def shutil_which(cmd: str):

@@ -3,12 +3,14 @@
 
 Builds the harness's launch invocation (default `claude`: fresh `--session-id
 <uuid>` + seed prompt, or `--resume <uuid>`) and runs it in a new tab of the
-current iTerm2 window, titled after the task. Each worker gets its own full-width
-tab (Cmd-1/2/... to switch); the coordinator's tab is untouched. The new tab opens
-**in the background** — iTerm2 always switches focus to a newly-created tab (its
-API has no background-create flag), so we remember the active tab beforehand and
-re-activate it immediately after the new tab is created. Brief flicker; user stays
-where they were. Prints session id, mode, and placement as JSON. It does not record
+workspace's iTerm2 tab group, titled after the task. The group is named after
+the workspace directory; when it does not exist yet, the tab opens in the
+current window and becomes the group's first member. Each worker gets its own
+full-width tab (Cmd-1/2/... to switch); the coordinator's tab is untouched.
+The new tab opens **in the background**. `select=False` asks iTerm2 not to
+focus it; builds that ignore that field still switch focus, so we remember the
+active tab beforehand and re-activate it immediately after. Brief flicker; user
+stays where they were. Prints session id, mode, and placement as JSON. It does not record
 the worker session — the dispatch skill calls `pwc set-session` for that — but
 explicit routing and skill-hint overrides append audit events to the task timeline.
 
@@ -40,8 +42,10 @@ Harnesses (`--harness`, default claude):
 Verify a new harness's flags on first real use and update its builder here.
 
 Requires iTerm2 running with the Python API enabled
-(Preferences -> General -> Magic -> Enable Python API) and `pip install iterm2`.
-Fails with a clear message (never hangs) if it can't connect.
+(Preferences -> General -> Magic -> Enable Python API) and
+`pip install 'iterm2>=2.24'`. Tab groups need iTerm2 3.7.4 or newer; an older
+build still opens the tab, ungrouped. Fails with a clear message (never hangs)
+if it can't connect.
 
 Remote workers (`--ssh <target>`, claude harness only for now): the worker runs on
 a named machine inside a REMOTE TMUX SESSION, so it survives this laptop sleeping
@@ -1217,16 +1221,20 @@ async def _wait_for_shell_prompt(iterm2, connection, session, timeout=15.0):
 
 
 def spawn(*, cwd, command, seed_in_command=False, title=None, needs_submit=False,
-          typed_seed=None):
-    """Open the worker in a new iTerm2 tab in the current window. Returns placement.
+          typed_seed=None, workspace_root=None):
+    """Open the worker in a new iTerm2 tab in the workspace's tab group.
 
-    Each worker gets its own full-width tab (switchable with Cmd-1/2/...), leaving
-    the coordinator's tab untouched. The new tab opens **in the background** — the
-    user's previously-active tab is restored as the focused tab right after the new
-    tab is created, so spawning workers doesn't yank the user out of whatever they
-    were doing. `async_send_text` targets the worker's session object directly (not
-    "the active session"), so the launch command is still delivered to the
-    backgrounded worker correctly.
+    Returns placement. Each worker gets its own full-width tab (switchable with
+    Cmd-1/2/...), leaving the coordinator's tab untouched. The tab is created in
+    the window that already holds that workspace's group, or in the current
+    window when the group does not exist yet, and then added to the group.
+    Grouping is best-effort: an iTerm2 older than 3.7.4 still gets the tab.
+
+    The new tab opens **in the background**. The user's previously-active tab is
+    restored right after the new tab is created, so spawning workers doesn't
+    yank the user out of whatever they were doing. `async_send_text` targets the
+    worker's session object directly (not "the active session"), so the launch
+    command is still delivered to the backgrounded worker correctly.
 
     The seed is no longer typed into the input box. It rides in `command` as
     claude's positional prompt (see `build_claude_command`), so claude auto-submits
@@ -1242,7 +1250,7 @@ def spawn(*, cwd, command, seed_in_command=False, title=None, needs_submit=False
     try:
         import iterm2  # lazy: non-spawn use of this module shouldn't need it
     except ImportError:
-        fail("iterm2 module not installed — run `pip install iterm2`")
+        fail("iterm2 module not installed — run `pip install 'iterm2>=2.24'`")
 
     placement = {}
 
@@ -1252,28 +1260,51 @@ def spawn(*, cwd, command, seed_in_command=False, title=None, needs_submit=False
         if window is None:
             fail("no active iTerm2 window to open a tab in")
 
+        import iterm_groups
+        grouped = bool(workspace_root) and iterm_groups.tab_groups_supported(connection)
+        target = window
+        if grouped:
+            target = await iterm_groups.window_for_workspace(
+                app, workspace_root, window)
+        # A group in another window means the new tab is born there. Bringing
+        # the original window forward on restore puts the user back if that
+        # create still stole focus. Same-window creates leave the window put.
+        opened_elsewhere = not iterm_groups.same_window(target, window)
+
         # Remember the user's currently-active tab BEFORE creating the new one so we
-        # can restore focus to it after — `async_create_tab` always switches focus to
-        # the new tab (the API has no background-create flag, confirmed), and that's
-        # jarring when the user is mid-flow in another tab. The flicker is brief, the
-        # net effect is the worker tab opens unfocused in the tab bar.
+        # can restore focus to it after. `select=False` asks iTerm2 not to focus the
+        # new tab; builds that ignore the field still switch focus.
         original_tab = window.current_tab
 
         # Open a normal interactive shell tab (NOT command=...). Interactive claude
         # needs a real TTY; launching it as the tab's program via command= gives it
         # no interactive terminal and it exits instantly (closing the tab). Instead
         # we type the launch command into a real shell, so claude runs with a TTY.
-        tab = await window.async_create_tab()
+        tab = await iterm_groups.create_background_tab(target)
         placement["tab"] = True
         if tab is None:
             return
-        session = tab.current_session
-        placement["iterm_session_id"] = session.session_id if session else None
         if title:
             try:
                 await tab.async_set_title(title)
             except Exception:  # noqa: BLE001 — title is cosmetic, never fatal
                 pass
+        if grouped:
+            try:
+                status = await iterm_groups.ensure_member(
+                    app, tab, workspace_root, connection)
+            except Exception as exc:  # noqa: BLE001 — the tab exists; grouping is extra
+                status = f"skipped: {type(exc).__name__}: {exc}"
+            placement["tab_group_status"] = status
+            if status in ("created", "joined", "already"):
+                placement["tab_group"] = iterm_groups.group_name(workspace_root)
+            elif str(status).startswith("skipped"):
+                print(f"pwc spawn: tab group skipped ({status})", file=sys.stderr)
+            fresh = app.get_tab_by_id(tab.tab_id)
+            if fresh is not None and fresh.current_session is not None:
+                tab = fresh
+        session = tab.current_session
+        placement["iterm_session_id"] = session.session_id if session else None
         if session is None:
             return
 
@@ -1281,10 +1312,11 @@ def spawn(*, cwd, command, seed_in_command=False, title=None, needs_submit=False
         # launch command below: `async_send_text` targets the session object
         # directly, not "the active session," so the worker tab can sit in the
         # background and still receive its launch command correctly.
-        # `order_window_front=False` keeps the window itself from being raised either.
+        # Same-window restores keep the window where it was. A tab opened in the
+        # group's window brings the original window back if focus moved there.
         if original_tab is not None and original_tab is not tab:
             try:
-                await original_tab.async_activate(order_window_front=False)
+                await original_tab.async_activate(order_window_front=opened_elsewhere)
                 placement["focus_restored"] = True
             except Exception:  # noqa: BLE001 — focus restore is best-effort, never fatal
                 placement["focus_restored"] = False
@@ -1512,7 +1544,8 @@ def main(argv=None):
 
     placement = spawn(cwd=cwd, command=command, seed_in_command=seed_in_command,
                       title=title, needs_submit=needs_submit,
-                      typed_seed=seed_prompt if needs_submit else None)
+                      typed_seed=seed_prompt if needs_submit else None,
+                      workspace_root=workspace_root)
     result.update(placement)
     emit(result)
 
