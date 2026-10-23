@@ -324,6 +324,124 @@ def harness_available(harness: str) -> bool:
     return True  # claude/codex authenticate out-of-band (subscription login)
 
 
+# Cursor's own `models` command lists every model the account can select. That
+# is wider than the plan. On 23.10.2026 X Plus (SuperGrok Lite) included the
+# auto-bucket models (Grok, Composer, …) and nothing else. Claude was selectable
+# and died on the first message: unifiedSkuLimitKind third_party_model, prepaid
+# balance empty. GetCurrentPeriodUsage.autoBucketModels is the included list.
+# GetUserPrepaidBilling.availableCents (omitted when zero) pays for the rest.
+# Checked against api2.cursor.sh on 23.10.2026.
+_CURSOR_API = "https://api2.cursor.sh"
+
+
+def _cents(value) -> int:
+    if value is None or value is False:
+        return 0
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _cursor_access_token() -> str | None:
+    """The Cursor CLI stores its access token in the macOS keychain."""
+    if sys.platform != "darwin":
+        return None
+    try:
+        out = subprocess.run(
+            ["security", "find-generic-password", "-s", "cursor-access-token",
+             "-a", "cursor-user", "-w"],
+            capture_output=True, text=True, timeout=20, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    return out.stdout.strip() or None
+
+
+def _cursor_rpc(method: str, token: str) -> dict | None:
+    req = urllib.request.Request(
+        f"{_CURSOR_API}/aiserver.v1.DashboardService/{method}",
+        data=b"{}", method="POST",
+        headers={"Authorization": f"Bearer {token}",
+                 "Content-Type": "application/json",
+                 "Connect-Protocol-Version": "1",
+                 "User-Agent": "pwc-models"})
+    try:
+        with urllib.request.urlopen(req, timeout=30, context=ssl_context()) as resp:
+            payload = json.loads(resp.read())
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def cursor_inclusion_from(usage: dict | None, prepaid: dict | None) -> dict | None:
+    """{models, prepaid_cents} or None when the plan list is missing.
+
+    An empty list is treated as 'could not read', not as 'the plan includes
+    nothing'. A failed read must not mark every Cursor model unavailable, and
+    must not mark one available either — callers leave the row alone.
+    A missing availableCents means 0. Third-party models stay off until the
+    balance is actually there.
+    """
+    if not isinstance(usage, dict) or "autoBucketModels" not in usage:
+        return None
+    raw = usage.get("autoBucketModels")
+    if not isinstance(raw, list):
+        return None
+    names = {m for m in raw if isinstance(m, str) and m}
+    if not names:
+        return None
+    cents = 0
+    if isinstance(prepaid, dict):
+        cents = _cents(prepaid.get("availableCents", 0))
+    return {"models": names, "prepaid_cents": cents}
+
+
+def cursor_plan_inclusion() -> dict | None:
+    """The plan's included models and the prepaid balance, or None if unread."""
+    token = _cursor_access_token()
+    if not token:
+        return None
+    usage = _cursor_rpc("GetCurrentPeriodUsage", token)
+    if usage is None:
+        return None
+    return cursor_inclusion_from(usage, _cursor_rpc("GetUserPrepaidBilling", token))
+
+
+def cursor_plan_allows(model: str, inclusion: dict | None) -> bool | None:
+    """True when the plan or prepaid credit covers `model`.
+
+    None means the plan list could not be read. Callers leave the stored flag
+    alone in that case. Treating 'unknown' as available is how a model the
+    plan excludes gets a task.
+    """
+    if inclusion is None:
+        return None
+    if model in inclusion.get("models", ()):
+        return True
+    return _cents(inclusion.get("prepaid_cents")) > 0
+
+
+def apply_cursor_plan(data: dict, inclusion: dict | None, *, authed: bool) -> None:
+    """Set `available` on Cursor rows from the plan. Does not touch tiers.
+
+    A logged-out harness is unavailable. A row `pwc maintain` has retired stays
+    unavailable. When the plan list could not be read, stored flags stay as
+    they are.
+    """
+    for row in data.get("models", []):
+        if row.get("harness") != "cursor-agent":
+            continue
+        if row.get("retired") or not authed:
+            row["available"] = False
+            continue
+        allowed = cursor_plan_allows(row.get("model") or "", inclusion)
+        if allowed is None:
+            continue
+        row["available"] = allowed
+
+
 # ── codex model catalog ─────────────────────────────────────────────────────────
 def _codex_model_slugs() -> set[str] | None:
     """Query codex for its currently usable model slugs.
@@ -389,6 +507,11 @@ def compute_fetch(data: dict) -> tuple[dict, list[dict]]:
     catalog = _openrouter_catalog()
     codex_slugs = _codex_model_slugs()  # None if query failed or codex not installed
     new = copy.deepcopy(data)
+    cursor_rows = any(r.get("harness") == "cursor-agent" for r in new["models"])
+    cursor_authed = harness_available("cursor-agent") if cursor_rows else False
+    # None when the plan list could not be read. Do not then mark Cursor models
+    # available just because the CLI is logged in.
+    cursor_inclusion = cursor_plan_inclusion() if cursor_authed else None
     changes = []
     for row in new["models"]:
         key = row.get("key")
@@ -411,6 +534,10 @@ def compute_fetch(data: dict) -> tuple[dict, list[dict]]:
         # codex: the binary check alone is insufficient — ChatGPT-account codex
         # silently rejects certain models the API-key variant supports. Cross-
         # reference against codex's own model catalog (the authoritative list).
+        # cursor-agent: logged-in is not enough either. The CLI lists models the
+        # plan does not pay for. Those stay unavailable until the plan includes
+        # them or prepaid credit covers them. Tiers live in the overlay, so a
+        # later fetch brings the model back without a new tier approval.
         # `retired` is set by `pwc maintain` when the harness stopped listing the
         # model. The binary being installed says nothing about that model.
         if row.get("retired"):
@@ -418,12 +545,22 @@ def compute_fetch(data: dict) -> tuple[dict, list[dict]]:
         elif harness == "codex" and codex_slugs is not None:
             avail = (shutil.which("codex") is not None
                      and row.get("model") in codex_slugs)
+        elif harness == "cursor-agent":
+            if not cursor_authed:
+                avail = False
+            else:
+                avail = cursor_plan_allows(row.get("model") or "", cursor_inclusion)
         else:
             avail = harness_available(harness)
-        if row.get("available") != avail:
-            changes.append({"key": key, "field": "available",
-                            "old": row.get("available"), "new": avail})
-            row["available"] = avail
+        if avail is None or row.get("available") == avail:
+            continue
+        change = {"key": key, "field": "available",
+                  "old": row.get("available"), "new": avail}
+        if harness == "cursor-agent" and avail is False and cursor_authed:
+            change["note"] = ("not included in the Cursor plan, and prepaid "
+                              "credit is empty")
+        changes.append(change)
+        row["available"] = avail
 
     new["fetched_at"] = now_iso()
     return new, changes

@@ -225,6 +225,14 @@ def run(*, dry_run: bool = False) -> dict:
             served[h] = names
     report["models"] = reconcile(data, served)
 
+    # Un-retiring a model marks it available. For Cursor, being listed is not
+    # the same as the plan paying for it. Re-apply the plan check so a Claude
+    # model that reappears in `cursor-agent models` does not take work.
+    if any(r.get("harness") == "cursor-agent" for r in data.get("models", [])):
+        authed = models_mod.harness_available("cursor-agent")
+        inclusion = models_mod.cursor_plan_inclusion() if authed else None
+        models_mod.apply_cursor_plan(data, inclusion, authed=authed)
+
     if not dry_run:
         models_mod.save(data)
         _save_marker({"date": date.today().isoformat(), **report})

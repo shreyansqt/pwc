@@ -74,6 +74,35 @@ def test_parse_cursor_models_skips_auto_and_heading():
     assert maintain.parse_cursor_models(lines) == {"composer-2.5", "grok-4.7-xhigh"}
 
 
+def test_maintain_keeps_unretired_cursor_model_off_the_plan(monkeypatch, tmp_path):
+    """Coming back onto `cursor-agent models` is not enough. The plan check
+    runs after un-retire, and the approved tiers stay put."""
+    import models
+    data = {"models": [{
+        "key": "cursor-agent/claude-sonnet-5-5-high", "harness": "cursor-agent",
+        "model": "claude-sonnet-5-5-high", "available": False, "retired": True,
+    }], "overlay": {"cursor-agent/claude-sonnet-5-5-high":
+                    {"tiers": {"implementation": 4}}}}
+    monkeypatch.setenv("PWC_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(models, "load_raw", lambda must_exist=False: data)
+    monkeypatch.setattr(models, "compute_fetch", lambda d: (d, []))
+    monkeypatch.setattr(maintain, "update_harnesses", lambda *a, **k: [])
+    monkeypatch.setattr(maintain, "list_models",
+                        lambda h: {"claude-sonnet-5-5-high"}
+                        if h == "cursor-agent" else None)
+    monkeypatch.setattr(models, "harness_available", lambda h: True)
+    monkeypatch.setattr(models, "cursor_plan_inclusion",
+                        lambda: {"models": {"grok-4.7-high"}, "prepaid_cents": 0})
+    saved = {}
+    monkeypatch.setattr(models, "save", lambda d: saved.update(table=d))
+    maintain.run()
+    row = saved["table"]["models"][0]
+    assert "retired" not in row
+    assert row["available"] is False
+    assert saved["table"]["overlay"]["cursor-agent/claude-sonnet-5-5-high"][
+        "tiers"] == {"implementation": 4}
+
+
 def test_cursor_discovery_adds_no_rows_but_retires_gone_ones():
     data = {"models": [{"key": "cursor-agent/old", "harness": "cursor-agent",
                         "model": "old", "available": True}]}

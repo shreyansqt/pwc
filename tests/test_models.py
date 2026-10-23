@@ -175,6 +175,101 @@ def test_freshness_custom_threshold():
     assert result["threshold_hours"] == 0.0
 
 
+def _cursor_row(model, *, available=True, tiers=None):
+    return {"key": f"cursor-agent/{model}", "harness": "cursor-agent",
+            "model": model, "catalog_id": None, "available": available,
+            "context": None, "cost_in": None, "cost_out": None,
+            "cache_read": None, "cache_write": None, "data_ok": False,
+            "tiers": dict(tiers or {})}
+
+
+def _fetch_cursor(data, inclusion, *, authed=True):
+    with mock.patch.object(models, "_openrouter_catalog", return_value=EMPTY_CATALOG), \
+         mock.patch.object(models, "_codex_model_slugs", return_value=None), \
+         mock.patch.object(models, "harness_available", return_value=authed), \
+         mock.patch.object(models, "cursor_plan_inclusion", return_value=inclusion):
+        return models.compute_fetch(data)
+
+
+def test_cursor_plan_excludes_third_party_models():
+    """Claude through Cursor stays off while the plan's bucket is Grok-only
+    and prepaid credit is empty. The approved tiers stay in the overlay."""
+    data = copy.deepcopy(SEED_DATA)
+    data["models"].extend([
+        _cursor_row("grok-4.7-high"),
+        _cursor_row("claude-sonnet-5-5-high"),
+        _cursor_row("claude-opus-5-5-high"),
+    ])
+    data["overlay"]["cursor-agent/claude-sonnet-5-5-high"] = {
+        "tiers": {"implementation": 4}, "note": "approved 21.10"}
+    data["overlay"]["cursor-agent/claude-opus-5-5-high"] = {
+        "tiers": {"implementation": 5}}
+    inclusion = {"models": {"grok-4.7-high", "composer-2.5"}, "prepaid_cents": 0}
+    new, changes = _fetch_cursor(data, inclusion)
+    rows = {m["key"]: m for m in new["models"]}
+    assert rows["cursor-agent/grok-4.7-high"]["available"] is True
+    assert rows["cursor-agent/claude-sonnet-5-5-high"]["available"] is False
+    assert rows["cursor-agent/claude-opus-5-5-high"]["available"] is False
+    assert new["overlay"]["cursor-agent/claude-sonnet-5-5-high"]["tiers"] == {
+        "implementation": 4}
+    assert new["overlay"]["cursor-agent/claude-opus-5-5-high"]["tiers"] == {
+        "implementation": 5}
+    notes = [c for c in changes if c.get("field") == "available" and c.get("note")]
+    assert {c["key"] for c in notes} == {
+        "cursor-agent/claude-sonnet-5-5-high",
+        "cursor-agent/claude-opus-5-5-high"}
+
+
+def test_cursor_prepaid_credit_brings_third_party_models_back():
+    data = {"models": [_cursor_row("claude-sonnet-5-5-high", available=False)],
+            "overlay": {"cursor-agent/claude-sonnet-5-5-high":
+                        {"tiers": {"implementation": 4}}},
+            "preferences": {}}
+    inclusion = {"models": {"grok-4.7-high"}, "prepaid_cents": 500}
+    new, _changes = _fetch_cursor(data, inclusion)
+    assert new["models"][0]["available"] is True
+    assert new["overlay"]["cursor-agent/claude-sonnet-5-5-high"]["tiers"][
+        "implementation"] == 4
+
+
+def test_cursor_plan_read_failure_does_not_mark_models_available():
+    data = {"models": [
+        _cursor_row("claude-sonnet-5-5-high", available=False),
+        _cursor_row("grok-4.7-high", available=True),
+    ], "overlay": {}, "preferences": {}}
+    new, changes = _fetch_cursor(data, None)
+    rows = {m["key"]: m for m in new["models"]}
+    assert rows["cursor-agent/claude-sonnet-5-5-high"]["available"] is False
+    assert rows["cursor-agent/grok-4.7-high"]["available"] is True
+    assert [c for c in changes if c["field"] == "available"] == []
+
+
+def test_cursor_logged_out_marks_plan_models_unavailable():
+    data = {"models": [_cursor_row("grok-4.7-high")], "overlay": {},
+            "preferences": {}}
+    new, _changes = _fetch_cursor(
+        data, {"models": {"grok-4.7-high"}, "prepaid_cents": 0}, authed=False)
+    assert new["models"][0]["available"] is False
+
+
+def test_cursor_inclusion_from_payloads():
+    inclusion = models.cursor_inclusion_from(
+        {"autoBucketModels": ["grok-4.7-high", "composer-2.5"]},
+        {"spentThisMonthCents": "814"})
+    assert inclusion == {"models": {"grok-4.7-high", "composer-2.5"},
+                         "prepaid_cents": 0}
+    assert models.cursor_plan_allows("claude-sonnet-5-5-high", inclusion) is False
+    assert models.cursor_plan_allows("grok-4.7-high", inclusion) is True
+    paid = models.cursor_inclusion_from(
+        {"autoBucketModels": ["grok-4.7-high"]},
+        {"availableCents": "500"})
+    assert models.cursor_plan_allows("claude-opus-5-5-high", paid) is True
+    assert models.cursor_inclusion_from({}, {"availableCents": "500"}) is None
+    assert models.cursor_inclusion_from(
+        {"autoBucketModels": []}, {"availableCents": "500"}) is None
+    assert models.cursor_plan_allows("grok-4.7-high", None) is None
+
+
 def test_freshness_just_under_threshold():
     ts = (_dt.datetime.now(_dt.timezone.utc)
           - _dt.timedelta(hours=models._STALE_HOURS - 0.5)
