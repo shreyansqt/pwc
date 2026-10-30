@@ -82,3 +82,33 @@ def test_no_tty_skips_grouping(tmp_path, monkeypatch):
         lambda workspace, tty: called.append((workspace, tty)))
     coord._group_coordinator_tab(str(tmp_path))
     assert called == []
+
+
+def test_machine_label_prefers_env_then_file_then_hostname(tmp_path, monkeypatch):
+    monkeypatch.setattr(coord.spawn.Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("PWC_MACHINE_NAME", raising=False)
+    monkeypatch.setattr("socket.gethostname", lambda: "box.local")
+    assert coord.spawn.machine_label() == "box"
+    (tmp_path / ".config" / "pwc").mkdir(parents=True)
+    (tmp_path / ".config" / "pwc" / "machine-name").write_text("mini\n")
+    assert coord.spawn.machine_label() == "mini"
+    monkeypatch.setenv("PWC_MACHINE_NAME", "env-name")
+    assert coord.spawn.machine_label() == "env-name"
+
+
+def test_coord_default_name_is_machine_pwc_workspace(tmp_path, monkeypatch, capsys):
+    ws = tmp_path / "home-admin"
+    ws.mkdir()
+    monkeypatch.setenv("PWC_MACHINE_NAME", "mini")
+    monkeypatch.setattr(coord.models, "harness_available", lambda harness: True)
+    monkeypatch.setattr(coord, "pick_model", lambda harness: ("opus", "because"))
+    assert coord.main(["--workspace", str(ws), "--print-command"]) == 0
+    assert "--name 'mini · PWC · home-admin'" in capsys.readouterr().out
+
+
+def test_claude_worker_session_name_carries_machine_prefix(monkeypatch):
+    monkeypatch.setenv("PWC_MACHINE_NAME", "mini")
+    _mode, args, _sid = coord.spawn._build_claude(
+        session_id="abc", resume=False, cwd="/tmp", seed_prompt=None,
+        model="sonnet", title="gh-ghar-13")
+    assert args[args.index("--name") + 1] == "mini · gh-ghar-13"

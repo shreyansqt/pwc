@@ -114,7 +114,31 @@ def transcript_path(cwd: str, session_id: str) -> Path:
             / session_slug(cwd) / f"{session_id}.jsonl")
 
 
-def _build_claude(*, session_id, resume, cwd, seed_prompt, model):
+def machine_label() -> str:
+    """Short name of THIS machine, shown in Claude session and tab names so that
+    sessions from several machines can be told apart in the Claude app.
+
+    Order: env PWC_MACHINE_NAME, then the first line of ~/.config/pwc/machine-name
+    (for example "🖥️ mini"), then the short hostname."""
+    env = os.environ.get("PWC_MACHINE_NAME", "").strip()
+    if env:
+        return env
+    try:
+        line = (Path.home() / ".config" / "pwc" / "machine-name").read_text(encoding="utf-8").splitlines()[0].strip()
+        if line:
+            return line
+    except (OSError, IndexError):
+        pass
+    import socket
+    return socket.gethostname().split(".")[0]
+
+
+def session_name(title: str | None) -> str | None:
+    """`<machine> · <title>`, the Claude session name for a worker."""
+    return f"{machine_label()} · {title}" if title else None
+
+
+def _build_claude(*, session_id, resume, cwd, seed_prompt, model, title=None):
     """The fully-supported harness. On a FRESH spawn the seed is passed as
     `claude`'s positional prompt argument, so claude ingests it as the first user
     message and starts working immediately — reliably, with no TUI timing race.
@@ -144,6 +168,9 @@ def _build_claude(*, session_id, resume, cwd, seed_prompt, model):
     args = ["claude"]
     if model:
         args += ["--model", model]
+    name = session_name(title)
+    if name:
+        args += ["--name", name]
     mode = "fresh"
     if resume:
         # An explicit --resume that cannot find its transcript must FAIL, not
@@ -813,7 +840,9 @@ def build_command(*, harness, session_id, resume, cwd, seed_prompt=None,
     builder, session_tracked, needs_submit = _BUILDERS[harness]
     kwargs = dict(session_id=session_id, resume=resume, cwd=cwd,
                   seed_prompt=seed_prompt, model=model)
-    if harness in ("opencode", "codex"):
+    if harness == "claude":
+        kwargs.update(title=title)
+    elif harness in ("opencode", "codex"):
         kwargs.update(title=title, dry_run=dry_run)
     elif harness in ("agy", "cursor-agent"):
         kwargs.update(dry_run=dry_run)

@@ -51,7 +51,7 @@ import spawn
 COORD_DOMAINS = ("research-writing", "ops-comms")
 
 DEFAULT_HARNESS = "claude"
-DEFAULT_NAME = "PWC coordinator"
+DEFAULT_NAME = "PWC"   # shown as "<machine> · PWC · <workspace>"
 DEFAULT_PROMPT = "/pwc-show-work"
 
 
@@ -163,7 +163,7 @@ def main(argv=None):
                     help=f"harness to run the coordinator on (default: {DEFAULT_HARNESS})")
     ap.add_argument("--model", help="override the table-derived coordinator model")
     ap.add_argument("--workspace", help="where to run (default: cwd)")
-    ap.add_argument("--name", default=DEFAULT_NAME, help=f"session display name (default: {DEFAULT_NAME!r})")
+    ap.add_argument("--name", help="session display name (default: '<machine> · PWC · <workspace>')")
     ap.add_argument("--prompt", default=DEFAULT_PROMPT,
                     help=f"seed prompt (default: {DEFAULT_PROMPT!r}; empty string for none)")
     ap.add_argument("--print-command", action="store_true",
@@ -181,6 +181,8 @@ def main(argv=None):
         model, why = pick_model(harness)
 
     cwd = resolve_workspace(args.workspace)
+    if not args.name:
+        args.name = f"{spawn.machine_label()} · {DEFAULT_NAME} · {Path(cwd).name}"
     argv_out = build(harness, model=model, cwd=cwd, name=args.name, prompt=args.prompt)
     title = spawn.tab_title(name=args.name, task=args.name, harness=harness, model=model)
 
