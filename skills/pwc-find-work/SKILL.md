@@ -19,10 +19,12 @@ substantial task execution.
 
 On startup:
 
-1. **Rename this tab** so it is visually unmistakable:
-   ```
-   printf '\033]0;PWC coordinator\007'
-   ```
+1. **The tab title is already set — do nothing.** `pwc coord` titles the tab at
+   launch (`<machine> · PWC · <workspace>`) and passes the same name to the
+   harness (`--name`). Do **not** retitle the tab from inside this session: a
+   session cannot title its own tab, and a `printf '\033]0;…\007'` here is
+   swallowed as tool output. If the title is wrong or missing, this session was
+   started by hand; relaunch it with `pwc coord [claude|codex|opencode]`.
 2. **Verify the coordinator model from PWC's model table.** Run
    `pwc models show --available` and derive the strongest available coordinator model
    for this session's harness from the table's current capability data. Do not

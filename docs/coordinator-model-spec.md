@@ -22,7 +22,7 @@ directory, the *command* is the trigger, not the location. On becoming coordinat
 the session must:
 
 - **Adopt the coordinator identity + rules** in this spec (a preamble in both skills).
-- **Rename its own iTerm tab to `PWC coordinator`** so it's visually unmistakable
+- **Its iTerm tab is titled by `pwc coord` at launch** (`<machine> · PWC · <workspace>`, changed 2026-10-30; the skills no longer retitle it) so it's visually unmistakable
   among many tabs. (Concrete action run on skill startup.)
 - **Check its model** (see #5) and warn if it's not the best available for its harness.
 
