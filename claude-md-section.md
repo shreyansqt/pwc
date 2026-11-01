@@ -10,8 +10,9 @@ This workspace uses **PWC** to track in-flight work. Tasks live in a local datab
 - `/pwc-pick-work` — suggest what to do next.
 - `/pwc-start-work` — act on a task: spawn a worker (own tab) or handle it inline.
 - `/pwc-report-status` — record where a task stands.
+- `/pwc-retitle` — restore this session's name and tab title (e.g. after `/restart`). Any session can run it.
 
 To see where your work stands, run `/pwc-show-work`. If you were spawned as a worker
 on a specific task, just do that task — the PWC commands are for coordinating work,
-not for a worker to run.
+not for a worker to run (except `/pwc-retitle`, which any session may run).
 <!-- PWC:END -->

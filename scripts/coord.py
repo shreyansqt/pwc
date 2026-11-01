@@ -182,7 +182,8 @@ def main(argv=None):
 
     cwd = resolve_workspace(args.workspace)
     if not args.name:
-        args.name = f"{spawn.machine_label()} · {DEFAULT_NAME} · {Path(cwd).name}"
+        import retitle
+        args.name = retitle.coordinator_name(cwd)
     argv_out = build(harness, model=model, cwd=cwd, name=args.name, prompt=args.prompt)
     title = spawn.tab_title(name=args.name, task=args.name, harness=harness, model=model)
 
