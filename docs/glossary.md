@@ -123,6 +123,11 @@ done / note) back to the task database. (Workers usually run the underlying
 `taskdb.py log-event` command directly, since the skill isn't on their path from a
 repo — see the dispatch notes.)
 
+**`/pwc-done`** — A worker's closing step, `pwc done`: final `done` event with the
+outcome, closes the paired GitHub issue, sets the task `done`, then closes the worker's
+iTerm2 tab (ending the session, whatever the harness). The tab closes last, and only if
+the work is committed and pushed and every earlier step succeeded.
+
 ## Behaviors / mechanisms (mostly inside `/pwc-show-work`)
 
 **Inline (handling)** — The coordinator doing a trivial task *itself* in its own

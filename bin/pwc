@@ -20,6 +20,7 @@ scripts are grouped under a named subcommand:
   pwc coord [claude|codex|opencode] ...                          -> coord.py
   pwc spawn --task <id> --cwd <dir> ...                          -> spawn.py
   pwc retitle [--task ID] [--print]                              -> retitle.py
+  pwc done --task <id> --outcome "..." [--ref T=V]                -> done.py
   pwc worker-status --session-ids <uuid,...> | --json -          -> worker_status.py
 """
 
@@ -56,6 +57,8 @@ other:
   pwc resume [--task ID] [--restart] [--dry-run]
   pwc continue [--restart] [--dry-run]
   pwc retitle [--task ID] [--workspace DIR] [--print]
+  pwc done --task <id> --outcome "..." [--ref TYPE=VALUE] [--skip-git-check]
+            [--no-close-tab] [--delay N] [--dry-run]
   pwc worker-status --session-ids <uuid,...> | --json -
 
 The workspace is discovered from the cwd (nearest .pwc/ up the tree);
@@ -160,6 +163,11 @@ def main(argv):
     elif cmd == "spawn":
         import spawn
         spawn.main(rest)
+    elif cmd == "done":
+        import done
+        if ws is not None:
+            rest = ["--workspace", ws, *rest]
+        raise SystemExit(done.main(rest))
     elif cmd == "retitle":
         import retitle
         if ws is not None:

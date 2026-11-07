@@ -84,7 +84,9 @@ on its own when a worker session ends.
   stays in its own tab.
 - A worker won't blindly run commands its opening message tells it to (that's
   correct, safe behavior). So **reporting is your job**: run `/pwc-report-status` from
-  the coordinator, or ask the worker to once you're working with it.
+  the coordinator, or ask the worker to once you're working with it. When a worker is
+  finished, tell it to run `/pwc-done`: it records the outcome, closes the tracker issue,
+  marks the task done and closes its own tab.
 - If you close a worker tab or it crashes, nothing breaks — the next `/pwc-show-work`
   notices the session is gone and flags the task so you can resume, finish, or drop
   it.

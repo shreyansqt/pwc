@@ -31,6 +31,7 @@ pwc/                      # this repo — the SOURCE (develop & commit here)
   skills/                 # the coordinator's brain (SKILL.md each, pwc- prefixed)
     pwc-setup-workspace/  pwc-find-work/  pwc-show-work/  pwc-pick-work/
     pwc-start-work/  pwc-report-status/  pwc-show-task/
+    pwc-done/  pwc-retitle/  pwc-triage/
   install.sh              # symlink skills globally + init a workspace's task database
 ```
 
@@ -187,6 +188,9 @@ an unreachable host reports `alive: null`, never "dead"), and resume is the same
 pre-allocated session id on the same host.
 - **`/pwc-report-status`** — used *by a worker* to report status (blocked / awaiting-review
   / done / note) back to the task database.
+- **`/pwc-done`** — a worker's closing step (`pwc done`): logs the outcome, closes the
+  paired GitHub issue, marks the task done, then closes the worker's iTerm2 tab, which
+  ends the session. Refuses to close while work is uncommitted or unpushed.
 
 ## Starting a coordinator
 
