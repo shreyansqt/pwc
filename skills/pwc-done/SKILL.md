@@ -1,6 +1,6 @@
 ---
 name: pwc-done
-description: A worker's closing step, for finished work (done) or work you are stopping on (blocked/paused). Use whenever Shreyans wants to wrap up the session and close the tab.  Records the outcome on its PWC task, closes the paired tracker issue (done only), then ends the session and closes the iTerm2 tab.
+description: A worker's closing step, for finished work (done) or work you are stopping on (blocked/paused). Use whenever Shreyans wants to wrap up the session and close the tab. Records the outcome on its PWC task, closes the paired tracker issue (done only), then ends the session and closes the iTerm2 tab.
 ---
 
 # /pwc-done
