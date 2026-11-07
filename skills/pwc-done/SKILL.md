@@ -1,6 +1,6 @@
 ---
 name: pwc-done
-description: A worker's closing step. Records the final outcome on its PWC task, closes the paired tracker issue, marks the task done, then ends the session and closes its iTerm2 tab. Run by a worker (any harness) when its work is finished, committed and pushed.
+description: A worker's closing step, for finished work (done) or work you are stopping on (blocked/paused). Use whenever Shreyans wants to wrap up the session and close the tab.  Records the outcome on its PWC task, closes the paired tracker issue (done only), then ends the session and closes the iTerm2 tab.
 ---
 
 # /pwc-done
@@ -9,8 +9,14 @@ Run this **in a worker session, once the work is finished**. It replaces the man
 `/pwc-report-status` done + closing the issue + closing the tab. Closing the tab is the
 last thing it does, and only if everything before it worked.
 
-Not for the coordinator, and not for blocked or paused work: use `/pwc-report-status`
-(`blocked` / `note`) for those. A closed tab is not coming back.
+Not for the coordinator. Two end states:
+- **Finished:** the default. Marks the task `done` and closes the tracker issue.
+- **Stopping without finishing** (blocked on someone, paused, reached a conclusion that
+  needs a decision): add `--blocked` and put what it waits on in `--outcome`. Marks the
+  task `blocked`, leaves the tracker issue open, still closes the tab. If you only want
+  to log status and keep the session, use `/pwc-report-status` instead.
+
+A closed tab is not coming back.
 
 ## Steps
 
@@ -26,6 +32,7 @@ Not for the coordinator, and not for blocked or paused work: use `/pwc-report-st
    pwc done --task <id> --outcome "<one line: what shipped / was decided>" \
      [--ref pr=<url>] [--ref commit=<sha>]
    ```
+   For blocked/paused: `pwc done --task <id> --blocked --outcome "waiting on <X>"`.
    `--dry-run` checks and reports without changing anything. `--no-close-tab` records
    everything but keeps the session.
 4. **Read the JSON.** It lists each tracker issue (`closed` / `already-closed`), the

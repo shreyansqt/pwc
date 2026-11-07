@@ -23,6 +23,7 @@ normal path; session lookup is only the fallback.
 
 Usage:
   pwc done --task ID --outcome "what shipped" [--ref TYPE=VALUE ...]
+  pwc done --task ID --blocked --outcome "waiting on X / paused, resume later"
            [--skip-git-check] [--no-close-tab] [--delay N] [--dry-run]
 """
 
@@ -179,6 +180,9 @@ def main(argv=None) -> int:
     ap.add_argument("--outcome", required=True, help="one line: what shipped / was decided")
     ap.add_argument("--ref", action="append", default=[], metavar="TYPE=VALUE",
                     help="final working ref to attach, e.g. commit=abc123 (repeatable)")
+    ap.add_argument("--blocked", action="store_true",
+                    help="end the session without finishing: status blocked, tracker issue "
+                         "left open, --outcome says what it is waiting on / why paused")
     ap.add_argument("--skip-git-check", action="store_true")
     ap.add_argument("--no-close-tab", action="store_true", help="record only; keep the session")
     ap.add_argument("--delay", type=float, default=4.0, help="seconds before the tab closes")
@@ -197,7 +201,7 @@ def main(argv=None) -> int:
             fail("work is not safely recorded, so not closing: " + "; ".join(problems)
                  + " (commit/push, or pass --skip-git-check)")
 
-    issues = tracker_issues(detail)
+    issues = [] if args.blocked else tracker_issues(detail)
     report = {"task": task, "issues": {f"{r}#{n}": "would-close" for r, n in issues}}
     if args.dry_run:
         report["tab"] = "dry-run"
@@ -213,9 +217,10 @@ def main(argv=None) -> int:
     for repo, num in issues:
         report["issues"][f"{repo}#{num}"] = close_issue(repo, num, args.outcome)
 
-    pwc(["log-event", "--task", task, "--source", "worker", "--kind", "done",
-         "--detail", args.outcome, "--set-status", "done"], ws)
-    report["status"] = "done"
+    status = "blocked" if args.blocked else "done"
+    pwc(["log-event", "--task", task, "--source", "worker", "--kind", status,
+         "--detail", args.outcome, "--set-status", status], ws)
+    report["status"] = status
 
     if args.no_close_tab:
         report["tab"] = "kept (--no-close-tab)"
