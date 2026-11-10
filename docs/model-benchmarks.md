@@ -343,11 +343,11 @@ No ReviewBench, CWE-bench, SWE-bench, CursorBench, or ARC-AGI number for gpt-6.1
 
 Compared with gpt-6.1-sol at the effort each model will actually launch with.
 
-- **Implementation.** Terra high is a step behind Sol medium on Terminal-Bench 4.0 (41.9 vs 48.0) and ahead on FrontierCode 2.0 (37.5 vs 33.4). Sol's current tier is 5. **Proposed: 4.**
-- **Code review.** At high, Bug Hunt is 9.7/105 against Sol medium's 29. The drop is not noise: the same model at max scores 40.7, close to Sol max at 44.3, and the bench says the high run stops early. Sol's current tier is 5. **Proposed: 2.** Terra should not take review work while it launches at high.
-- **Research-writing.** Index 42 vs 46, Briefcase 1264 vs 1360, HLE-Diamond 35.4 vs 46.0, Omniscience 28 vs 40. Sol's current tier is 4. **Proposed: 3.**
-- **Ops-comms.** No instruction-following score. Omniscience is the factual proxy and Terra is well behind (28 vs 40). Sol's current tier is 4. **Proposed: 3.**
+- **Implementation.** Terra high is a step behind Sol medium on Terminal-Bench 4.0 (41.9 vs 48.0) and ahead on FrontierCode 2.0 (37.5 vs 33.4). Sol's current tier is 5. **Tier: 4.**
+- **Code review.** At high, Bug Hunt is 9.7/105 against Sol medium's 29. The drop is not noise: the same model at max scores 40.7, close to Sol max at 44.3, and the bench says the high run stops early. Sol's current tier is 5. **Tier: 2.** Terra does not take review work while it launches at high.
+- **Research-writing.** Index 42 vs 46, Briefcase 1264 vs 1360, HLE-Diamond 35.4 vs 46.0, Omniscience 28 vs 40. Sol's current tier is 4. **Tier: 3.**
+- **Ops-comms.** No instruction-following score. Omniscience is the factual proxy and Terra is well behind (28 vs 40). Sol's current tier is 4. **Tier: 3.**
 
-These four numbers are a proposal. They are not in the model table. Shreyans approves tiers before they are written.
+Shreyans approved these four tiers on 10.11.2026. They are in the model-table overlay.
 
 Both models sit on the ChatGPT plan, and the router picks the cheaper model that still clears the tier. Terra at $1/$5 against Sol at $2/$10 means a shared tier would send every qualifying task to Terra. The step down is what leaves the harder work on Sol.
