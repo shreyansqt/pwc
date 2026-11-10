@@ -252,6 +252,82 @@ def test_cursor_logged_out_marks_plan_models_unavailable():
     assert new["models"][0]["available"] is False
 
 
+def test_catalog_id_matches_one_openrouter_id_and_refuses_a_tie():
+    catalog = {
+        "openai/gpt-6.1-terra": {},
+        "openai/gpt-6.1-sol": {},
+        "other/gpt-6.1-sol": {},
+    }
+    assert models.catalog_id_for("gpt-6.1-terra", catalog) == "openai/gpt-6.1-terra"
+    assert models.catalog_id_for("gpt-6.1-sol", catalog) is None
+    assert models.catalog_id_for("missing", catalog) is None
+    assert models.catalog_id_for(None, catalog) is None
+
+
+def test_fetch_prices_a_row_that_had_no_catalog_id():
+    data = {"version": 1, "fetched_at": None, "overlay": {}, "preferences": {},
+            "models": [{
+                "key": "codex/gpt-6.1-terra", "harness": "codex",
+                "model": "gpt-6.1-terra", "catalog_id": None, "available": True,
+                "context": None, "cost_in": None, "cost_out": None,
+                "cache_read": None, "cache_write": None, "data_ok": False,
+                "tiers": {},
+            }, {
+                "key": "codex/already", "harness": "codex", "model": "already",
+                "catalog_id": "openai/already", "available": True, "context": 1,
+                "cost_in": 9.0, "cost_out": 9.0, "cache_read": 9.0,
+                "cache_write": 9.0, "data_ok": False, "tiers": {},
+            }]}
+    catalog = {
+        "openai/gpt-6.1-terra": {
+            "cost_in": 1.0, "cost_out": 5.0, "cache_read": 0.05,
+            "cache_write": 1.25, "context": 1_050_000,
+        },
+        "openai/already": {
+            "cost_in": 9.0, "cost_out": 9.0, "cache_read": 9.0,
+            "cache_write": 9.0, "context": 1,
+        },
+        "vendor/ambiguous": {},
+        "other/ambiguous": {},
+    }
+    data["models"].append({
+        "key": "codex/ambiguous", "harness": "codex", "model": "ambiguous",
+        "catalog_id": None, "available": True, "context": None,
+        "cost_in": None, "cost_out": None, "cache_read": None,
+        "cache_write": None, "data_ok": False, "tiers": {},
+    })
+    with mock.patch.object(models, "_openrouter_catalog", return_value=catalog), \
+         mock.patch.object(models, "_codex_model_slugs", return_value={"gpt-6.1-terra", "already", "ambiguous"}), \
+         mock.patch("shutil.which", return_value="/usr/bin/codex"):
+        new, changes = models.compute_fetch(data)
+    rows = {m["key"]: m for m in new["models"]}
+    assert rows["codex/gpt-6.1-terra"]["catalog_id"] == "openai/gpt-6.1-terra"
+    assert rows["codex/gpt-6.1-terra"]["cost_in"] == 1.0
+    assert rows["codex/gpt-6.1-terra"]["cost_out"] == 5.0
+    assert rows["codex/gpt-6.1-terra"]["context"] == 1_050_000
+    assert rows["codex/already"]["catalog_id"] == "openai/already"
+    assert rows["codex/ambiguous"]["catalog_id"] is None
+    assert rows["codex/ambiguous"]["cost_in"] is None
+    filled = [c for c in changes if c["field"] == "catalog_id" and c["new"]]
+    assert filled == [{"key": "codex/gpt-6.1-terra", "field": "catalog_id",
+                       "old": None, "new": "openai/gpt-6.1-terra"}]
+
+
+def test_effort_overlay_is_merged_and_fetch_does_not_own_it():
+    data = copy.deepcopy(SEED_DATA)
+    data["overlay"]["codex/gpt-5.5"] = {"effort": "medium", "note": "kept"}
+    merged = {m["key"]: m for m in models.merged_models(data)}
+    assert merged["codex/gpt-5.5"]["effort"] == "medium"
+    assert "effort" not in merged["claude/opus-5"]
+    with mock.patch.object(models, "_openrouter_catalog", return_value=EMPTY_CATALOG), \
+         mock.patch.object(models, "_codex_model_slugs", return_value=CODEX_SLUGS), \
+         mock.patch("shutil.which", return_value="/usr/bin/codex"):
+        new, _ = models.compute_fetch(data)
+    raw = next(m for m in new["models"] if m["key"] == "codex/gpt-5.5")
+    assert "effort" not in raw
+    assert new["overlay"]["codex/gpt-5.5"]["effort"] == "medium"
+
+
 def test_cursor_inclusion_from_payloads():
     inclusion = models.cursor_inclusion_from(
         {"autoBucketModels": ["grok-4.7-high", "composer-2.5"]},

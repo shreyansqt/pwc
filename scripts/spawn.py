@@ -33,10 +33,15 @@ Harnesses (`--harness`, default claude):
               launches `codex resume <uuid> '<seed>'` — resume
               accepts a positional prompt and -m/--model, and the uuid in argv
               gives pgrep liveness. The positional prompt auto-submits (verified
-              2026-08-31 on v0.151.0). PWC workers also pass
+              2026-08-31 on v0.151.0).               PWC workers also pass
               `-c sandbox_workspace_write.network_access=true` (supported by
               codex-cli 0.145.0) so hub-backed workspace calls can reach their
               task store without changing the user's global Codex sandbox policy.
+              When the model row carries an effort, the same launch passes
+              `-c model_reasoning_effort="<level>"` (codex-cli 0.167.0; the level
+              is a config override and must precede the `resume` subcommand).
+              Resume uses that flag too. Other harnesses can read the same
+              field later; only Codex applies it today.
               Like opencode, the id is MINTED HERE on a fresh spawn — record the
               RETURNED session_id.
 Verify a new harness's flags on first real use and update its builder here.
@@ -470,8 +475,28 @@ def _preallocate_codex_session(cwd: str, title: str, model: str | None) -> str:
     return sid
 
 
+# `codex debug models` on codex-cli 0.167.0 (2026-11-10). gpt-6.1-sol and
+# gpt-6.1-terra both list every one of these. Some older slugs omit `ultra`.
+# Codex's own default for those two models is `low`, so a missing flag is not
+# "whatever the table says".
+CODEX_REASONING_EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
+
+
+def _codex_effort_args(effort: str | None) -> list[str]:
+    """`-c model_reasoning_effort=...` or nothing. The value is a TOML string,
+    same shape as the CLI's own `-c model="o3"` example. Global `-c` flags have
+    to precede the `resume` subcommand."""
+    if not effort:
+        return []
+    if effort not in CODEX_REASONING_EFFORTS:
+        fail(f"codex effort {effort!r} is not one of "
+             f"{', '.join(CODEX_REASONING_EFFORTS)} "
+             f"(codex-cli 0.167.0, `codex debug models`)")
+    return ["-c", f'model_reasoning_effort="{effort}"']
+
+
 def _build_codex(*, session_id, resume, cwd, seed_prompt, model,
-                 title=None, dry_run=False):
+                 title=None, dry_run=False, effort=None):
     """Session-tracked like claude/opencode, same inverted id flow as opencode.
 
     Codex mints the uuid and PWC primes it before a fresh spawn. Both fresh and
@@ -500,6 +525,7 @@ def _build_codex(*, session_id, resume, cwd, seed_prompt, model,
     # spawned workers rather than requiring users to loosen ~/.codex/config.toml.
     # codex-cli 0.145.0 supports config overrides via -c.
     args = [codex_bin, "-c", "sandbox_workspace_write.network_access=true",
+            *_codex_effort_args(effort),
             "resume", session_id]
     if model:
         args += ["--model", model]
@@ -829,7 +855,7 @@ def build_remote_claude_command(*, ssh_target, session_id, resume, cwd,
 
 
 def build_command(*, harness, session_id, resume, cwd, seed_prompt=None,
-                  model=None, title=None, dry_run=False):
+                  model=None, title=None, dry_run=False, effort=None):
     """Return (mode, launch_command, session_id, session_tracked, needs_submit) for
     the task's harness. `session_id` in the result is the EFFECTIVE id (opencode mints
     its own on a fresh spawn — record that one), or None for untracked harnesses.
@@ -844,6 +870,8 @@ def build_command(*, harness, session_id, resume, cwd, seed_prompt=None,
         kwargs.update(title=title)
     elif harness in ("opencode", "codex"):
         kwargs.update(title=title, dry_run=dry_run)
+        if harness == "codex":
+            kwargs["effort"] = effort
     elif harness in ("agy", "cursor-agent"):
         kwargs.update(dry_run=dry_run)
     mode, args, effective_id = builder(**kwargs)
@@ -1002,6 +1030,37 @@ def runner_from_detail(detail: str | None) -> tuple[str, str] | None:
     return None
 
 
+def routed_detail(decision: dict) -> str:
+    """The `routed` event line. Effort sits after the dash so `harness/model`
+    stays the first token and `runner_from_detail` can still parse it."""
+    why = decision.get("why") or ""
+    if decision.get("effort"):
+        why = f"effort={decision['effort']}; {why}" if why else f"effort={decision['effort']}"
+    return f"{decision['harness']}/{decision['model']} — {why}"
+
+
+def effort_for(harness: str | None, model: str | None) -> str | None:
+    """The model's launch effort from the merged table, or None.
+
+    A missing table must not stop a pinned spawn: the flag is omitted and the
+    harness keeps its own default.
+    """
+    if not harness or not model:
+        return None
+    import models as models_mod
+    try:
+        rows = models_mod.table().get("models") or []
+    except SystemExit:
+        return None
+    for row in rows:
+        if row.get("harness") == harness and row.get("model") == model:
+            value = row.get("effort")
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+            return None
+    return None
+
+
 def runner_from_events(events: list[dict]) -> tuple[str, str] | None:
     """The harness that actually ran, from the timeline.
 
@@ -1087,8 +1146,7 @@ def resolve_routing(args, task_row, workspace_root):
                                 workspace_root=workspace_root)
     if not args.dry_run:
         _log_task_event(workspace_root, task_id, "routed",
-                        f"{decision['harness']}/{decision['model']} — "
-                        f"{decision['why']}")
+                        routed_detail(decision))
     args._route_decision = decision
     return decision["harness"], decision["model"]
 
@@ -1490,6 +1548,7 @@ def main(argv=None):
         import maintain
         maintain.run_if_due()
     harness, model = resolve_routing(args, task_row, workspace_root)
+    effort = effort_for(harness, model)
 
     session_id = args.session_id or str(uuid.uuid4())
 
@@ -1517,6 +1576,7 @@ def main(argv=None):
             harness=harness, session_id=session_id, resume=args.resume,
             cwd=cwd, seed_prompt=seed_prompt, model=model,
             title=args.name or args.task, dry_run=args.dry_run,
+            effort=effort,
         )
     # The seed rides in the launch command as the harness's prompt argument
     # (auto-submitted) on BOTH a fresh spawn and a resume-with-follow-up — the only
@@ -1543,9 +1603,13 @@ def main(argv=None):
         "mode": mode,
         "command": command,
     }
+    if effort:
+        result["effort"] = effort
     decision = getattr(args, "_route_decision", None)
     if decision:
         result["routed"] = {"why": decision["why"], "quota": decision.get("quota")}
+        if decision.get("effort"):
+            result["routed"]["effort"] = decision["effort"]
     if args.ssh:
         result["runhost"] = args.runhost or args.ssh
         result["ssh"] = args.ssh

@@ -103,6 +103,36 @@ def test_maintain_keeps_unretired_cursor_model_off_the_plan(monkeypatch, tmp_pat
         "tiers"] == {"implementation": 4}
 
 
+def test_discovered_model_is_priced_in_the_same_run(monkeypatch, tmp_path):
+    """A model maintain has never seen gets its OpenRouter id and its price
+    before this run returns. The next day's fetch is not required."""
+    import models
+    data = {"version": 1, "models": [], "overlay": {}, "preferences": {}}
+    monkeypatch.setenv("PWC_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(models, "load_raw", lambda must_exist=False: data)
+    monkeypatch.setattr(maintain, "update_harnesses", lambda *a, **k: [])
+    monkeypatch.setattr(maintain, "list_models",
+                        lambda h: {"gpt-6.1-terra"} if h == "codex" else None)
+    monkeypatch.setattr(models, "_openrouter_catalog", lambda: {
+        "openai/gpt-6.1-terra": {
+            "cost_in": 1.0, "cost_out": 5.0, "cache_read": 0.05,
+            "cache_write": 1.25, "context": 1_050_000,
+        },
+    })
+    monkeypatch.setattr(models, "_codex_model_slugs", lambda: {"gpt-6.1-terra"})
+    monkeypatch.setattr(models, "harness_available", lambda h: True)
+    saved = {}
+    monkeypatch.setattr(models, "save", lambda d: saved.update(table=d))
+    maintain.run()
+    row = next(r for r in saved["table"]["models"] if r["key"] == "codex/gpt-6.1-terra")
+    assert row["catalog_id"] == "openai/gpt-6.1-terra"
+    assert row["cost_in"] == 1.0
+    assert row["cost_out"] == 5.0
+    assert row["context"] == 1_050_000
+    assert row["needs_tiers"] is True
+    assert row["tiers"] == {}
+
+
 def test_cursor_discovery_adds_no_rows_but_retires_gone_ones():
     data = {"models": [{"key": "cursor-agent/old", "harness": "cursor-agent",
                         "model": "old", "available": True}]}

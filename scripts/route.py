@@ -463,6 +463,8 @@ def route(profile: dict, table: dict, *, now: datetime | None = None,
         ],
         "rejected": rejected,
     }
+    if pick.get("effort"):
+        result["effort"] = pick["effort"]
     if pick["cost_weight"] != 1.0:
         result["cost_weight_applied"] = pick["cost_weight"]
     if preference_result:

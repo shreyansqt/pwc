@@ -794,6 +794,58 @@ def test_resume_session_harness_beats_a_later_force_note(ws):
     assert json.loads(out)["harness"] == "agy"
 
 
+def test_routed_detail_records_effort_without_breaking_the_parser():
+    detail = spawn_module.routed_detail({
+        "harness": "codex", "model": "gpt-6.1-terra", "effort": "high",
+        "why": "cheapest implementation model at tier >= 4",
+    })
+    assert detail.startswith("codex/gpt-6.1-terra — effort=high; ")
+    assert spawn_module.runner_from_detail(detail) == ("codex", "gpt-6.1-terra")
+
+
+def test_codex_launch_passes_reasoning_effort_on_fresh_and_resume():
+    mode, args, _sid = spawn_module._build_codex(
+        session_id="sid", resume=False, cwd="/tmp", seed_prompt="go",
+        model="gpt-6.1-sol", dry_run=True, effort="medium")
+    assert mode == "fresh"
+    assert args[1:5] == ["-c", "sandbox_workspace_write.network_access=true",
+                         "-c", 'model_reasoning_effort="medium"']
+    assert args[5] == "resume"
+    _mode, resume_args, _sid = spawn_module._build_codex(
+        session_id="sid", resume=True, cwd="/tmp", seed_prompt=None,
+        model="gpt-6.1-terra", dry_run=True, effort="high")
+    assert 'model_reasoning_effort="high"' in resume_args
+    assert resume_args.index('model_reasoning_effort="high"') < resume_args.index("resume")
+
+
+def test_codex_rejects_an_unknown_effort(capsys):
+    with pytest.raises(SystemExit):
+        spawn_module._codex_effort_args("banana")
+    assert "banana" in capsys.readouterr().err
+
+
+def test_spawn_passes_table_effort_on_resume(ws, tmp_path):
+    table = {
+        "version": 1, "fetched_at": "2026-11-10T00:00:00Z",
+        "models": [_row("codex/gpt-6.1-terra", "codex", "gpt-6.1-terra")],
+        "overlay": {"codex/gpt-6.1-terra": {"effort": "high"}},
+        "preferences": {},
+    }
+    env = _routing_env(tmp_path, table["models"])
+    # _routing_env writes an empty overlay; replace it with the effort.
+    Path(env["PWC_MODEL_TABLE"]).write_text(json.dumps(table))
+    ws.add_task("terra", harness="codex", model="gpt-6.1-terra")
+    sid = "11111111-2222-3333-4444-555555555555"
+    rc, out, err = _run_env(env, str(SPAWN), "--task", "terra",
+                            "--cwd", str(ws.root / "workdir"), "--dry-run",
+                            "--session-id", sid, "--resume")
+    assert rc == 0, err
+    result = json.loads(out)
+    assert result["effort"] == "high"
+    assert 'model_reasoning_effort="high"' in result["command"]
+    assert result["mode"] == "resume"
+
+
 def test_model_with_slashes_parses_as_one_model():
     assert spawn_module.runner_from_detail(
         "opencode/openrouter/z-ai/glm-5.2 — cheap and enough"

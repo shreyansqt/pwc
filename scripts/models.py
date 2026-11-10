@@ -26,6 +26,11 @@ Three kinds of input, and the split is the whole design:
     for each domain. Preferences live in a separate top-level `preferences` object.
     They are taste, not model facts, capability claims, or synthetic prices.
 
+  LAUNCH SETTING (yours, NEVER fetched) — `effort` on the overlay. How hard this
+    model should think when a harness starts it. Not a price, not a capability
+    tier, and not a preference for which model to pick. `merged_models` copies it
+    onto the row so route and spawn can read it. Only Codex consumes it today.
+
 Every model is priced at its API RACK RATE — there is deliberately no
 subscription/"it's free, I already pay for it" column. Claude and Codex ride
 subscriptions today, but pricing them at zero would make the router maximize the
@@ -53,6 +58,7 @@ Usage:
   models.py set-tier --key K --domain D --tier N [--note "..."]   # write an overlay correction
   models.py set-preference --domain D --key K --strength 0-100
                            [--expires-at RFC3339] [--note "..."]
+  models.py set-effort --key K --effort LEVEL   # launch setting, overlay
 
 All output is JSON on stdout; diagnostics on stderr; exit 1 on error.
 """
@@ -253,6 +259,8 @@ def merged_models(data: dict) -> list[dict]:
             row["available"] = ov["available"]
         if ov.get("data_ok") is not None:
             row["data_ok"] = ov["data_ok"]
+        if ov.get("effort"):
+            row["effort"] = ov["effort"]
         row["cost_weight"] = float(ov.get("cost_weight", 1.0))
         out.append(row)
     return out
@@ -465,6 +473,21 @@ def _codex_model_slugs() -> set[str] | None:
 
 
 # ── fetch: refresh the objective columns ──────────────────────────────────────
+def catalog_id_for(model: str | None, catalog: dict) -> str | None:
+    """The OpenRouter id whose last segment equals the harness model slug.
+
+    One match is the join key `pwc models fetch` prices on. Zero matches, or
+    more than one, is no match: guessing would price the wrong model. A row
+    `pwc maintain` discovers has no catalog id until this runs.
+    """
+    if not model or not catalog:
+        return None
+    hits = [cid for cid in catalog if cid.rsplit("/", 1)[-1] == model]
+    if len(hits) == 1:
+        return hits[0]
+    return None
+
+
 def _openrouter_catalog() -> dict[str, dict]:
     """{catalog_id: {cost_in, cost_out, cache_read, cache_write, context}} from
     OpenRouter's free, unauthenticated catalog. Prices there are USD PER TOKEN as
@@ -516,6 +539,15 @@ def compute_fetch(data: dict) -> tuple[dict, list[dict]]:
     for row in new["models"]:
         key = row.get("key")
         harness = row.get("harness", "")
+
+        # A discovered row starts with catalog_id null. Fill a unique OpenRouter
+        # match before pricing, or fetch can never price that model.
+        if not row.get("catalog_id"):
+            matched = catalog_id_for(row.get("model"), catalog)
+            if matched:
+                changes.append({"key": key, "field": "catalog_id", "old": None,
+                                "new": matched})
+                row["catalog_id"] = matched
 
         # objective columns from the catalog
         entry = catalog.get(row.get("catalog_id"))
@@ -689,6 +721,28 @@ def cmd_clear_weight(args):
     emit({"key": args.key, "old": old, "cost_weight": None, "overlay": ov})
 
 
+def cmd_set_effort(args):
+    """Store how hard a harness should think when it launches this model.
+
+    Lands in the overlay, so a refresh cannot clear it. The value is a launch
+    setting, not a capability tier. Codex reads it as model_reasoning_effort;
+    other harnesses can read the same field later.
+    """
+    effort = (args.effort or "").strip()
+    if not effort:
+        fail("effort must be a non-empty level, for example medium or high")
+    data = load_raw()
+    if not any(m.get("key") == args.key for m in data["models"]):
+        known = ", ".join(m.get("key", "?") for m in data["models"])
+        fail(f"unknown model key {args.key!r} — known: {known}")
+    ov = data.setdefault("overlay", {}).setdefault(args.key, {})
+    old = ov.get("effort")
+    ov["effort"] = effort
+    ov["updated_at"] = now_iso()
+    save(data)
+    emit({"key": args.key, "old": old, "effort": effort, "overlay": ov})
+
+
 def cmd_set_preference(args):
     """Record user taste separately from model facts and capability calibration."""
     if not 0 <= args.strength <= 100:
@@ -755,6 +809,13 @@ def main(argv=None):
     s = sub.add_parser("clear-weight", help="remove a cost weight from the overlay")
     s.add_argument("--key", required=True)
     s.set_defaults(func=cmd_clear_weight)
+
+    s = sub.add_parser("set-effort",
+                       help="store a launch effort level in the overlay")
+    s.add_argument("--key", required=True)
+    s.add_argument("--effort", required=True,
+                   help="level the harness should think at, e.g. medium or high")
+    s.set_defaults(func=cmd_set_effort)
 
     s = sub.add_parser("set-preference", help="prefer one qualified model for a domain")
     s.add_argument("--domain", required=True, choices=DOMAINS)

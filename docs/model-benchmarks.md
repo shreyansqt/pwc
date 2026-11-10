@@ -268,3 +268,86 @@ Suggested reading of the evidence:
 - **Aider Polyglot:** no 2026 data found.
 - **MRCR:** vendor numbers only (gpt-6-astra, gpt-5.5).
 - **Relayed AA numbers** (Coding Index, GPQA, IFBench): BenchLM does not give the effort setting. A direct read of each AA model page would confirm it.
+
+---
+
+## Addendum: gpt-6.1-terra (collected 2026-11-10)
+
+The 13.10.2026 tables above are unchanged. Artificial Analysis has since moved the Intelligence Index from v4.3.2 to v5.0.1, so a v5 index number is not comparable to the AA-II column in those tables. Terminal-Bench 4.0 and Bug Hunt Bench are the same tests as before. Cells below use the same "(I)" / "(V)" marks. An empty cell means I found no number. I did not guess.
+
+PWC will launch this model at **high** effort, and gpt-6.1-sol at **medium**. The comparison that matches those settings is the one that matters for tiers. Max-effort numbers are included because Bug Hunt changes sharply with effort.
+
+### Same-page comparison, the efforts PWC will launch
+
+Direct read, 2026-11-10: [GPT-6.1 Terra (High) vs GPT-6.1 Sol (Medium)](https://artificialanalysis.ai/models/comparisons/gpt-6-1-terra-high-vs-gpt-6-1-sol-medium). Artificial Analysis Intelligence Index v5.0.1. Both columns are independent (I).
+
+| | gpt-6.1-terra (high) | gpt-6.1-sol (medium) |
+|---|---|---|
+| Intelligence Index v5.0.1 | 42 | 46 |
+| Terminal-Bench 4.0 | 41.9 | 48.0 |
+| FrontierCode 2.0 | 37.5 | 33.4 |
+| AA-Briefcase v1.1 (Elo) | 1264 | 1360 |
+| AA-Omniscience v1.1 | 28 | 40 |
+| HLE-Diamond | 35.4 | 46.0 |
+| CritPt v2 hard subset | 61.5 | 67.0 |
+| AutomationBench-AA | 58.5 | 62.6 |
+| Terminal-Bench-Science 0.1 | 33.3 | 37.1 |
+| Input / output USD per Mtok | 1.00 / 5.00 | 2.00 / 10.00 |
+| Context | 1M | 1M |
+
+Sol at medium leads on eight of the nine index parts. Terra at high leads on FrontierCode 2.0 only (37.5 vs 33.4).
+
+### Other efforts, so the high-effort row is not mistaken for the ceiling
+
+Direct reads, 2026-11-10, same index v5.0.1.
+
+| Model (effort) | Index | TB4 | Briefcase | Omniscience | Source |
+|---|---|---|---|---|---|
+| gpt-6.1-terra (max) | 51 | 55.6 | 1403 | 30 | [Terra max vs Sol max](https://artificialanalysis.ai/models/comparisons/gpt-6-1-terra-vs-gpt-6-1-sol) (I) |
+| gpt-6.1-sol (max) | 55 | 56.1 | 1555 | 42 | same page (I) |
+| gpt-6.1-terra (medium) | 38 | 32.3 | 1190 | 27 | [Terra max vs Terra medium](https://artificialanalysis.ai/models/comparisons/gpt-6-1-terra-vs-gpt-6-1-terra-medium) (I) |
+| gpt-6.1-terra (low) | 29 | — | — | — | [AA release page](https://artificialanalysis.ai/models/releases/gpt-6-1-terra) (I). TB4 for low was not on that page. |
+| gpt-6.1-terra (xhigh) | 45 | — | — | — | same release page (I) |
+
+The release page lists index only for low and xhigh. I did not fill the other cells from a different effort.
+
+AA's 26.10.2026 article says the Coding Agent Index v2.0 is 48 for Terra and 54 for Sol, and does not name the effort on that 48. It says the xhigh and low settings sit on the cost frontier and the others sit behind it. [Article](https://artificialanalysis.ai/articles/gpt-6-1-terra-pushes-the-cost-efficiency-frontier) (I). Cache write on that page is $1.25 per million tokens (I). I did not put 48 into a table cell as if it were the high-effort score.
+
+### Vendor
+
+OpenAI, [Introducing GPT-6.1 Terra](https://openai.com/index/introducing-gpt-6-1-terra/), read 2026-11-10 (V):
+
+- Terminal-Bench 4.0 at max effort: 50.3. GPT-5.6 Terra's published score on the same test: 21.5. OpenAI says Sol and Astra remain the better choice for the most complex coding tasks.
+- API price: $1 input, $0.05 cached input, $5 output, per million tokens. The page does not state cache-write price or the context window.
+- Internal error-rate benchmark at max effort: 4.3, "nearly matching" Astra and Sol. At low effort: 16.7, down from 53.6 for GPT-5.6 Terra. No independent copy of this test.
+- Agents' Last Exam, MMMU-Pro, OSWorld 2.1: the page describes the direction (higher than GPT-5.6 Terra, on par with Astra at medium on Agents' Last Exam) and does not give the percentages. Those cells stay empty.
+
+### Code review
+
+Bug Hunt Bench public data, retrieved 2026-11-10 from https://bughunt.productcompass.pm/data/benchmark.json (I). The file's `meta.updated` is 2026-11-10. Scores are planted bugs fixed out of 105, Codex CLI, means of the non-superseded rows. The board's own note on Terra below max: the runs finished cleanly and the model stopped early (about 1.5k reasoning tokens at high, against about 36k at max).
+
+| Model (effort) | Bug Hunt (fixes / 105) |
+|---|---|
+| gpt-6.1-terra (max) | 40.7 (mean of 3; runs 34, 42, 46; range 12) |
+| gpt-6.1-terra (xhigh) | 11.3 (mean of 3) |
+| gpt-6.1-terra (high) | 9.7 (mean of 3; runs 11, 8, 10) |
+| gpt-6.1-terra (medium) | 7.3 (mean of 3) |
+| gpt-6.1-terra (low) | 6.0 (mean of 3) |
+| gpt-6.1-sol (medium) | 29.0 (mean of 2) |
+| gpt-6.1-sol (high) | 36.5 (mean of 2) |
+| gpt-6.1-sol (max) | 44.3 (mean of 3) |
+
+No ReviewBench, CWE-bench, SWE-bench, CursorBench, or ARC-AGI number for gpt-6.1-terra turned up as a measured score. A BenchLM-style aggregator page listed many estimated scores; I did not use those.
+
+### Where this sits, and the tiers I would set
+
+Compared with gpt-6.1-sol at the effort each model will actually launch with.
+
+- **Implementation.** Terra high is a step behind Sol medium on Terminal-Bench 4.0 (41.9 vs 48.0) and ahead on FrontierCode 2.0 (37.5 vs 33.4). Sol's current tier is 5. **Proposed: 4.**
+- **Code review.** At high, Bug Hunt is 9.7/105 against Sol medium's 29. The drop is not noise: the same model at max scores 40.7, close to Sol max at 44.3, and the bench says the high run stops early. Sol's current tier is 5. **Proposed: 2.** Terra should not take review work while it launches at high.
+- **Research-writing.** Index 42 vs 46, Briefcase 1264 vs 1360, HLE-Diamond 35.4 vs 46.0, Omniscience 28 vs 40. Sol's current tier is 4. **Proposed: 3.**
+- **Ops-comms.** No instruction-following score. Omniscience is the factual proxy and Terra is well behind (28 vs 40). Sol's current tier is 4. **Proposed: 3.**
+
+These four numbers are a proposal. They are not in the model table. Shreyans approves tiers before they are written.
+
+Both models sit on the ChatGPT plan, and the router picks the cheaper model that still clears the tier. Terra at $1/$5 against Sol at $2/$10 means a shared tier would send every qualifying task to Terra. The step down is what leaves the harder work on Sol.

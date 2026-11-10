@@ -44,6 +44,14 @@ def _profile(domain=DOMAIN, reasoning=3, verifiability=3, risk="none", context_n
 
 
 # ── 1. cheapest model clearing the required tier wins ──────────────────────────
+def test_effort_is_reported_with_the_decision():
+    chosen = _model("chosen")
+    chosen["effort"] = "high"
+    result = route(_profile(), _table(chosen))
+    assert result["effort"] == "high"
+    assert result["key"] == "chosen"
+
+
 def test_cheapest_wins():
     cheap = _model("cheap", cost_in=1.0, cost_out=5.0, cache_read=1.0, cache_write=1.0)
     pricey = _model("pricey", cost_in=2.0, cost_out=10.0, cache_read=2.0, cache_write=2.0)

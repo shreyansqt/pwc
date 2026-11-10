@@ -13,7 +13,10 @@ first spawn of each local day. It does three jobs:
      - a model the table does not know gets a row with `needs_tiers: true` and no
        tiers. Route rejects a model with no tier, so a new model never takes work
        before Shreyans sets its tiers (`pwc models set-tier`). /pwc-show-work lists
-       these rows so the gap is visible.
+       these rows so the gap is visible. The row is born with no catalog id. The
+       price refresh that follows assigns one when OpenRouter has exactly one id
+       whose last segment is the model slug, then prices it. A later refresh does
+       the same for a row that was discovered earlier and still has no id.
      - a row whose model the harness no longer lists is set `available: false`.
      Harnesses that cannot list models (claude: aliases only) are left alone.
 
@@ -210,20 +213,21 @@ def run(*, dry_run: bool = False) -> dict:
                         if r.get("harness")} | set(UPDATE_COMMANDS))
     report = {"at": now_iso(), "updates": update_harnesses(harnesses, dry_run=dry_run)}
 
-    # Prices first: `compute_fetch` also re-derives `available` from the installed
-    # binary, which would re-enable a model that discovery retires below.
-    try:
-        data, price_changes = models_mod.compute_fetch(data)
-        report["price_changes"] = len(price_changes)
-    except SystemExit:
-        report["price_changes"] = "refresh failed (offline?)"
-
+    # Discovery before prices. A new row is born with no catalog id; the fetch
+    # below fills a unique OpenRouter match and prices it in this same run.
+    # Fetch leaves a retired row unavailable, so retiring first is not undone.
     served = {}
     for h in harnesses:
         names = list_models(h)
         if names:  # None = cannot say; empty = probably logged out, so do not retire
             served[h] = names
     report["models"] = reconcile(data, served)
+
+    try:
+        data, price_changes = models_mod.compute_fetch(data)
+        report["price_changes"] = len(price_changes)
+    except SystemExit:
+        report["price_changes"] = "refresh failed (offline?)"
 
     # Un-retiring a model marks it available. For Cursor, being listed is not
     # the same as the plan paying for it. Re-apply the plan check so a Claude

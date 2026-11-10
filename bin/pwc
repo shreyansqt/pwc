@@ -12,7 +12,7 @@ scripts are grouped under a named subcommand:
 
   pwc summary | detail | events | add-task | update-task | ...   -> taskdb.py
   pwc sources show | enabled | set | skill-hints | claim | priority      -> sources.py
-  pwc models show | stale | fetch | seed | set-tier | set-preference -> models.py
+  pwc models show | stale | fetch | seed | set-tier | set-effort | set-preference -> models.py
   pwc route --task <id> --domain <d> --reasoning <n> ...         -> route.py
   pwc quota show | mark-empty | clear-mark                       -> quota.py
   pwc maintain run | status                                      -> maintain.py
@@ -43,7 +43,7 @@ task database (see `pwc <command> -h` for each):
 
 other:
   pwc sources <show|enabled|set|skill-hints|claim|priority> [args]
-  pwc models <show|stale|fetch|seed|set-tier|set-preference> [args]
+  pwc models <show|stale|fetch|seed|set-tier|set-effort|set-preference> [args]
   pwc route --task <id>
             --domain <code-review|implementation|research-writing|ops-comms>
             --reasoning <1-5> [--verifiability <1-5>] [--risk none|outward|prod-data]

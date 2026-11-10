@@ -292,12 +292,15 @@ On startup:
      and `runhost` (all in `summary`). Since 13.10.2026 `pwc spawn` picks the harness at
      spawn time, so a task without a pin has no `harness` in `summary`; for a
      dispatched one, read the harness/model of its newest session (`pwc sessions
-     --task <id>`). Render as `harness/model@runhost`, collapsing
+     --task <id>`).      Render as `harness/model@runhost`, collapsing
      what's absent: `harness/model`, `harness/model@runhost`, `harness` when no model is
      set, and `—` when the task has no harness yet (never dispatched). Keep it terse —
      it's a column, not a sentence; shorten provider-qualified model ids to their final
      path segment. Do not hard-code model names in this skill; render the values carried
-     by `summary`.
+     by `summary`. When that harness and model have an `effort` on `pwc models show`
+     (one call for the whole board; match harness plus the dispatch model), append it
+     in parentheses: `codex/gpt-6.1-sol (medium)`. The newest `routed` event records
+     the same level as `effort=<level>` after the dash.
 
      Show it because the answer is no longer obvious: tasks now route to different
      models by cost (a p3 research task on a cheap model, a hard review on a strong
