@@ -44,11 +44,12 @@ _SAFE_ID = re.compile(r"^[A-Za-z0-9_-]+$")
 # exit 2 when more than one directory slugs to the same transcript folder.
 # PWC_DECODE_ROOT overrides the walk root (tests); production walks `/`.
 _FIND_CLAUDE_CWD = r"""
-import os, sys
+import os, re, sys
 from pathlib import Path
 
 def session_slug(cwd):
-    return str(Path(cwd).resolve()).replace("/", "-")
+    # Same rule as spawn.session_slug: every non-alphanumeric character -> "-".
+    return re.sub(r"[^A-Za-z0-9]", "-", str(Path(cwd).resolve()))
 
 def walk(directory, rest):
     if not rest:
@@ -61,7 +62,8 @@ def walk(directory, rest):
     for child in children:
         if not child.is_dir():
             continue
-        name = child.name
+        # Compare the ENCODED name: Claude Code writes `_playground` as `-playground`.
+        name = re.sub(r"[^A-Za-z0-9]", "-", child.name)
         if rest == name:
             found.append(child)
         elif rest.startswith(name + "-"):

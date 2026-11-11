@@ -98,10 +98,12 @@ already has its process context.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shlex
 import shutil
+import subprocess
 import sys
 import uuid
 from pathlib import Path
@@ -110,8 +112,12 @@ from _common import emit, fail, find_workspace_root, now_iso
 
 
 def session_slug(cwd: str) -> str:
-    """Claude Code's transcript dir name for a cwd (literal path, / -> -)."""
-    return str(Path(cwd).resolve()).replace("/", "-")
+    """Claude Code's transcript dir name for a cwd.
+
+    Claude Code replaces every character that is not a letter or a digit with
+    "-", not only "/". So `_playground` becomes `-playground` (seen 11.11.2026).
+    """
+    return re.sub(r"[^A-Za-z0-9]", "-", str(Path(cwd).resolve()))
 
 
 def transcript_path(cwd: str, session_id: str) -> Path:
@@ -1470,6 +1476,111 @@ def spawn(*, cwd, command, seed_in_command=False, title=None, needs_submit=False
     return placement
 
 
+# ── Orca launcher ─────────────────────────────────────────────────────────────
+#
+# Orca (stablyai/orca) is an alternative to iTerm2 as the place where a worker
+# runs. Its desktop app shows the sessions, and its phone app reaches every
+# harness, not only Claude. See docs/orchestrator-comparison.md.
+#
+# PWC still builds the launch command, so routing, session ids, resume and cost
+# tracking do not change. Orca only hosts the terminal: `orca terminal create`
+# opens a tab in an Orca workspace and runs the command there.
+
+LAUNCHERS = ("iterm2", "orca")
+
+
+def workspace_launcher(workspace_root: str) -> str:
+    """The workspace's default launcher, from <workspace>/.pwc/launcher.json.
+
+    The file holds {"launcher": "iterm2" | "orca"}. An absent file means iterm2,
+    so every workspace keeps today's behaviour until it opts in.
+    """
+    path = Path(workspace_root) / ".pwc" / "launcher.json"
+    if not path.is_file():
+        return "iterm2"
+    try:
+        value = json.loads(path.read_text()).get("launcher", "iterm2")
+    except (OSError, ValueError, AttributeError) as e:
+        fail(f"cannot read {path}: {e}")
+    if value not in LAUNCHERS:
+        fail(f"{path}: launcher must be one of {', '.join(LAUNCHERS)}, got {value!r}")
+    return value
+
+
+def _orca(args: list[str], *, what: str) -> dict:
+    """Run one `orca … --json` command and return its `result`, or fail."""
+    if shutil.which("orca") is None:
+        fail("the orca CLI is not installed (brew install --cask stablyai/orca/orca)")
+    proc = subprocess.run(["orca", *args, "--json"], capture_output=True, text=True)
+    try:
+        reply = json.loads(proc.stdout)
+    except ValueError:
+        fail(f"orca {what} failed: {(proc.stderr or proc.stdout).strip()[:400]}")
+    if not reply.get("ok"):
+        err = reply.get("error") or {}
+        fail(f"orca {what} failed: {err.get('message') or err}")
+    return reply.get("result") or {}
+
+
+def orca_workspace_for(cwd: str) -> str:
+    """The path of the Orca workspace that contains `cwd`.
+
+    Orca opens terminals only inside a workspace it knows: a git project, a
+    worktree, or a folder workspace. This walks up from `cwd` and returns the
+    first directory that Orca knows. The launch command still starts with
+    `cd <cwd>`, so the worker runs in `cwd` itself.
+
+    PWC does not register new projects by itself, because they appear in
+    Shreyans' Orca sidebar. It fails and says how to add one.
+    """
+    probe = Path(cwd)
+    for candidate in (probe, *probe.parents):
+        proc = subprocess.run(
+            ["orca", "worktree", "show", "--worktree", f"path:{candidate}", "--json"],
+            capture_output=True, text=True)
+        try:
+            if json.loads(proc.stdout).get("ok"):
+                return str(candidate)
+        except ValueError:
+            pass
+    fail(f"no Orca workspace contains {cwd}. Add the repository or folder in "
+         f"Orca first (in the app, or `orca repo add <dir>`, or "
+         f"`orca repo add --kind folder <dir>`), then spawn again.")
+
+
+def spawn_orca(*, cwd, command, seed_in_command=False, title=None):
+    """Open the worker in a new Orca terminal tab. Returns placement.
+
+    The launch command goes into a small script file, and Orca runs only
+    `sh <file>`. The reason: Orca types `--command` into the tab's shell, and a
+    seed prompt is often several KB long. A terminal line buffer can cut long
+    typed input at 1024 bytes (the iTerm2 path had this bug, see
+    _wait_for_shell_prompt). The script deletes itself when it starts.
+
+    The tab opens in the background (no --focus), as the iTerm2 tabs do.
+    """
+    if shutil.which("orca") is None:
+        fail("the orca CLI is not installed (brew install --cask stablyai/orca/orca)")
+    workspace = orca_workspace_for(cwd)
+    launch_dir = Path.home() / ".pwc" / "launch"
+    launch_dir.mkdir(parents=True, exist_ok=True)
+    script = launch_dir / f"{uuid.uuid4()}.sh"
+    script.write_text(f'rm -f "$0"\n{command}\n')
+    args = ["terminal", "create", "--worktree", f"path:{workspace}",
+            "--command", f"sh {shlex.quote(str(script))}"]
+    if title:
+        args += ["--title", title]
+    result = _orca(args, what="terminal create")
+    terminal = result.get("terminal") or result
+    return {
+        "launcher": "orca",
+        "orca_workspace": workspace,
+        "orca_terminal": terminal.get("handle"),
+        "orca_tab": terminal.get("tabId"),
+        "seed": "submitted" if seed_in_command else "skipped",
+    }
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="spawn.py", description=__doc__)
     p.add_argument("--task", required=True)
@@ -1502,6 +1613,9 @@ def main(argv=None):
     p.add_argument("--name")
     p.add_argument("--dry-run", action="store_true",
                    help="print the command without opening a tab (for testing)")
+    p.add_argument("--launcher", choices=LAUNCHERS,
+                   help="where the worker runs: iterm2 or orca. Default: the "
+                        "workspace's .pwc/launcher.json, else iterm2")
     args = p.parse_args(argv)
 
     cwd = str(Path(args.cwd).expanduser())
@@ -1630,8 +1744,27 @@ def main(argv=None):
             f"question and send the seed only after it. Answer it in the new tab.")
         print(f"pwc: WARNING — {result['warning']}", file=sys.stderr)
 
+    launcher = args.launcher or workspace_launcher(workspace_root)
+    if launcher == "orca":
+        if args.ssh:
+            fail("--ssh and the orca launcher do not combine yet. A worker on "
+                 "another Mac goes through a paired Orca server instead "
+                 "(not built yet). Use --launcher iterm2 for --ssh.")
+        if needs_submit:
+            fail(f"the {harness} harness needs its seed typed into its TUI, and "
+                 f"the orca launcher cannot do that yet. Use --launcher iterm2.")
+    result["launcher"] = launcher
+
     if args.dry_run:
         result["dry_run"] = True
+        if launcher == "orca":
+            result["orca_workspace"] = orca_workspace_for(cwd)
+        emit(result)
+        return
+
+    if launcher == "orca":
+        result.update(spawn_orca(cwd=cwd, command=command,
+                                 seed_in_command=seed_in_command, title=title))
         emit(result)
         return
 
