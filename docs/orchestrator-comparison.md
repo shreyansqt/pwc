@@ -34,10 +34,17 @@ facts again before a decision that depends on them.*
   (keys pinned in the pairing QR code). Push notification text is not (Orca issue
   #25462), and the relay servers are in the US and Hong Kong. Keep this in mind for
   smarta work; see [`data-handling.md`](data-handling.md).
+- **T3 Code trial (started 11.11.2026):** Shreyans wants both tools tested in
+  real use. side-projects uses T3 Code (`.pwc/launcher.json` = `t3`), and smarta
+  uses Orca. PWC's `t3` launcher starts a worker with `t3 thread start` and
+  records it as `t3:<thread id>`. The first test thread answered on the Claude
+  subscription through the Agent SDK, without a "Credit balance is too low"
+  error. Known gaps: the t3 CLI cannot stop or archive a thread (archive by hand
+  in the app), PWC cannot pass the reasoning effort, `pwc cost` cannot price T3
+  threads, and T3 Connect is not end-to-end encrypted.
 - **Still open:**
-  - the phone test (pairing, dictation, notifications);
-  - a T3 Code trial, so that both tools are tested in real use before the task
-    closes;
+  - the phone test (pairing, dictation, notifications), for Orca and T3 Code;
+  - the decision between Orca and T3 Code after the trial;
   - the board page on the hub ([pwc #21](https://github.com/shreyansqt/pwc/issues/21)
     (hub web app: a board UI for PWC tasks)).
 

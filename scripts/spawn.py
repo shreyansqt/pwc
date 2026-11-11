@@ -1486,13 +1486,13 @@ def spawn(*, cwd, command, seed_in_command=False, title=None, needs_submit=False
 # tracking do not change. Orca only hosts the terminal: `orca terminal create`
 # opens a tab in an Orca workspace and runs the command there.
 
-LAUNCHERS = ("iterm2", "orca")
+LAUNCHERS = ("iterm2", "orca", "t3")
 
 
 def workspace_launcher(workspace_root: str) -> str:
     """The workspace's default launcher, from <workspace>/.pwc/launcher.json.
 
-    The file holds {"launcher": "iterm2" | "orca"}. An absent file means iterm2,
+    The file holds {"launcher": "iterm2" | "orca" | "t3"}. An absent file means iterm2,
     so every workspace keeps today's behaviour until it opts in.
     """
     path = Path(workspace_root) / ".pwc" / "launcher.json"
@@ -1581,6 +1581,118 @@ def spawn_orca(*, cwd, command, seed_in_command=False, title=None):
     }
 
 
+# ── T3 Code launcher ──────────────────────────────────────────────────────────
+#
+# T3 Code (pingdotgg/t3code) runs each harness through its own interface
+# (`codex app-server`, the Claude Agent SDK, the Cursor SDK) and shows the work
+# as a chat thread in its desktop, web and phone apps. There is no terminal.
+# So PWC does not build a launch command here. It asks the running T3 server to
+# start a thread: `t3 thread start <cwd> - --provider … --model …`, with the
+# seed prompt on stdin.
+#
+# PWC records the worker as `t3:<thread id>`. The thread id is not a process,
+# so `pwc worker-status` asks `t3 thread show` instead of pgrep. A resume sends
+# the new seed into the same thread (`t3 thread send`). `pwc done` cannot stop
+# or archive a thread, because the t3 CLI has no command for it; Shreyans
+# archives it in the app.
+
+T3_PREFIX = "t3:"
+
+# PWC harness -> T3 provider instance id. T3's default instance id is the
+# driver name (packages/contracts/src/providerInstance.ts).
+T3_PROVIDERS = {
+    "claude": "claudeAgent",
+    "codex": "codex",
+    "cursor-agent": "cursor",
+    "opencode": "opencode",
+    "grok": "grok",
+    "agy": "antigravity",
+}
+
+
+def _t3(args: list[str], *, what: str, stdin: str | None = None) -> str:
+    """Run one `t3 …` command and return its stdout, or fail."""
+    if shutil.which("t3") is None:
+        fail("the t3 CLI is not installed (curl -fsSL https://t3.codes/install.sh | sh)")
+    proc = subprocess.run(["t3", *args], input=stdin, capture_output=True, text=True)
+    if proc.returncode != 0:
+        lines = [l for l in (proc.stderr or proc.stdout).splitlines()
+                 if not l.lstrip().startswith("at ")]
+        fail(f"t3 {what} failed: {' '.join(lines).strip()[:400]}")
+    return proc.stdout
+
+
+def t3_model(harness: str, model: str | None) -> str | None:
+    """T3's model slug for a PWC model. Claude needs a mapping: PWC routes to
+    the aliases `opus`, `sonnet`, `haiku` and `fable`, and T3 wants a full id
+    such as `claude-sonnet-5-5`. The current id comes from T3's own model
+    manifest. Other harnesses use the same names in PWC and in T3."""
+    if not model or harness != "claude" or model.startswith("claude-"):
+        return model
+    manifest = Path.home() / ".t3" / "userdata" / "model-manifest.json"
+    try:
+        current = json.loads(manifest.read_text())["manifest"]["currentModels"]["claudeAgent"]
+    except (OSError, ValueError, KeyError):
+        current = []
+    for slug in current:
+        if f"-{model}-" in slug or slug.endswith(f"-{model}"):
+            return slug
+    fail(f"no T3 Claude model matches the PWC alias {model!r} "
+         f"(T3 lists: {', '.join(current) or 'nothing'})")
+
+
+def ensure_t3_project(cwd: str) -> bool:
+    """Make `cwd` a T3 project, so the thread runs in that folder. T3 runs a
+    thread in its project's root, so a parent-folder project is not enough.
+    Returns True when this call added the project."""
+    if shutil.which("t3") is None:
+        fail("the t3 CLI is not installed (curl -fsSL https://t3.codes/install.sh | sh)")
+    proc = subprocess.run(["t3", "project", "add", cwd], capture_output=True, text=True)
+    if proc.returncode == 0:
+        return True
+    if "ProjectAlreadyExistsError" in (proc.stderr + proc.stdout):
+        return False
+    fail(f"t3 project add {cwd} failed: {(proc.stderr or proc.stdout).strip()[:400]}")
+
+
+def spawn_t3(*, cwd, harness, model, seed_prompt, title, resume_thread=None):
+    """Start (or resume) the worker as a T3 Code thread. Returns placement."""
+    if not seed_prompt:
+        fail("the t3 launcher needs a seed prompt: a T3 thread starts with a message")
+    if resume_thread:
+        _t3(["thread", "send", resume_thread, "-"], what="thread send", stdin=seed_prompt)
+        return {"launcher": "t3", "t3_thread": resume_thread, "seed": "submitted",
+                "session_id": T3_PREFIX + resume_thread}
+    provider = T3_PROVIDERS.get(harness)
+    if provider is None:
+        fail(f"the t3 launcher has no provider for the {harness!r} harness")
+    added = ensure_t3_project(cwd)
+    args = ["thread", "start", cwd, "-", "--json"]
+    if title:
+        args += ["--title", title]
+    slug = t3_model(harness, model)
+    if slug:
+        args += ["--provider", provider, "--model", slug]
+    out = _t3(args, what="thread start", stdin=seed_prompt)
+    try:
+        launched = json.loads(out)
+    except ValueError:
+        fail(f"t3 thread start returned no JSON: {out.strip()[:200]}")
+    thread = launched.get("threadId")
+    if not thread:
+        fail(f"t3 thread start returned no thread id: {out.strip()[:200]}")
+    return {
+        "launcher": "t3",
+        "t3_thread": thread,
+        "t3_run": launched.get("runId"),
+        "t3_provider": provider,
+        "t3_model": slug,
+        "t3_project_added": added,
+        "seed": "submitted",
+        "session_id": T3_PREFIX + thread,
+    }
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="spawn.py", description=__doc__)
     p.add_argument("--task", required=True)
@@ -1614,7 +1726,7 @@ def main(argv=None):
     p.add_argument("--dry-run", action="store_true",
                    help="print the command without opening a tab (for testing)")
     p.add_argument("--launcher", choices=LAUNCHERS,
-                   help="where the worker runs: iterm2 or orca. Default: the "
+                   help="where the worker runs: iterm2, orca or t3. Default: the "
                         "workspace's .pwc/launcher.json, else iterm2")
     args = p.parse_args(argv)
 
@@ -1665,6 +1777,12 @@ def main(argv=None):
     effort = effort_for(harness, model)
 
     session_id = args.session_id or str(uuid.uuid4())
+
+    launcher = args.launcher or workspace_launcher(workspace_root)
+    if launcher == "t3":
+        _main_t3(args, harness=harness, model=model, effort=effort, cwd=cwd,
+                 seed_prompt=seed_prompt)
+        return
 
     if args.ssh:
         # Remote worker: cwd is a REMOTE path — validate remotely, build ssh+tmux.
@@ -1744,7 +1862,6 @@ def main(argv=None):
             f"question and send the seed only after it. Answer it in the new tab.")
         print(f"pwc: WARNING — {result['warning']}", file=sys.stderr)
 
-    launcher = args.launcher or workspace_launcher(workspace_root)
     if launcher == "orca":
         if args.ssh:
             fail("--ssh and the orca launcher do not combine yet. A worker on "
@@ -1773,6 +1890,45 @@ def main(argv=None):
                       typed_seed=seed_prompt if needs_submit else None,
                       workspace_root=workspace_root)
     result.update(placement)
+    emit(result)
+
+
+def _main_t3(args, *, harness, model, effort, cwd, seed_prompt):
+    """The t3 launcher half of main(): no launch command, a T3 thread instead."""
+    if args.ssh:
+        fail("--ssh and the t3 launcher do not combine. T3 reaches other Macs "
+             "through its own linked environments (not built in PWC yet). "
+             "Use --launcher iterm2 for --ssh.")
+    resume_thread = None
+    if args.resume:
+        if not (args.session_id or "").startswith(T3_PREFIX):
+            fail(f"the task's session {args.session_id!r} is not a T3 thread, so "
+                 f"the t3 launcher cannot resume it. Use --launcher iterm2 or orca.")
+        resume_thread = args.session_id[len(T3_PREFIX):]
+    title = tab_title(name=args.name, task=args.task, harness=harness, model=model)
+    result = {
+        "harness": harness,
+        "model": model,
+        "tab_title": title,
+        "cwd": cwd,
+        "launcher": "t3",
+        "session_tracked": True,
+    }
+    if effort:
+        # `t3 thread start` has no effort flag. T3 uses the model's default.
+        result["effort_not_applied"] = effort
+    decision = getattr(args, "_route_decision", None)
+    if decision:
+        result["routed"] = {"why": decision["why"], "quota": decision.get("quota")}
+    if args.dry_run:
+        result.update(dry_run=True, t3_provider=T3_PROVIDERS.get(harness),
+                      t3_model=t3_model(harness, model),
+                      session_id=args.session_id if resume_thread else None)
+        emit(result)
+        return
+    result.update(spawn_t3(cwd=cwd, harness=harness, model=model,
+                           seed_prompt=seed_prompt, title=title,
+                           resume_thread=resume_thread))
     emit(result)
 
 

@@ -38,6 +38,8 @@ A closed tab is not coming back.
 4. **Read the JSON.** It lists each tracker issue (`closed` / `already-closed`), the
    status, and the tab (`scheduled in 4s`, or `skipped: ...` for a remote `--ssh`
    worker or a terminal that is neither Orca nor iTerm2, where you tell Shreyans to close it himself).
+   A T3 Code worker has no tab: the t3 CLI cannot stop or archive a thread, so tell
+   Shreyans to archive the thread in the T3 app.
 5. **Say goodbye in one line, then stop.** The tab closes a few seconds later and takes
    the session with it. Don't start more work.
 

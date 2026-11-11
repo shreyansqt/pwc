@@ -33,6 +33,17 @@ of the way.
     `--launcher iterm2` for them;
   - Shreyans can see and drive the worker from the Orca phone app.
 
+  `{"launcher": "t3"}` starts the worker as a **T3 Code thread** instead of a
+  tab (`t3 thread start`). With T3:
+  - spawn adds the worker's folder as a T3 project when it is missing;
+  - the session id is `t3:<thread id>`. Record it with `pwc set-session` as
+    usual. `pwc worker-status` asks T3 for it, and `--resume` sends the seed
+    into the same thread;
+  - a seed prompt is required, and `--ssh` is refused;
+  - the reasoning effort is not passed (the t3 CLI has no flag for it);
+  - `pwc done` cannot stop or archive the thread. Shreyans archives it in the
+    T3 app.
+
 ## Tools
 
 - `pwc detail --task <id>` — the task's fields, refs, and

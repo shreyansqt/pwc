@@ -90,6 +90,10 @@ Three parts:
   Put `{"launcher": "orca"}` in `<workspace>/.pwc/launcher.json`, and add the
   workspace folder as a project in Orca. Then `pwc spawn` opens workers as Orca
   tabs, which the Orca phone app can drive. `--ssh` workers still need iTerm2.
+- **Or T3 Code** (optional, per workspace): `curl -fsSL https://t3.codes/install.sh | sh`,
+  then `t3 up`. Put `{"launcher": "t3"}` in `<workspace>/.pwc/launcher.json`. Then
+  `pwc spawn` starts each worker as a T3 Code thread (`t3 thread start`), which
+  the T3 desktop and phone apps show. Archive finished threads in the app.
 - `pgrep` (standard on macOS) — for worker-status checks.
 
 ## Use

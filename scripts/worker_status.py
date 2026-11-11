@@ -19,6 +19,8 @@ leave the task `in-progress` (resumable). This detects death, not outcome — a 
 worker may have left finished-but-unpushed work, so never infer done/failed.
 
 Usage:
+A T3 Code worker (session id `t3:<thread id>`) is checked with `t3 thread show`.
+
   worker_status.py --session-ids <uuid,uuid,...>
   worker_status.py --json -   # [{"task": "...", "session_id": "...", "ssh": "host"?}] on stdin
 
@@ -28,12 +30,36 @@ Output (stdout, JSON): a list of {session_id, alive[, task][, unreachable]}.
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 
 from _common import emit, fail, read_json_stdin
 
 _SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=8"]
+
+
+def _t3_thread_alive(thread_id: str) -> bool | None:
+    """A T3 Code thread (session id `t3:<thread id>`) has no process of its own.
+    It is alive while T3 still has it and it is not archived. None = the T3
+    server did not answer, so liveness is UNKNOWN, not dead."""
+    try:
+        proc = subprocess.run(["t3", "thread", "show", thread_id, "--json",
+                               "--messages", "0"],
+                              capture_output=True, text=True, timeout=30)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return None
+    if proc.returncode != 0:
+        text = proc.stderr + proc.stdout
+        if "no longer available" in text or "not found" in text.lower():
+            return False
+        return None
+    try:
+        data = json.loads(proc.stdout)
+    except ValueError:
+        return None
+    thread = data.get("thread", data)
+    return not thread.get("archivedAt") and not thread.get("archived")
 
 
 def is_alive(session_id: str, ssh_target: str | None = None) -> bool | None:
@@ -46,6 +72,8 @@ def is_alive(session_id: str, ssh_target: str | None = None) -> bool | None:
     """
     if not session_id:
         return False
+    if session_id.startswith("t3:"):
+        return _t3_thread_alive(session_id[3:])
     if ssh_target:
         try:
             result = subprocess.run(
