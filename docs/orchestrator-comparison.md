@@ -42,6 +42,16 @@ facts again before a decision that depends on them.*
   error. Known gaps: the t3 CLI cannot stop or archive a thread (archive by hand
   in the app), PWC cannot pass the reasoning effort, `pwc cost` cannot price T3
   threads, and T3 Connect is not end-to-end encrypted.
+- **Session import (11.11.2026):** T3's Welcome page (`#/welcome`) imported 8
+  side-projects threads (Claude and Codex, last 30 days only). An imported
+  thread is named `import:<provider>:<native session id>`, so `pwc spawn
+  --resume` with the t3 launcher finds it from the task's old session id. A
+  resume continues the real native session with its full context: this worker
+  session was resumed in T3, then in Orca, and the Orca transcript held the full
+  history plus the T3 turn. T3 also adds a summary of recent messages (a
+  "handoff") to the first new turn. That summary is extra text, not a
+  replacement for the context. Orca resumes the same session with
+  `claude --resume` and adds nothing.
 - **Still open:**
   - the phone test (pairing, dictation, notifications), for Orca and T3 Code;
   - the decision between Orca and T3 Code after the trial;
