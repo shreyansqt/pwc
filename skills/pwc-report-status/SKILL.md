@@ -143,32 +143,10 @@ they have finished or hit a blocker they cannot clear.
    was a one-off. Do not edit or publish skills from here; surface the recommendation
    for the user to decide.
 
-7. **On `done` only — rate the model that ran it.** This is the feedback loop that
-   makes routing get *better* instead of staying a guess. (Until 13.10.2026 this step
-   also ran `pwc cost`. Shreyans does not use the cost figures, and the quota lines in
-   `/pwc-show-work` now answer "is this plan the right size?", so that part is gone.)
-
-   Ask the user one question: *was that model right for this
-   task?* — too weak / about right / overkill, plus a one-liner. If they say too weak
-   or overkill, write the correction into the table's overlay:
-   ```
-   pwc models set-tier --key <model-key> --domain <the task's domain> \
-     --tier <1-5> --note "<the one-liner>"
-   ```
-   Lower the tier when a model underperformed (it will stop winning that kind of
-   work); raise it when a cheap model did great (it will start winning more). The
-   correction lands in the **overlay**, so the next `pwc models fetch` cannot revert
-   it — the table becomes calibrated to this user's real experience rather than to
-   vendor benchmarks.
-
-   Then log it so the decision is auditable:
-   ```
-   pwc log-event --task <id> --kind routing-outcome \
-     --detail "<harness>/<model>: <rating> — <one-liner>"
-   ```
-
-   **Skip this whole step for a task with no worker** (inline, never dispatched) —
-   there's nothing to rate.
+(Until 11.11.2026 a step 7 asked, on `done`, whether the model was right for the
+task. Shreyans stopped caring about it, so it is gone. If he says on his own that a
+model was too weak or overkill, record it with `pwc models set-tier --key <model-key>
+--domain <domain> --tier <1-5> --note "<why>"`.)
 
 ## Notes
 

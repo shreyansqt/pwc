@@ -9,15 +9,18 @@ A worker runs this (through `/pwc-done`) when its work is finished. In order:
   4. close the paired tracker issue (a github-issue ref), with the outcome as the
      closing comment — both sides of a paired task must move
   5. log the final `done` event and set status done
-  6. close the iTerm2 tab, which ends the session (every harness dies with its tab)
+  6. close the worker's tab (Orca or iTerm2), which ends the session (every
+     harness dies with its tab)
 
 Closing is LAST. Any failure in 1-5 exits non-zero before anything irreversible
 happens to the tab, and the worker stays alive to fix it. Step 5 follows step 4 so a
 failed `gh` call never leaves a task marked done with its issue still open; the
 reverse (issue closed, task not done) is retried safely, since closing is idempotent.
 
-The tab is found by $ITERM_SESSION_ID, else by tty. It is closed by a detached
-process after --delay seconds, so the worker can still print its last message.
+An Orca tab is found by $ORCA_TERMINAL_HANDLE, which Orca sets in every terminal
+it opens; `orca terminal close --tab` closes it. Otherwise an iTerm2 tab is found
+by $ITERM_SESSION_ID, else by tty. A detached process closes the tab after
+--delay seconds, so the worker can still print its last message.
 Spawn does not record session ids on tasks (shreyansqt/pwc#19), so --task is the
 normal path; session lookup is only the fallback.
 
@@ -33,6 +36,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -124,10 +128,27 @@ def close_issue(repo: str, num: str, outcome: str) -> str:
     return "closed"
 
 
+def close_orca_tab(handle: str, delay: float) -> str:
+    """Hand off to a detached process that closes this Orca tab after `delay`.
+    The process starts its own session, so it outlives the tab it closes."""
+    orca = shutil.which("orca")
+    if orca is None:
+        return "skipped: in an Orca terminal, but the orca CLI is not on PATH"
+    subprocess.Popen(
+        ["sh", "-c", 'sleep "$1"; exec "$2" terminal close --terminal "$3" --tab --json',
+         "pwc-close-orca-tab", str(delay), orca, handle],
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        start_new_session=True)
+    return f"scheduled in {delay:g}s (orca {handle})"
+
+
 def close_tab(tty: str | None, delay: float) -> str:
     """Hand off to a detached process that closes this session's tab after `delay`."""
+    handle = os.environ.get("ORCA_TERMINAL_HANDLE")
+    if handle:
+        return close_orca_tab(handle, delay)
     if not os.environ.get("ITERM_SESSION_ID") and not tty:
-        return "skipped: not in an iTerm2 tab (remote --ssh worker, or another terminal)"
+        return "skipped: not in an Orca or iTerm2 tab (remote --ssh worker, or another terminal)"
     subprocess.Popen(
         [sys.executable, str(Path(__file__).resolve()), "--_close-tab",
          os.environ.get("ITERM_SESSION_ID", ""), tty or "", str(delay)],

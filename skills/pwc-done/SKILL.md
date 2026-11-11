@@ -1,6 +1,6 @@
 ---
 name: pwc-done
-description: A worker's closing step, for finished work (done) or work you are stopping on (blocked/paused). Use whenever Shreyans wants to wrap up the session and close the tab. Records the outcome on its PWC task, closes the paired tracker issue (done only), then ends the session and closes the iTerm2 tab.
+description: A worker's closing step, for finished work (done) or work you are stopping on (blocked/paused). Use whenever Shreyans wants to wrap up the session and close the tab. Records the outcome on its PWC task, closes the paired tracker issue (done only), then ends the session and closes the tab (Orca or iTerm2).
 ---
 
 # /pwc-done
@@ -25,7 +25,7 @@ A closed tab is not coming back.
 2. **Do the outward steps the CLI cannot.** Anything `/pwc-report-status` asks on `done`
    that needs a tool of yours: Slack reactions on the task's Slack refs (step 4a there),
    and a Jira transition if the task pairs with a Jira key (the CLI only closes GitHub
-   issues). Ask the one model-rating question (step 7 there) now; the tab is about to go.
+   issues).
 3. **Run it.** The task id is in your seed prompt. Do not rely on session lookup:
    spawn does not always record session ids (shreyansqt/pwc#19).
    ```
@@ -37,7 +37,7 @@ A closed tab is not coming back.
    everything but keeps the session.
 4. **Read the JSON.** It lists each tracker issue (`closed` / `already-closed`), the
    status, and the tab (`scheduled in 4s`, or `skipped: ...` for a remote `--ssh`
-   worker or a non-iTerm2 terminal, where you tell Shreyans to close it himself).
+   worker or a terminal that is neither Orca nor iTerm2, where you tell Shreyans to close it himself).
 5. **Say goodbye in one line, then stop.** The tab closes a few seconds later and takes
    the session with it. Don't start more work.
 
