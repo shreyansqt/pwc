@@ -1641,6 +1641,27 @@ def t3_model(harness: str, model: str | None) -> str | None:
          f"(T3 lists: {', '.join(current) or 'nothing'})")
 
 
+def t3_imported_thread(harness: str, session_id: str) -> str | None:
+    """The T3 thread that T3's import made from a harness session, or None.
+    T3 names an imported thread `import:<provider>:<native session id>`, so the
+    task's old session id finds it without a lookup table."""
+    session_id = (session_id or "").strip()
+    if not session_id or shutil.which("t3") is None:
+        return None
+    # The routed harness first; a resume can route to another harness than the
+    # one that ran the old session, and the old session decides the thread.
+    first = T3_PROVIDERS.get(harness)
+    providers = [first] if first else []
+    providers += [p for p in T3_PROVIDERS.values() if p != first]
+    for provider in providers:
+        thread = f"import:{provider}:{session_id}"
+        proc = subprocess.run(["t3", "thread", "show", thread, "--json", "--messages", "0"],
+                              capture_output=True, text=True)
+        if proc.returncode == 0:
+            return thread
+    return None
+
+
 def ensure_t3_project(cwd: str) -> bool:
     """Make `cwd` a T3 project, so the thread runs in that folder. T3 runs a
     thread in its project's root, so a parent-folder project is not enough.
@@ -1901,10 +1922,15 @@ def _main_t3(args, *, harness, model, effort, cwd, seed_prompt):
              "Use --launcher iterm2 for --ssh.")
     resume_thread = None
     if args.resume:
-        if not (args.session_id or "").startswith(T3_PREFIX):
-            fail(f"the task's session {args.session_id!r} is not a T3 thread, so "
-                 f"the t3 launcher cannot resume it. Use --launcher iterm2 or orca.")
-        resume_thread = args.session_id[len(T3_PREFIX):]
+        sid = args.session_id or ""
+        if sid.startswith(T3_PREFIX):
+            resume_thread = sid[len(T3_PREFIX):]
+        else:
+            resume_thread = t3_imported_thread(harness, sid)
+            if resume_thread is None:
+                fail(f"the task's session {sid!r} is not a T3 thread, and T3 has not "
+                     f"imported it. Import it on T3's Welcome page, or resume it with "
+                     f"--launcher iterm2 or orca.")
     title = tab_title(name=args.name, task=args.task, harness=harness, model=model)
     result = {
         "harness": harness,
@@ -1923,7 +1949,7 @@ def _main_t3(args, *, harness, model, effort, cwd, seed_prompt):
     if args.dry_run:
         result.update(dry_run=True, t3_provider=T3_PROVIDERS.get(harness),
                       t3_model=t3_model(harness, model),
-                      session_id=args.session_id if resume_thread else None)
+                      session_id=T3_PREFIX + resume_thread if resume_thread else None)
         emit(result)
         return
     result.update(spawn_t3(cwd=cwd, harness=harness, model=model,

@@ -39,6 +39,11 @@ of the way.
   - the session id is `t3:<thread id>`. Record it with `pwc set-session` as
     usual. `pwc worker-status` asks T3 for it, and `--resume` sends the seed
     into the same thread;
+  - a task whose old session (Claude or Codex, from iTerm2 or Orca) was
+    imported on T3's Welcome page also resumes in T3: `--resume` with the old
+    session id finds the thread `import:<provider>:<session id>`. Record the
+    new `t3:…` session id from the result. A session that T3 has not imported
+    is refused; resume it with `--launcher iterm2`;
   - a seed prompt is required, and `--ssh` is refused;
   - the reasoning effort is not passed (the t3 CLI has no flag for it);
   - `pwc done` cannot stop or archive the thread. Shreyans archives it in the
