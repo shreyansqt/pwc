@@ -1,12 +1,12 @@
 ---
 name: pwc-start-work
-description: Act on a PWC task — either dispatch a worker (a Claude Code session, spawned in its own iTerm2 tab) for substantial work, or handle it inline for trivial work. Also covers resuming a task whose worker has stopped. The default is to dispatch a worker.
+description: Act on a PWC task — either dispatch a worker (a coding-agent session, spawned in its own Orca or iTerm2 tab) for substantial work, or handle it inline for trivial work. Also covers resuming a task whose worker has stopped. The default is to dispatch a worker.
 ---
 
 # /pwc-start-work
 
 Turn a tracked task into action. `/pwc-start-work` decides whether the task warrants
-its own **worker** (a Claude Code session, spawned in a new iTerm2 tab) or can be
+its own **worker** (a coding-agent session, spawned in a new Orca or iTerm2 tab) or can be
 handled **inline** by the coordinator, then does it. It also covers **resumption** when you are dispatching a specific task: picking a
 stopped task back up reopens its prior session when one survives. From inside a
 workspace, with no task name, `pwc resume` lists every session on that board and
@@ -23,7 +23,15 @@ of the way.
 - **Workspace root**: the current directory (e.g. `~/work/acme`).
   A task's `workdir` is relative to this (a repo like `service-backend`, or the
   root itself).
-- **Spawning requires iTerm2** with the Python API enabled.
+- **Launcher** (where the worker tab opens): `<workspace>/.pwc/launcher.json`
+  `{"launcher": "orca"}` opens it in Orca. Without the file, it opens in iTerm2,
+  which needs the iTerm2 Python API enabled. `pwc spawn --launcher` overrides the
+  file for one spawn. With Orca:
+  - the workspace (or a parent folder) must be a project in Orca, or spawn fails
+    with a hint; PWC does not add projects itself;
+  - `--ssh` remote workers and opencode with a seed prompt are refused, so use
+    `--launcher iterm2` for them;
+  - Shreyans can see and drive the worker from the Orca phone app.
 
 ## Tools
 

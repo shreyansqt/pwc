@@ -6,7 +6,45 @@ and the GitHub API on that day. "Not verified" means that no primary source
 confirmed the fact. These projects release several times a day, so check the
 facts again before a decision that depends on them.*
 
-## Summary
+## Decision and status (updated 11.11.2026)
+
+- **Decision: combine PWC with Orca.** On 10.11.2026 Shreyans chose Orca over the
+  T3 Code recommendation below. PWC keeps the task database, the routing and the
+  sources. Orca is the place where workers run, on the Mac and on the phone.
+- **Why Orca won:**
+  - Orca runs the installed `claude` binary in a terminal, so Claude work uses the
+    Claude subscription in the normal way. T3 Code drives Claude through the Claude
+    Agent SDK. That is a grey area under Anthropic's terms, and open T3 issues
+    report "Credit balance is too low" errors (#29393, #31577, #29674).
+  - Codex and Cursor use their existing CLI logins in Orca. T3 Code's Cursor
+    adapter needs a separate sign-in.
+  - Orca reads the transcripts of each CLI, so it shows and resumes sessions that
+    PWC started outside Orca.
+- **Built in PWC (commits db532ab and 4f4db9c):**
+  - `pwc spawn --launcher orca`, or `<workspace>/.pwc/launcher.json` with
+    `{"launcher": "orca"}`, opens the worker with `orca terminal create`;
+  - `pwc done` closes the Orca tab through `$ORCA_TERMINAL_HANDLE`;
+  - smarta uses Orca by default since 11.11.2026; side-projects and home-admin
+    still use iTerm2.
+- **Limits today:** `--ssh` remote workers and opencode with a seed prompt still
+  need iTerm2. Orca's SSH mode is not used, because SSH-host sessions are
+  unreachable from the phone when the desktop sleeps (Orca issue #40079). The Mac
+  mini will join later as a remote Orca server (`orca serve`).
+- **Relay and client data:** the Orca relay is end-to-end encrypted by design
+  (keys pinned in the pairing QR code). Push notification text is not (Orca issue
+  #25462), and the relay servers are in the US and Hong Kong. Keep this in mind for
+  smarta work; see [`data-handling.md`](data-handling.md).
+- **Still open:**
+  - the phone test (pairing, dictation, notifications);
+  - a T3 Code trial, so that both tools are tested in real use before the task
+    closes;
+  - the board page on the hub ([pwc #21](https://github.com/shreyansqt/pwc/issues/21)
+    (hub web app: a board UI for PWC tasks)).
+
+The research below is from 10.11.2026 and is kept as it was written. Its
+recommendation of T3 Code is superseded by the decision above.
+
+## Research summary (10.11.2026)
 
 - **Recommendation: combine.** PWC keeps the task database, the routing and the
   sources (Slack, email, calendar, GitHub, Jira). **T3 Code** becomes the place

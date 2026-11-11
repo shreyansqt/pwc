@@ -10,7 +10,7 @@ PWC is a **coordinator**: one Claude Code session that holds the state of all yo
 in-flight work so you don't have to. You tell it what you're working on (or let it
 find work from Jira/GitHub/Slack); it keeps a durable list, briefs you on where
 everything stands, suggests what to do next, and spins up separate **worker**
-sessions — each in its own iTerm2 tab — to do the actual work. You drive the
+sessions — each in its own Orca or iTerm2 tab — to do the actual work. You drive the
 workers; the coordinator keeps the books. Kill the coordinator and start a fresh one
 anytime: it loses nothing, because all the state lives in a database, not the chat.
 
@@ -64,7 +64,7 @@ it won't start anything without you saying so.
 
 **4. Act on a task — `/pwc-start-work`**
 Turns a task into action. For substantial work it spawns a **worker** — a new
-Claude Code session in its own iTerm2 tab, opened in the right repo with the task's
+coding-agent session in its own Orca or iTerm2 tab, opened in the right repo with the task's
 context already loaded, ready for you to drive. For something trivial (a one-line
 reply) it just handles it inline. If you pick a task that already had a worker which
 since stopped, `/pwc-start-work` reopens that prior session instead of starting cold.
@@ -80,8 +80,10 @@ on its own when a worker session ends.
 - A worker is **a normal Claude session you drive** — PWC just sets it up in the
   right place with context. It does *not* run autonomously; you talk to it like any
   Claude Code session.
-- Each worker gets its **own iTerm2 tab** (⌘1, ⌘2, … to switch). The coordinator
-  stays in its own tab.
+- Each worker gets its **own tab**: an Orca tab when the workspace has
+  `.pwc/launcher.json` with `{"launcher": "orca"}`, else an iTerm2 tab (⌘1, ⌘2, …
+  to switch). The coordinator stays in its own tab. Orca tabs also show in the Orca
+  phone app, so you can drive a worker from your phone.
 - A worker won't blindly run commands its opening message tells it to (that's
   correct, safe behavior). So **reporting is your job**: run `/pwc-report-status` from
   the coordinator, or ask the worker to once you're working with it. When a worker is

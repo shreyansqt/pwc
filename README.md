@@ -23,7 +23,7 @@ pwc/                      # this repo — the SOURCE (develop & commit here)
   bin/pwc                 # the CLI entry point (symlinked onto PATH by install.sh)
   scripts/                # shared deterministic mechanism ("the hands")
     taskdb.py             #   single read/write path to the task database (CLI, JSON I/O)
-    spawn.py              #   spawn a worker in an iTerm2 window
+    spawn.py              #   spawn a worker in an Orca or iTerm2 tab
     worker_status.py      #   is a worker session still running? (pgrep)
     sources.py            #   per-workspace sources config (read/write/validate)
     claude_md.py          #   splice the PWC section into a workspace CLAUDE.md
@@ -86,6 +86,10 @@ Three parts:
   `pwc spawn` put each workspace's coordinator and its workers in one tab
   group, named after the workspace directory. An older iTerm2 still opens the
   tabs; it cannot group them.
+- **Or Orca** (optional, per workspace): `brew install --cask stablyai/orca/orca`.
+  Put `{"launcher": "orca"}` in `<workspace>/.pwc/launcher.json`, and add the
+  workspace folder as a project in Orca. Then `pwc spawn` opens workers as Orca
+  tabs, which the Orca phone app can drive. `--ssh` workers still need iTerm2.
 - `pgrep` (standard on macOS) — for worker-status checks.
 
 ## Use
@@ -189,7 +193,7 @@ pre-allocated session id on the same host.
 - **`/pwc-report-status`** — used *by a worker* to report status (blocked / awaiting-review
   / done / note) back to the task database.
 - **`/pwc-done`** — a worker's closing step (`pwc done`): logs the outcome, closes the
-  paired GitHub issue, marks the task done, then closes the worker's iTerm2 tab, which
+  paired GitHub issue, marks the task done, then closes the worker's Orca or iTerm2 tab, which
   ends the session. Refuses to close while work is uncommitted or unpushed.
 
 ## Starting a coordinator
