@@ -74,12 +74,16 @@ facts again before a decision that depends on them.*
   "handoff") to the first new turn. That summary is extra text, not a
   replacement for the context. Orca resumes the same session with
   `claude --resume` and adds nothing.
+- **smarta import and Orca hand-over (17.11.2026):** T3 imported 61 smarta
+  threads (last 30 days). The sessions still open in Orca moved to T3: SMT-1516,
+  SMT-1477 and the smarta coordinator. For each, the Orca tab was closed while
+  idle, the task was recorded on its `import:…` thread, and a resume message
+  got an answer with the full context. Orca has no sessions left. Shreyans
+  closed the Orca app.
 - **Still open:**
   - the phone test for T3 Code (pairing, dictation, notifications). The Orca
     phone test is no longer needed;
-  - importing recent smarta sessions on T3's Welcome page, so that old smarta
-    tasks can resume in T3;
-  - removing Orca, after the last Orca workers finish (Shreyans' choice);
+  - removing Orca (Shreyans' choice);
   - the board page on the hub ([pwc #21](https://github.com/shreyansqt/pwc/issues/21)
     (hub web app: a board UI for PWC tasks)).
 
