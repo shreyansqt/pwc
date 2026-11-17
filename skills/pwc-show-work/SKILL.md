@@ -96,7 +96,8 @@ On startup:
   drilling into a specific task, not for the overview.
 - `pwc worker-status --json -` — reads a JSON list of
   `{task, session_id}` on stdin, returns each with `alive: true|false`. Tests
-  whether each worker session is actually still running.
+  whether each worker session is actually still running. A T3 thread can also
+  carry `waiting: true` (see the sweep below).
 - `pwc clear-session --task <id>` — **do NOT use this in the sweep.** It NULLs a task's
   session id, which destroys the only pointer to its transcript: the task can then
   never be resumed with its context (`/pwc-start-work` would start cold) and its cost
@@ -138,8 +139,25 @@ On startup:
 
    **`alive: null` + `unreachable: true` is UNKNOWN, not dead** — the remote host
    couldn't be reached (Tailscale down, mini offline), and the worker there is
-   probably still running. Do NOT clear the session or change anything; report the
-   task as "worker on <runhost> — host unreachable, liveness unknown" and move on.
+   probably still running. The same pair is what a T3 server that did not answer
+   looks like. Do NOT clear the session or change anything; report the
+   task as "worker on <runhost> — host unreachable, liveness unknown" (or, for a
+   T3 thread, "T3 did not answer, liveness unknown") and move on.
+
+   **A settled T3 thread is not running.** Session ids `t3:<thread id>` are not
+   processes. `worker-status` asks `t3 thread show`. T3 sets `settled` when a run
+   ends with nothing pending, and clears it when a new run starts. `settled: true`
+   comes back `alive: false`: the work stopped, and the thread stays resumable,
+   same as a CLI worker whose process exited. Say "worker not running, resumable".
+   Do not clear the session id, and do not infer done.
+
+   **A pending request is a third state.** `t3 thread show` reports
+   `pendingRequestCount`. When it is above zero, the row is `alive: true` and
+   `waiting: true`: the thread is waiting on you. T3 does not settle a thread
+   that still has a pending request; if both flags ever appear together, the
+   pending request wins, so the row stays alive and waiting. On that row, say
+   "waiting on you". Leave the task alone — answer in the T3 thread, do not
+   spawn a second worker, and do not describe the worker as died or not running.
 
    A dead session is **death, not outcome.** And crucially:
 
@@ -152,8 +170,9 @@ On startup:
    context), **cost** (`pwc cost` finds the transcript by that id), and liveness
    itself.
 
-   Liveness is **computed, not stored**: `pwc worker-status` runs `pgrep` and gives a
-   live answer on demand, every sweep. So there is no need to encode "no worker
+   Liveness is **computed, not stored**: `pwc worker-status` runs `pgrep` (or
+   `t3 thread show` for a `t3:` session) and gives a live answer on demand, every
+   sweep. So there is no need to encode "no worker
    running" by destroying the session id — doing so trades a durable fact
    (*this session did this work*) for a transient one (*it isn't running right now*)
    that you can re-derive in milliseconds anyway.
@@ -166,7 +185,8 @@ On startup:
    - **Vanished** — the session died with nothing said since dispatch. The task
      **stays `in-progress`** (it was mid-flight and is resumable) — do not invent a new
      status, do not infer done/failed (it may have unpushed work). Note "worker died,
-     resumable" so the user can resume or re-decide, and surface it in the briefing as
+     resumable" — for a settled T3 thread, "worker not running, resumable" — so the
+     user can resume or re-decide, and surface it in the briefing as
      an in-progress row whose worker is no longer live.
      (A **remote** worker's `alive: false` is trustworthy — the host answered and the
      process is gone; only `unreachable` results are exempt from this handling.)
@@ -183,7 +203,9 @@ On startup:
 
    The sweep covers every task with a `session_id` — claude, opencode, and codex
    workers all have one (the non-claude ids are pre-created at spawn and sit in
-   the worker's argv, so `pgrep` sees them the same way). A task on a future
+   the worker's argv, so `pgrep` sees them the same way). A T3 worker's session
+   id is `t3:<thread id>`; the sweep reads `alive` and `waiting` from
+   `t3 thread show`, as above. A task on a future
    untracked harness would have no `session_id` and never enter the sweep: its
    status is whatever was last reported; if it matters whether one is still in
    flight, ask the user rather than inferring.

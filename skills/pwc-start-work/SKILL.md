@@ -37,8 +37,13 @@ of the way.
   tab (`t3 thread start`). With T3:
   - spawn adds the worker's folder as a T3 project when it is missing;
   - the session id is `t3:<thread id>`. Record it with `pwc set-session` as
-    usual. `pwc worker-status` asks T3 for it, and `--resume` sends the seed
-    into the same thread;
+    usual. `pwc worker-status` asks `t3 thread show`. A settled thread is not
+    running: T3 sets `settled` when a run ends with nothing pending, and clears
+    it when a new run starts, so the check treats it like a CLI worker whose
+    process exited. Resume sends the next seed into that same thread. A thread
+    with a pending request is waiting on Shreyans — worker-status reports it
+    alive with `waiting: true`. Do not resume over it; point Shreyans at the
+    thread;
   - a task whose old session (Claude or Codex, from iTerm2 or Orca) was
     imported on T3's Welcome page also resumes in T3: `--resume` with the old
     session id finds the thread `import:<provider>:<session id>`. Record the

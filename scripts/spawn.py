@@ -1591,8 +1591,9 @@ def spawn_orca(*, cwd, command, seed_in_command=False, title=None):
 # seed prompt on stdin.
 #
 # PWC records the worker as `t3:<thread id>`. The thread id is not a process,
-# so `pwc worker-status` asks `t3 thread show` instead of pgrep. A resume sends
-# the new seed into the same thread (`t3 thread send`). `pwc done` cannot stop
+# so `pwc worker-status` asks `t3 thread show` instead of pgrep. A settled
+# thread is not running; a pending request is waiting on the user. A resume
+# sends the new seed into the same thread (`t3 thread send`). `pwc done` cannot stop
 # or archive a thread, because the t3 CLI has no command for it; Shreyans
 # archives it in the app.
 

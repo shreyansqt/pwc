@@ -282,7 +282,10 @@ free. The board page is small, so PWC builds only that.
   relay off.
 - **Session tracking.** PWC records a harness session id at spawn time. With
   T3 Code, PWC records the T3 thread id instead, and `worker_status.py` asks
-  `t3 thread show`. Cost tracking (`pwc cost`) reads the harness transcripts; the
+  `t3 thread show`. A settled thread counts as not running (the thread stays
+  resumable). A thread with a pending request is waiting on the user, which
+  worker-status reports as `alive: true` and `waiting: true`. Cost tracking
+  (`pwc cost`) reads the harness transcripts; the
   trial must confirm that the transcripts still land where `cost.py` reads them.
 
 ## Trial plan on the Mac mini (grumpyorange)

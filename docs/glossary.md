@@ -141,7 +141,10 @@ auto-resolve.
 new tasks and asking whether to add each. Never auto-adds.
 
 **Worker-status check** — Checking whether a worker is *actually still running*
-(via `pgrep` on its session id). A worker that's no longer running gets its task
+(via `pgrep` on its session id). A T3 Code worker (`t3:<thread id>`) is checked
+with `t3 thread show` instead: a settled thread is not running, and a thread
+with a pending request is waiting on you (`waiting: true`), which is not a
+stopped worker. A worker that's no longer running gets its task
 flagged **"gone — needs triage."** Detects death, not outcome — a gone worker may
 have left finished-but-unpushed work, so the coordinator never assumes done/failed.
 (Distinct from a task's *status* field.)

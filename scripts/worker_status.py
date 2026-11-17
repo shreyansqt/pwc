@@ -14,17 +14,25 @@ host is NOT a dead worker (the worker is probably fine; your network isn't):
 those come back `alive: null, unreachable: true` and must not be swept.
 
 Used by /show-work: for each `in-progress` task with a session_id, check worker
-status here; for the dead ones, detach the session (`pwc clear-session`) and
-leave the task `in-progress` (resumable). This detects death, not outcome — a dead
-worker may have left finished-but-unpushed work, so never infer done/failed.
+status here. A session that is not running stays on the task (resumable) — do
+not clear it. This detects death, not outcome — a dead worker may have left
+finished-but-unpushed work, so never infer done/failed.
+
+A T3 Code worker (session id `t3:<thread id>`) has no process of its own, so
+the check asks `t3 thread show` instead of pgrep. T3 sets `settled` when a run
+ends with nothing pending, and clears it when a new run starts. A settled
+thread is not running: the work stopped, and the thread stays resumable, same
+as a CLI worker whose process exited. A pending request (`pendingRequestCount`
+> 0) is a third state — the thread is waiting on the user — reported as
+`alive: true` with `waiting: true`. T3 does not settle a thread that still has
+a pending request; if both ever appear, the pending request wins, so a resume
+does not walk over a question.
 
 Usage:
-A T3 Code worker (session id `t3:<thread id>`) is checked with `t3 thread show`.
-
   worker_status.py --session-ids <uuid,uuid,...>
   worker_status.py --json -   # [{"task": "...", "session_id": "...", "ssh": "host"?}] on stdin
 
-Output (stdout, JSON): a list of {session_id, alive[, task][, unreachable]}.
+Output (stdout, JSON): a list of {session_id, alive[, waiting][, task][, unreachable]}.
 """
 
 from __future__ import annotations
@@ -39,27 +47,56 @@ from _common import emit, fail, read_json_stdin
 _SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=8"]
 
 
-def _t3_thread_alive(thread_id: str) -> bool | None:
-    """A T3 Code thread (session id `t3:<thread id>`) has no process of its own.
-    It is alive while T3 still has it and it is not archived. None = the T3
-    server did not answer, so liveness is UNKNOWN, not dead."""
+def _pending_request_count(thread: dict) -> int:
+    try:
+        return int(thread.get("pendingRequestCount") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _classify_t3_thread(thread: dict) -> tuple[bool, bool]:
+    """(alive, waiting) from one `t3 thread show` thread object.
+
+    Archived, missing, or settled with nothing pending → not running.
+    A pending request → still alive, and waiting on the user. Liveness
+    follows `settled`, not `status`: a completed thread T3 has not settled
+    is still live, because T3 withholds `settled` while something is open.
+    """
+    if thread.get("archivedAt") or thread.get("archived"):
+        return False, False
+    waiting = _pending_request_count(thread) > 0
+    if waiting:
+        return True, True
+    if thread.get("settled"):
+        return False, False
+    return True, False
+
+
+def _t3_thread_liveness(thread_id: str) -> tuple[bool | None, bool]:
+    """(alive, waiting) for a T3 thread. alive is None when the T3 server
+    did not answer — unknown, not dead. waiting is only true alongside
+    alive True."""
     try:
         proc = subprocess.run(["t3", "thread", "show", thread_id, "--json",
                                "--messages", "0"],
                               capture_output=True, text=True, timeout=30)
     except (subprocess.TimeoutExpired, FileNotFoundError):
-        return None
+        return None, False
     if proc.returncode != 0:
         text = proc.stderr + proc.stdout
         if "no longer available" in text or "not found" in text.lower():
-            return False
-        return None
+            return False, False
+        return None, False
     try:
         data = json.loads(proc.stdout)
     except ValueError:
-        return None
+        return None, False
+    if not isinstance(data, dict):
+        return None, False
     thread = data.get("thread", data)
-    return not thread.get("archivedAt") and not thread.get("archived")
+    if not isinstance(thread, dict):
+        return None, False
+    return _classify_t3_thread(thread)
 
 
 def is_alive(session_id: str, ssh_target: str | None = None) -> bool | None:
@@ -73,7 +110,8 @@ def is_alive(session_id: str, ssh_target: str | None = None) -> bool | None:
     if not session_id:
         return False
     if session_id.startswith("t3:"):
-        return _t3_thread_alive(session_id[3:])
+        alive, _waiting = _t3_thread_liveness(session_id[3:])
+        return alive
     if ssh_target:
         try:
             result = subprocess.run(
@@ -119,8 +157,14 @@ def main(argv=None):
     out = []
     for e in entries:
         sid = e.get("session_id")
-        alive = is_alive(sid, e.get("ssh"))
+        waiting = False
+        if isinstance(sid, str) and sid.startswith("t3:"):
+            alive, waiting = _t3_thread_liveness(sid[3:])
+        else:
+            alive = is_alive(sid, e.get("ssh"))
         row = {"session_id": sid, "alive": alive}
+        if waiting:
+            row["waiting"] = True
         if alive is None:
             row["unreachable"] = True
         if "task" in e:
