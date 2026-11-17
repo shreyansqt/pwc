@@ -1,6 +1,6 @@
 ---
 name: pwc-done
-description: A worker's closing step, for finished work (done) or work you are stopping on (blocked/paused). Use whenever Shreyans wants to wrap up the session and close the tab. Records the outcome on its PWC task, closes the paired tracker issue (done only), then ends the session and closes the tab (Orca or iTerm2).
+description: A worker's closing step, for finished work (done) or work you are stopping on (blocked/paused). Use whenever Shreyans wants to wrap up the session and close the tab. Records the outcome on its PWC task, closes the paired tracker issue (done only), then ends the session: it closes the tab (Orca or iTerm2), or archives the T3 Code thread.
 ---
 
 # /pwc-done
@@ -38,9 +38,12 @@ A closed tab is not coming back.
 4. **Read the JSON.** It lists each tracker issue (`closed` / `already-closed`), the
    status, and the tab (`scheduled in 4s`, or `skipped: ...` for a remote `--ssh`
    worker or a terminal that is neither Orca nor iTerm2, where you tell Shreyans to close it himself).
-   A T3 Code worker has no tab: the t3 CLI cannot stop or archive a thread, so tell
-   Shreyans to archive the thread in the T3 app.
-5. **Say goodbye in one line, then stop.** The tab closes a few seconds later and takes
+   A T3 Code worker has no tab, so the JSON says `skipped`. Go to step 5.
+5. **T3 Code worker only: archive your own thread.** Do this only after `pwc done`
+   succeeded. Call the T3 MCP tool `t3_thread_organize` with `action: "archive"` and no
+   `threadId` (no `threadId` means this thread). Make it your last tool call. If the
+   tool is not in your tool list, tell Shreyans to archive the thread in the T3 app.
+6. **Say goodbye in one line, then stop.** A tab closes a few seconds later and takes
    the session with it. Don't start more work.
 
 ## If it fails
