@@ -1626,7 +1626,12 @@ def t3_model(harness: str, model: str | None) -> str | None:
     """T3's model slug for a PWC model. Claude needs a mapping: PWC routes to
     the aliases `opus`, `sonnet`, `haiku` and `fable`, and T3 wants a full id
     such as `claude-sonnet-5-5`. The current id comes from T3's own model
-    manifest. Other harnesses use the same names in PWC and in T3."""
+    manifest. Cursor drops the effort suffix (see below). Other harnesses use
+    the same names in PWC and in T3."""
+    if model and harness == "cursor-agent":
+        # The cursor-agent CLI puts the effort into the name (`grok-4.7-high`).
+        # The Cursor SDK that T3 uses wants the bare model (`grok-4.7`).
+        return re.sub(r"-(low|medium|high|xhigh|max|thinking)$", "", model)
     if not model or harness != "claude" or model.startswith("claude-"):
         return model
     manifest = Path.home() / ".t3" / "userdata" / "model-manifest.json"

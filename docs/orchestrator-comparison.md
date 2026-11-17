@@ -6,12 +6,30 @@ and the GitHub API on that day. "Not verified" means that no primary source
 confirmed the fact. These projects release several times a day, so check the
 facts again before a decision that depends on them.*
 
-## Decision and status (updated 11.11.2026)
+## Decision and status (updated 17.11.2026)
 
-- **Decision: combine PWC with Orca.** On 10.11.2026 Shreyans chose Orca over the
+- **Decision (17.11.2026): combine PWC with T3 Code, in every workspace that
+  uses a launcher.** Shreyans does not like Orca, so T3 Code replaces Orca for
+  smarta. side-projects already used T3 Code since 11.11.2026. PWC keeps the task
+  database, the routing and the sources. T3 Code is the place where workers run,
+  on the Mac and on the phone.
+  - Shreyans accepts T3 Connect (the phone relay) for smarta. The data-handling
+    caveats below stay recorded, and he decided that they do not block the move.
+  - He does not use `pwc cost`, so the missing T3 cost data does not matter.
+  - smarta's `.pwc/launcher.json` changed from `orca` to `t3` on 17.11.2026.
+    The 6 active smarta repos and the smarta workspace folder are T3 projects.
+    Spawn adds any other repo or worktree folder as a T3 project on first use.
+  - A test spawn in smarta (task `t3-smarta-launch-test`) ran as a T3 thread on
+    Cursor (`grok-4.7`) in `smarta/_playground` and answered.
+  - The smarta workers that ran in Orca on 17.11.2026 (SMT-271, SMT-1533,
+    SMT-1477, SMT-1516) and the smarta coordinator finish in Orca. A resume of
+    one of their sessions goes to T3 only after T3 imports it; otherwise use
+    `--launcher orca`.
+  - home-admin still uses iTerm2.
+- **Earlier decision (10.11.2026, superseded): combine PWC with Orca.** On 10.11.2026 Shreyans chose Orca over the
   T3 Code recommendation below. PWC keeps the task database, the routing and the
   sources. Orca is the place where workers run, on the Mac and on the phone.
-- **Why Orca won:**
+- **Why Orca won on 10.11.2026:**
   - Orca runs the installed `claude` binary in a terminal, so Claude work uses the
     Claude subscription in the normal way. T3 Code drives Claude through the Claude
     Agent SDK. That is a grey area under Anthropic's terms, and open T3 issues
@@ -24,9 +42,9 @@ facts again before a decision that depends on them.*
   - `pwc spawn --launcher orca`, or `<workspace>/.pwc/launcher.json` with
     `{"launcher": "orca"}`, opens the worker with `orca terminal create`;
   - `pwc done` closes the Orca tab through `$ORCA_TERMINAL_HANDLE`;
-  - smarta uses Orca by default since 11.11.2026; side-projects and home-admin
-    still use iTerm2.
-- **Limits today:** `--ssh` remote workers and opencode with a seed prompt still
+  - smarta used Orca by default from 11.11.2026 to 17.11.2026. The Orca launcher
+    stays in PWC (`--launcher orca`).
+- **Orca limits (recorded 11.11.2026):** `--ssh` remote workers and opencode with a seed prompt still
   need iTerm2. Orca's SSH mode is not used, because SSH-host sessions are
   unreachable from the phone when the desktop sleeps (Orca issue #40079). The Mac
   mini will join later as a remote Orca server (`orca serve`).
@@ -42,6 +60,10 @@ facts again before a decision that depends on them.*
   error. Known gaps: the t3 CLI cannot stop or archive a thread (archive by hand
   in the app), PWC cannot pass the reasoning effort, `pwc cost` cannot price T3
   threads, and T3 Connect is not end-to-end encrypted.
+- **Cursor model names (17.11.2026):** the `cursor-agent` CLI puts the effort
+  into the model name (`grok-4.7-high`). T3's Cursor adapter (the Cursor SDK)
+  wants the bare name (`grok-4.7`), so the t3 launcher drops the effort suffix.
+  The first smarta test failed with `CursorModelUnavailableError` before this fix.
 - **Session import (11.11.2026):** T3's Welcome page (`#/welcome`) imported 8
   side-projects threads (Claude and Codex, last 30 days only). An imported
   thread is named `import:<provider>:<native session id>`, so `pwc spawn
@@ -53,13 +75,17 @@ facts again before a decision that depends on them.*
   replacement for the context. Orca resumes the same session with
   `claude --resume` and adds nothing.
 - **Still open:**
-  - the phone test (pairing, dictation, notifications), for Orca and T3 Code;
-  - the decision between Orca and T3 Code after the trial;
+  - the phone test for T3 Code (pairing, dictation, notifications). The Orca
+    phone test is no longer needed;
+  - importing recent smarta sessions on T3's Welcome page, so that old smarta
+    tasks can resume in T3;
+  - removing Orca, after the last Orca workers finish (Shreyans' choice);
   - the board page on the hub ([pwc #21](https://github.com/shreyansqt/pwc/issues/21)
     (hub web app: a board UI for PWC tasks)).
 
-The research below is from 10.11.2026 and is kept as it was written. Its
-recommendation of T3 Code is superseded by the decision above.
+The research below is from 10.11.2026 and is kept as it was written. It
+recommended T3 Code. Shreyans chose Orca on 10.11.2026, then moved to T3 Code on
+17.11.2026.
 
 ## Research summary (10.11.2026)
 
