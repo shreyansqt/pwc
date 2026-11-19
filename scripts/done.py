@@ -10,7 +10,9 @@ A worker runs this (through `/pwc-done`) when its work is finished. In order:
      closing comment — both sides of a paired task must move
   5. log the final `done` event and set status done
   6. close the worker's tab (Orca or iTerm2), which ends the session (every
-     harness dies with its tab)
+     harness dies with its tab). A T3 worker has no tab. When the task session
+     id is `t3:…`, the JSON field `t3` is `settle` and the worker settles the
+     thread. The t3 CLI cannot do that. Do not archive the thread.
 
 Closing is LAST. Any failure in 1-5 exits non-zero before anything irreversible
 happens to the tab, and the worker stays alive to fix it. Step 5 follows step 4 so a
@@ -40,6 +42,8 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+from spawn import T3_ON_DONE, T3_PREFIX
 
 PWC = str(Path(__file__).resolve().parent.parent / "bin" / "pwc")
 ISSUE_RE = re.compile(r"^(?P<repo>[\w.-]+/[\w.-]+)#(?P<num>\d+)$")
@@ -126,6 +130,29 @@ def close_issue(repo: str, num: str, outcome: str) -> str:
     if res.returncode != 0:
         fail(f"cannot close {repo}#{num}: {res.stderr.strip()}")
     return "closed"
+
+
+def t3_session(detail: dict) -> bool:
+    """True when this task's recorded session is a T3 thread."""
+    sid = str((detail.get("task") or {}).get("session_id") or "")
+    return sid.startswith(T3_PREFIX) and len(sid) > len(T3_PREFIX)
+
+
+def t3_close_report(*, no_close_tab: bool, dry_run: bool) -> dict:
+    """How a T3 worker ends. The CLI cannot settle the thread, so the JSON
+    tells the worker to call `t3_thread_organize`. Settle keeps the thread
+    findable. Archive removes it from the sidebar and from search."""
+    if no_close_tab:
+        return {"t3": "kept (--no-close-tab)", "tab": "kept (--no-close-tab)"}
+    if dry_run:
+        return {"t3": "would-settle", "tab": "dry-run"}
+    return {
+        "t3": T3_ON_DONE,
+        "tab": (
+            f"skipped: T3 thread; {T3_ON_DONE} it "
+            f"(t3_thread_organize action {T3_ON_DONE}, no threadId)"
+        ),
+    }
 
 
 def close_orca_tab(handle: str, delay: float) -> str:
@@ -224,8 +251,12 @@ def main(argv=None) -> int:
 
     issues = [] if args.blocked else tracker_issues(detail)
     report = {"task": task, "issues": {f"{r}#{n}": "would-close" for r, n in issues}}
+    is_t3 = t3_session(detail)
     if args.dry_run:
-        report["tab"] = "dry-run"
+        if is_t3:
+            report.update(t3_close_report(no_close_tab=args.no_close_tab, dry_run=True))
+        else:
+            report["tab"] = "dry-run"
         print(json.dumps(report, indent=2))
         return 0
 
@@ -243,7 +274,9 @@ def main(argv=None) -> int:
          "--detail", args.outcome, "--set-status", status], ws)
     report["status"] = status
 
-    if args.no_close_tab:
+    if is_t3:
+        report.update(t3_close_report(no_close_tab=args.no_close_tab, dry_run=False))
+    elif args.no_close_tab:
         report["tab"] = "kept (--no-close-tab)"
     else:
         from retitle import parent_tty

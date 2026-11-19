@@ -51,8 +51,10 @@ of the way.
     is refused; resume it with `--launcher iterm2`;
   - a seed prompt is required, and `--ssh` is refused;
   - the reasoning effort is not passed (the t3 CLI has no flag for it);
-  - `pwc done` cannot stop or archive the thread. Shreyans archives it in the
-    T3 app.
+  - `pwc done` cannot settle the thread: the t3 CLI has no settle command.
+    After `pwc done` succeeds, the worker settles its own thread
+    (`t3_thread_organize`, action `settle`, no threadId). A settled thread
+    stays in the settled shelf, so search can find it. Do not archive it.
 
 ## Tools
 

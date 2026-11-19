@@ -1,6 +1,6 @@
 ---
 name: pwc-done
-description: A worker's closing step, for finished work (done) or work you are stopping on (blocked/paused). Use whenever Shreyans wants to wrap up the session and close the tab. Records the outcome on its PWC task, closes the paired tracker issue (done only), then ends the session: it closes the tab (Orca or iTerm2), or archives the T3 Code thread.
+description: A worker's closing step, for finished work (done) or work you are stopping on (blocked/paused). Use whenever Shreyans wants to wrap up the session and close the tab. Records the outcome on its PWC task, closes the paired tracker issue (done only), then ends the session: it closes the tab (Orca or iTerm2), or settles the T3 Code thread. A settled thread stays findable.
 ---
 
 # /pwc-done
@@ -16,7 +16,8 @@ Not for the coordinator. Two end states:
   task `blocked`, leaves the tracker issue open, still closes the tab. If you only want
   to log status and keep the session, use `/pwc-report-status` instead.
 
-A closed tab is not coming back.
+A closed tab is not coming back. A settled T3 thread stays in the settled shelf.
+A new message in that thread wakes it.
 
 ## Steps
 
@@ -38,11 +39,17 @@ A closed tab is not coming back.
 4. **Read the JSON.** It lists each tracker issue (`closed` / `already-closed`), the
    status, and the tab (`scheduled in 4s`, or `skipped: ...` for a remote `--ssh`
    worker or a terminal that is neither Orca nor iTerm2, where you tell Shreyans to close it himself).
-   A T3 Code worker has no tab, so the JSON says `skipped`. Go to step 5.
-5. **T3 Code worker only: archive your own thread.** Do this only after `pwc done`
-   succeeded. Call the T3 MCP tool `t3_thread_organize` with `action: "archive"` and no
-   `threadId` (no `threadId` means this thread). Make it your last tool call. If the
-   tool is not in your tool list, tell Shreyans to archive the thread in the T3 app.
+   A T3 Code worker has no tab. When the task session id is `t3:…`, the JSON
+   has a `t3` field. Go to step 5.
+5. **T3 Code worker only: settle your own thread.** Do this only after `pwc done`
+   succeeded, and not after `--dry-run`. Do not settle when the JSON `tab` or `t3`
+   value is `kept (--no-close-tab)`. Otherwise call the T3 MCP tool
+   `t3_thread_organize` with `action: "settle"` and no `threadId` (no `threadId`
+   means this thread). The JSON field `t3` is `settle` when this session was
+   recorded. Settling this thread applies at the end of the turn. Make it your
+   last tool call. Do not archive the thread. An archived thread leaves the
+   sidebar and search. A settled thread stays in the settled shelf. If the tool
+   is not in your tool list, tell Shreyans to settle the thread in the T3 app.
 6. **Say goodbye in one line, then stop.** A tab closes a few seconds later and takes
    the session with it. Don't start more work.
 
@@ -61,4 +68,6 @@ It exits non-zero before touching the tab, so you are still alive to fix it:
 `github-issue` ref with the outcome as the comment, `log-event --kind done
 --set-status done`, then a detached process closes the tab matched by
 `$ITERM_SESSION_ID` (else tty), strictly, never the focused tab. Every harness
-(claude, codex, opencode) ends when its tab does.
+(claude, codex, opencode) ends when its tab does. A T3 worker has no tab: when
+the task session id is `t3:…`, the JSON field `t3` is `settle` and the worker
+settles the thread. The t3 CLI cannot settle it.

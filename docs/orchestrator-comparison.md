@@ -57,8 +57,8 @@ facts again before a decision that depends on them.*
   uses Orca. PWC's `t3` launcher starts a worker with `t3 thread start` and
   records it as `t3:<thread id>`. The first test thread answered on the Claude
   subscription through the Agent SDK, without a "Credit balance is too low"
-  error. Known gaps: the t3 CLI cannot stop or archive a thread (archive by hand
-  in the app), PWC cannot pass the reasoning effort, `pwc cost` cannot price T3
+  error. Known gaps: the t3 CLI cannot settle a thread (the worker settles it
+  after `pwc done`; a settled thread stays findable), PWC cannot pass the reasoning effort, `pwc cost` cannot price T3
   threads, and T3 Connect is not end-to-end encrypted.
 - **Cursor model names (17.11.2026):** the `cursor-agent` CLI puts the effort
   into the model name (`grok-4.7-high`). T3's Cursor adapter (the Cursor SDK)

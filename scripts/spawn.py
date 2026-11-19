@@ -1593,11 +1593,20 @@ def spawn_orca(*, cwd, command, seed_in_command=False, title=None):
 # PWC records the worker as `t3:<thread id>`. The thread id is not a process,
 # so `pwc worker-status` asks `t3 thread show` instead of pgrep. A settled
 # thread is not running; a pending request is waiting on the user. A resume
-# sends the new seed into the same thread (`t3 thread send`). `pwc done` cannot stop
-# or archive a thread, because the t3 CLI has no command for it; Shreyans
-# archives it in the app.
+# sends the new seed into the same thread (`t3 thread send`).
+#
+# On `pwc done` the worker settles its own thread. The t3 CLI has no settle
+# command, so the worker calls the T3 tool `t3_thread_organize` with action
+# `settle` (see T3_ON_DONE). A settled thread stays in the settled shelf, and
+# search can still find it. Do not archive it: an archived thread leaves the
+# sidebar and search, and a later unarchive does not put it back in an open
+# window.
 
 T3_PREFIX = "t3:"
+
+# What /pwc-done does with the worker's T3 thread. The CLI cannot do it.
+# `done.py` copies this into the JSON field `t3`, and the worker performs it.
+T3_ON_DONE = "settle"
 
 # PWC harness -> T3 provider instance id. T3's default instance id is the
 # driver name (packages/contracts/src/providerInstance.ts).
