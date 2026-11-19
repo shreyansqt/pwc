@@ -41,7 +41,9 @@ Harnesses (`--harness`, default claude):
               `-c model_reasoning_effort="<level>"` (codex-cli 0.167.0; the level
               is a config override and must precede the `resume` subcommand).
               Resume uses that flag too. Other harnesses can read the same
-              field later; only Codex applies it today.
+              field later; Codex and the T3 launcher apply it today. The T3
+              launcher passes it as `t3 thread start --option <id>=<level>`
+              when that t3 build has the flag (see T3_EFFORT_OPTION).
               Like opencode, the id is MINTED HERE on a fresh spawn — record the
               RETURNED session_id.
 Verify a new harness's flags on first real use and update its builder here.
@@ -1590,6 +1592,9 @@ def spawn_orca(*, cwd, command, seed_in_command=False, title=None):
 # start a thread: `t3 thread start <cwd> - --provider … --model …`, with the
 # seed prompt on stdin.
 #
+# When the model table has an effort, the start command also gets
+# `--option <id>=<level>` (t3_effort_plan), if this t3 build has that flag.
+#
 # PWC records the worker as `t3:<thread id>`. The thread id is not a process,
 # so `pwc worker-status` asks `t3 thread show` instead of pgrep. A settled
 # thread is not running; a pending request is waiting on the user. A resume
@@ -1618,6 +1623,64 @@ T3_PROVIDERS = {
     "grok": "grok",
     "agy": "antigravity",
 }
+
+# T3 provider instance id -> the model option that holds the reasoning level.
+# `t3 thread start --option <id>=<value>` writes it into the launch's
+# modelSelection.options (t3code PR 23932, in nightly builds from 17.11.2026,
+# not in stable v0.1.10). Cursor is not here: its option id depends on the
+# model (`reasoning_effort` for grok-4.7, `effort` for others).
+T3_EFFORT_OPTION = {
+    "claudeAgent": "effort",
+    "codex": "reasoningEffort",
+    "grok": "reasoningEffort",
+    "opencode": "variant",
+}
+
+
+def t3_has_option_flag() -> bool:
+    """True when the installed `t3 thread start` accepts `--option`. The help
+    text decides, so PWC works on every t3 build and uses the flag as soon as
+    a build has it. A missing t3 or a failed help call counts as False."""
+    if shutil.which("t3") is None:
+        return False
+    proc = subprocess.run(["t3", "thread", "start", "--help"],
+                          capture_output=True, text=True)
+    return proc.returncode == 0 and "--option" in proc.stdout
+
+
+def t3_effort_plan(harness: str, effort: str | None, *, resume: bool = False,
+                   has_flag: bool | None = None) -> dict:
+    """What the T3 launch does with the model table's effort.
+
+    Returns {"args": [...]} when `thread start` must carry `--option`, plus the
+    JSON fields to report: `effort_applied` and `t3_option`, or
+    `effort_not_applied` and `effort_not_applied_reason`. `has_flag` is for
+    tests; None asks the installed t3."""
+    if not effort:
+        return {"args": []}
+    if resume:
+        # A resumed thread keeps its stored model selection, effort included.
+        return {"args": [], "effort_not_applied": effort,
+                "effort_not_applied_reason": "a resume keeps the thread's own effort"}
+    provider = T3_PROVIDERS.get(harness)
+    option = T3_EFFORT_OPTION.get(provider or "")
+    if option is None:
+        return {"args": [], "effort_not_applied": effort,
+                "effort_not_applied_reason":
+                    f"no known T3 effort option for the {provider or harness!r} provider"}
+    if harness == "codex" and effort not in CODEX_REASONING_EFFORTS:
+        fail(f"codex effort {effort!r} is not one of "
+             f"{', '.join(CODEX_REASONING_EFFORTS)} "
+             f"(change it with `pwc models set-effort`)")
+    if has_flag is None:
+        has_flag = t3_has_option_flag()
+    if not has_flag:
+        return {"args": [], "effort_not_applied": effort,
+                "effort_not_applied_reason":
+                    "this t3 has no `thread start --option` flag "
+                    "(stable v0.1.10 lacks it; nightly 17.11.2026 and later has it)"}
+    return {"args": ["--option", f"{option}={effort}"],
+            "effort_applied": effort, "t3_option": f"{option}={effort}"}
 
 
 def _t3(args: list[str], *, what: str, stdin: str | None = None) -> str:
@@ -1691,7 +1754,8 @@ def ensure_t3_project(cwd: str) -> bool:
     fail(f"t3 project add {cwd} failed: {(proc.stderr or proc.stdout).strip()[:400]}")
 
 
-def spawn_t3(*, cwd, harness, model, seed_prompt, title, resume_thread=None):
+def spawn_t3(*, cwd, harness, model, seed_prompt, title, resume_thread=None,
+             effort_args=None):
     """Start (or resume) the worker as a T3 Code thread. Returns placement."""
     if not seed_prompt:
         fail("the t3 launcher needs a seed prompt: a T3 thread starts with a message")
@@ -1709,6 +1773,8 @@ def spawn_t3(*, cwd, harness, model, seed_prompt, title, resume_thread=None):
     slug = t3_model(harness, model)
     if slug:
         args += ["--provider", provider, "--model", slug]
+        # `--option` needs --provider and --model, so it only goes with them.
+        args += effort_args or []
     out = _t3(args, what="thread start", stdin=seed_prompt)
     try:
         launched = json.loads(out)
@@ -1955,9 +2021,13 @@ def _main_t3(args, *, harness, model, effort, cwd, seed_prompt):
         "launcher": "t3",
         "session_tracked": True,
     }
-    if effort:
-        # `t3 thread start` has no effort flag. T3 uses the model's default.
-        result["effort_not_applied"] = effort
+    plan = t3_effort_plan(harness, effort, resume=bool(resume_thread))
+    if effort and not (model and T3_PROVIDERS.get(harness)) and not resume_thread:
+        # `--option` needs --provider and --model; a launch without a model has neither.
+        plan = {"args": [], "effort_not_applied": effort,
+                "effort_not_applied_reason": "the launch names no model, so T3 takes no option"}
+    effort_args = plan.pop("args")
+    result.update(plan)
     decision = getattr(args, "_route_decision", None)
     if decision:
         result["routed"] = {"why": decision["why"], "quota": decision.get("quota")}
@@ -1969,7 +2039,7 @@ def _main_t3(args, *, harness, model, effort, cwd, seed_prompt):
         return
     result.update(spawn_t3(cwd=cwd, harness=harness, model=model,
                            seed_prompt=seed_prompt, title=title,
-                           resume_thread=resume_thread))
+                           resume_thread=resume_thread, effort_args=effort_args))
     emit(result)
 
 

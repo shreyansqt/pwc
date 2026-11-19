@@ -915,3 +915,145 @@ def test_cursor_dry_run_spawn_via_pin(ws):
     result = json.loads(out)
     assert result["harness"] == "cursor-agent" and result["session_tracked"]
     assert "--resume 00000000-DRYRUN-not-created --auto-review" in result["command"]
+
+
+# ── T3 launcher: reasoning effort ────────────────────────────────────────────
+
+
+def test_t3_effort_plan_maps_each_provider_to_its_option():
+    for harness, option in (("claude", "effort"), ("codex", "reasoningEffort"),
+                            ("grok", "reasoningEffort"), ("opencode", "variant")):
+        plan = spawn_module.t3_effort_plan(harness, "high", has_flag=True)
+        assert plan["args"] == ["--option", f"{option}=high"]
+        assert plan["effort_applied"] == "high"
+        assert plan["t3_option"] == f"{option}=high"
+        assert "effort_not_applied" not in plan
+
+
+def test_t3_effort_plan_without_effort_does_nothing():
+    assert spawn_module.t3_effort_plan("codex", None, has_flag=True) == {"args": []}
+    assert spawn_module.t3_effort_plan("codex", "", has_flag=True) == {"args": []}
+
+
+def test_t3_effort_plan_reports_a_t3_without_the_option_flag():
+    plan = spawn_module.t3_effort_plan("codex", "medium", has_flag=False)
+    assert plan["args"] == []
+    assert plan["effort_not_applied"] == "medium"
+    assert "--option" in plan["effort_not_applied_reason"]
+    assert "effort_applied" not in plan
+
+
+def test_t3_effort_plan_leaves_cursor_and_agy_unapplied():
+    for harness in ("cursor-agent", "agy"):
+        plan = spawn_module.t3_effort_plan(harness, "high", has_flag=True)
+        assert plan["args"] == []
+        assert plan["effort_not_applied"] == "high"
+        assert plan["effort_not_applied_reason"]
+
+
+def test_t3_effort_plan_resume_keeps_the_thread_effort():
+    plan = spawn_module.t3_effort_plan("codex", "high", resume=True, has_flag=True)
+    assert plan["args"] == []
+    assert plan["effort_not_applied"] == "high"
+    assert "resume" in plan["effort_not_applied_reason"]
+
+
+def test_t3_effort_plan_rejects_an_unknown_codex_level(capsys):
+    with pytest.raises(SystemExit):
+        spawn_module.t3_effort_plan("codex", "banana", has_flag=True)
+    assert "banana" in capsys.readouterr().err
+
+
+def test_t3_has_option_flag_reads_the_help_text(monkeypatch):
+    def fake_run(help_text, code=0):
+        return lambda *a, **k: subprocess.CompletedProcess(a[0], code, help_text, "")
+    monkeypatch.setattr(spawn_module.shutil, "which", lambda name: "/usr/bin/t3")
+    monkeypatch.setattr(subprocess, "run",
+                        fake_run("FLAGS\n  --provider string\n  --option id=value\n"))
+    assert spawn_module.t3_has_option_flag() is True
+    monkeypatch.setattr(subprocess, "run", fake_run("FLAGS\n  --provider string\n"))
+    assert spawn_module.t3_has_option_flag() is False
+    monkeypatch.setattr(subprocess, "run", fake_run("--option", code=1))
+    assert spawn_module.t3_has_option_flag() is False
+    monkeypatch.setattr(spawn_module.shutil, "which", lambda name: None)
+    assert spawn_module.t3_has_option_flag() is False
+
+
+def _fake_t3(monkeypatch):
+    """Record the `t3` argv list of every call; start prints a thread id."""
+    calls = []
+    monkeypatch.setattr(spawn_module, "ensure_t3_project", lambda cwd: False)
+
+    def fake_t3(args, *, what, stdin=None):
+        calls.append(list(args))
+        return json.dumps({"threadId": "thr-1", "runId": "run-1"})
+    monkeypatch.setattr(spawn_module, "_t3", fake_t3)
+    return calls
+
+
+def test_spawn_t3_puts_the_option_after_provider_and_model(monkeypatch):
+    calls = _fake_t3(monkeypatch)
+    placement = spawn_module.spawn_t3(
+        cwd="/w", harness="codex", model="gpt-6.1-sol", seed_prompt="go",
+        title="t", effort_args=["--option", "reasoningEffort=medium"])
+    args = calls[0]
+    assert args[:2] == ["thread", "start"]
+    assert args[-2:] == ["--option", "reasoningEffort=medium"]
+    assert args[args.index("--provider") + 1] == "codex"
+    assert args[args.index("--model") + 1] == "gpt-6.1-sol"
+    assert placement["session_id"] == "t3:thr-1"
+
+
+def test_spawn_t3_without_effort_sends_no_option(monkeypatch):
+    calls = _fake_t3(monkeypatch)
+    spawn_module.spawn_t3(cwd="/w", harness="codex", model="gpt-6.1-sol",
+                          seed_prompt="go", title="t")
+    assert "--option" not in calls[0]
+
+
+def test_spawn_t3_resume_sends_the_message_only(monkeypatch):
+    calls = _fake_t3(monkeypatch)
+    spawn_module.spawn_t3(cwd="/w", harness="codex", model="gpt-6.1-sol",
+                          seed_prompt="go", title="t", resume_thread="thr-9",
+                          effort_args=["--option", "reasoningEffort=medium"])
+    assert calls == [["thread", "send", "thr-9", "-"]]
+
+
+def _t3_args(**kw):
+    import argparse
+    base = dict(ssh=None, resume=False, session_id=None, name=None, task="T-1",
+                dry_run=True)
+    base.update(kw)
+    return argparse.Namespace(**base)
+
+
+def test_main_t3_reports_applied_effort(monkeypatch, capsys):
+    monkeypatch.setattr(spawn_module, "t3_has_option_flag", lambda: True)
+    spawn_module._main_t3(_t3_args(), harness="codex", model="gpt-6.1-terra",
+                          effort="high", cwd="/w", seed_prompt="go")
+    out = json.loads(capsys.readouterr().out)
+    assert out["effort_applied"] == "high"
+    assert out["t3_option"] == "reasoningEffort=high"
+    assert "effort_not_applied" not in out
+
+
+def test_main_t3_reports_unapplied_effort_on_an_old_t3(monkeypatch, capsys):
+    monkeypatch.setattr(spawn_module, "t3_has_option_flag", lambda: False)
+    spawn_module._main_t3(_t3_args(), harness="codex", model="gpt-6.1-terra",
+                          effort="high", cwd="/w", seed_prompt="go")
+    out = json.loads(capsys.readouterr().out)
+    assert out["effort_not_applied"] == "high"
+    assert out["effort_not_applied_reason"]
+    assert "effort_applied" not in out
+
+
+def test_main_t3_live_launch_carries_the_option(monkeypatch, capsys):
+    calls = _fake_t3(monkeypatch)
+    monkeypatch.setattr(spawn_module, "t3_has_option_flag", lambda: True)
+    spawn_module._main_t3(_t3_args(dry_run=False), harness="codex",
+                          model="gpt-6.1-sol", effort="medium", cwd="/w",
+                          seed_prompt="go")
+    out = json.loads(capsys.readouterr().out)
+    assert calls[0][-2:] == ["--option", "reasoningEffort=medium"]
+    assert out["effort_applied"] == "medium"
+    assert out["t3_thread"] == "thr-1"
